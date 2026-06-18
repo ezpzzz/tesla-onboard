@@ -223,3 +223,11 @@ scripts/
   focus rings, keyboard-operable controls — guests will use this on a phone, at the car.
 - Official Tesla videos and the Tesla name belong to Tesla; this app links to /
   embeds first-party material rather than rehosting it.
+
+---
+
+## License
+
+[MIT](LICENSE). Tesla, Model 3, Supercharger, and related marks are trademarks of
+Tesla, Inc. and are used here only to describe the vehicle; this project is not
+affiliated with or endorsed by Tesla.
