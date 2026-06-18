@@ -53,6 +53,25 @@ Supercharger and pick up exactly where they left off.
 
 ---
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/screenshots/01-welcome.png" alt="Welcome" /><br /><sub><b>Welcome</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/02-connect.png" alt="Connect with Tesla" /><br /><sub><b>Adaptive sign-in</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/03-plan.png" alt="Your plan" /><br /><sub><b>Your plan</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><img src="docs/screenshots/04-module.png" alt="Tutorial module" /><br /><sub><b>Tutorial + official Tesla video</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/05-checklist.png" alt="Readiness check" /><br /><sub><b>Readiness check</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/06-done.png" alt="All set" /><br /><sub><b>All set</b></sub></td>
+  </tr>
+</table>
+
+> Demo uses placeholder branding and contact details; real values come from `.env.local` (see [Make it yours](#make-it-yours-host-configuration)).
+
+---
+
 ## Run it
 
 ```bash
