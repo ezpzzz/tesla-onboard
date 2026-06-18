@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+/* ── Design tokens ─────────────────────────────────────────────────────────
+   Near-black "ink" + a blue accent (gradient #11B7F7 → #0AA3EE → #0287D8),
+   calm grays.
+   Tailwind v4 turns these --color-* vars into utilities (bg-ink, text-brand…). */
+@theme {
+  --color-ink: #171a20;
+  --color-ink-soft: #393c41;
+  --color-muted: #5c5e62;
+  --color-line: #e6e7e8;
+  --color-surface: #f4f4f5;
+  --color-card: #ffffff;
+  --color-brand: #0287d8;
+  --color-brand-dark: #0269a8;
+  --color-good: #1b8a5a;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Soft entrance used when steps change */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-rise {
+  animation: rise 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade {
+  animation: fade 0.5s ease both;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Tame the iOS tap highlight for a native-app feel */
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}

@@ -1,0 +1,42 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# local QA artifacts
+/.qa-shots/
+
+# Tesla partner private key — NEVER commit
+/tesla-private-key.pem
+/.vercel
+.vercel
+.gstack/
+.env*
+
+# ...but keep the documented, secret-free template
+!.env.example
