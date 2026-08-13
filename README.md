@@ -105,10 +105,11 @@ project; `OWNER_ALLOWED_EMAILS` is the separate allowlist that actually grants
 **One-time Supabase dashboard step:** this app shares a Supabase project with
 other products, so the only thing to add is a redirect URL — go to
 **Authentication → URL Configuration → Redirect URLs** and add this app's
-origin plus `/login` (e.g. `https://your-app.example.com/login`, and
-`http://localhost:3000/login` for local dev). Nothing else in that project is
-touched: the email **template** is not modified, the Site URL is not changed,
-and no existing user is edited.
+origin plus `/auth/callback` (e.g.
+`https://your-app.example.com/auth/callback`, and
+`http://localhost:3000/auth/callback` for local dev). Nothing else in that
+project is touched: the email **template** is not modified, the Site URL is
+not changed, and no existing user is edited.
 
 **First account:** if you already have an account in the shared Supabase
 project, just add its email to `OWNER_ALLOWED_EMAILS` — no new user needed. To
@@ -129,11 +130,11 @@ is shared.
 Sign-in is **password-first**, not magic-link-first: a password round-trip
 needs no email deliverability setup and doesn't depend on the shared
 project's email template (which this app is not allowed to touch). Magic
-link ships too, as the secondary tab on the sign-in page — it uses the
-project's unmodified default "Magic Link" email template as-is. The
-Supabase dashboard redirect-URL step above is **required** for that tab to
-work (Supabase only redirects a magic-link callback to a URL on the
-project's allowlist); the template itself is unchanged either way.
+link ships too, as the secondary tab on the sign-in page. The shared
+project's send-email hook delivers the message, but this app does not modify
+that hook's templates or any Supabase email template. The dashboard
+redirect-URL step above is **required** for the callback to work (Supabase
+only redirects a magic-link callback to a URL on the project's allowlist).
 
 **Build-time requirement:** both `NEXT_PUBLIC_SUPABASE_URL` and
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` must be present at **build time**, not

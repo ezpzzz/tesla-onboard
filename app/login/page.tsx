@@ -31,6 +31,7 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { safeOwnerNextPath } from "@/lib/owner-auth-redirect";
 import { OwnerAuthShell } from "@/components/owner/OwnerAuthShell";
 import { Badge, Button, Segmented } from "@/components/ui";
 import { IconArrowRight } from "@/components/icons";
@@ -42,18 +43,6 @@ const SUPABASE_CONFIGURED =
 const RESEND_SECONDS = 60;
 
 type Tab = "password" | "magic-link";
-
-// Post-login destination must stay same-origin: a bare "/" path, never a
-// protocol-relative ("//evil.com") or absolute ("https://evil.com") URL. The
-// `next` query param is attacker-controlled input, not just an echo of what
-// middleware.ts generates, so it's validated here regardless of source.
-function safeNextPath(raw: string | null): string {
-  if (!raw) return "/owner";
-  if (!raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) {
-    return "/owner";
-  }
-  return raw;
-}
 
 export default function LoginPage() {
   return (
@@ -95,7 +84,7 @@ function UnconfiguredNotice() {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = safeNextPath(searchParams.get("next"));
+  const next = safeOwnerNextPath(searchParams.get("next"));
   const urlError = searchParams.get("error");
 
   const [tab, setTab] = useState<Tab>("password");

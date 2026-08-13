@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isOwnerAuthConfigured } from "@/lib/owner-auth";
+import { safeOwnerNextPath } from "@/lib/owner-auth-redirect";
 import { allowRequest } from "@/lib/owner-throttle";
 import { createClient } from "@/lib/supabase/server";
 
@@ -61,18 +62,16 @@ export async function POST(request: Request) {
     // response WITHOUT calling Supabase at all — a throttled response must
     // be indistinguishable from a normal success response over the wire.
     if (emailAllowed && ipAllowed) {
-      // Mirror app/login/page.tsx's safeNextPath: same-origin path only.
-      const safeNext =
-        typeof next === "string" && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\")
-          ? next
-          : "/owner";
+      const safeNext = safeOwnerNextPath(next);
       const origin = new URL(request.url).origin;
+      const callbackUrl = new URL("/auth/callback", origin);
+      callbackUrl.searchParams.set("next", safeNext);
       const supabase = await createClient();
       try {
         await supabase.auth.signInWithOtp({
           email: email.trim(),
           options: {
-            emailRedirectTo: `${origin}/login?next=${encodeURIComponent(safeNext)}`,
+            emailRedirectTo: callbackUrl.toString(),
             shouldCreateUser: false,
           },
         });

@@ -61,19 +61,18 @@ session tied to this browser's cookies for this app. This is mandatory, not a pr
 the contract for `app/auth/signout/route.ts`.
 
 **Password sign-in is the primary, first-class method; magic link is secondary and
-constrained.** Supabase's magic-link email is sent using the project's default "Magic Link"
-template, and that template is shared project-wide (see the first constraint above) — this
-feature cannot customize its subject, copy, or branding to say "Tesla Onboarding" without
-changing what every other app's magic-link email looks like. Consequence: magic link ships
-using the **unmodified default template** as-is, the sign-in page leads with password as the
-default tab, and the magic-link tab carries a visible note that the email will look generic
-(Supabase-branded, not app-branded) by design.
+constrained.** The shared project has a project-wide send-email hook that renders and delivers
+auth messages. This app cannot customize that hook's template or any Supabase email template
+to say "Tesla Onboarding" without changing shared infrastructure. Consequence: the sign-in
+page leads with password as the default tab, while magic link uses the shared platform email
+unchanged.
 
 **Magic link additionally requires exactly one additive dashboard step, not a config change:**
 Supabase only redirects a magic-link callback to a URL present in the project's redirect
-allowlist. Adding this app's `/login` URL to that allowlist is additive (it does not remove or
-alter any existing entry) and is the one piece of manual setup this feature cannot avoid; it is
-called out explicitly in the operational runbook (§11) so it isn't missed at deploy time.
+allowlist. Adding this app's `/auth/callback` URL to that allowlist is additive (it does not
+remove or alter any existing entry) and is the one piece of manual setup this feature cannot
+avoid; it is called out explicitly in the operational runbook (§11) so it isn't missed at
+deploy time.
 
 ## 3. Decisions & rationale
 
@@ -178,8 +177,9 @@ export const config = { matcher: ["/owner/:path*", "/login"] }
 // ---- app/login/page.tsx ("use client", OUTSIDE app/owner so no OwnerShell chrome; wrapped in OwnerAuthShell) ----
 // Segmented control: "Password" (DEFAULT tab) | "Magic link". Inputs use the new .field class. Reads ?next= and ?error= params (useSearchParams — wrap the component in <Suspense> per Next requirements).
 // Password: signInWithPassword via browser client; success -> router.push(next || "/owner"); failure -> ONE generic inline danger message (identical for wrong-password vs no-such-user — anti-enumeration); distinct message only for rate-limit errors.
-// Magic link: signInWithOtp({ email, options: { emailRedirectTo: origin + "/login?next=" + next, shouldCreateUser: false } }); ALWAYS transition to the same "Check your email" interstitial regardless of response (anti-enumeration), with a Resend button behind a 60s countdown and a "use a different method" link. Under the tab, muted helper copy: magic links require this app's URL in the Supabase project's redirect allowlist (README covers it).
-// On mount / auth-state change: if a session already exists or arrives (e.g. the magic-link redirect landed here with ?code= or a URL fragment — the browser client's default detectSessionInUrl handles the exchange; ALSO explicitly call exchangeCodeForSession if a ?code= param is present and detectSessionInUrl did not consume it — verify the current @supabase/ssr behavior by reading the installed package's README/types in node_modules and adapt so BOTH cases are covered), router.replace(next || "/owner").
+// Magic link: signInWithOtp({ email, options: { emailRedirectTo: origin + "/auth/callback?next=" + next, shouldCreateUser: false } }); ALWAYS transition to the same "Check your email" interstitial regardless of response (anti-enumeration), with a Resend button behind a 60s countdown and a "use a different method" link. Under the tab, muted helper copy: magic links require this app's callback URL in the Supabase project's redirect allowlist (README covers it).
+// app/auth/callback/route.ts verifies the shared hook's token_hash with type=magiclink using the server Supabase client, persists the session cookies, and redirects to the validated same-origin next path. Invalid or missing tokens return to /login with the same generic auth error.
+// On mount / auth-state change: if a session already exists or a PKCE ?code= redirect lands on /login, redirect or exchange it as a backwards-compatible fallback; token-hash magic links use the server callback route above.
 // If NEXT_PUBLIC_SUPABASE_* are unset: render a Card explaining auth isn't configured, link back to /owner (demo mode).
 
 // ---- app/not-authorized/page.tsx (server component, outside /owner, wrapped in OwnerAuthShell) ----
@@ -342,11 +342,12 @@ valid, supported, permanent state for a preview deploy, not just a transitional 
 
 **Redirect-allowlist step (required for magic link, once per deployment URL):** in the
 `sophosic-platform` Supabase dashboard, under Authentication > URL Configuration > Redirect
-URLs, add this app's `/login` URL (e.g. `https://<this-app-domain>/login` for prod, and the
-local dev URL, e.g. `http://localhost:3000/login`, for local testing) to the list. This is
-additive — existing entries for other apps in the project are left untouched. Password sign-in
-does not require this step (no redirect involved); it is only needed the moment magic-link
-sign-in is used against a new deployment URL.
+URLs, add this app's `/auth/callback` URL (e.g.
+`https://<this-app-domain>/auth/callback` for prod, and the local dev URL, e.g.
+`http://localhost:3000/auth/callback`, for local testing) to the list. This is additive —
+existing entries for other apps in the project are left untouched. Password sign-in does not
+require this step (no redirect involved); it is only needed the moment magic-link sign-in is
+used against a new deployment URL.
 
 **First-account provisioning**, either of:
 
@@ -478,3 +479,9 @@ with the fix that closed it:
     checkout ambiguous about what happens with the file copied as-is. Fixed by confirming (and
     documenting) that the section's default — all three vars blank — keeps `/owner` open in demo
     mode, consistent with §7's operational runbook.
+11. **The shared send-email hook rejected the OnlyEVs host and the app had no token-hash callback.**
+    The hook replaced the requested redirect with `https://auth.sophosic.ai`; even if the host
+    had been accepted, its renderer would have appended `/auth/callback` to the old `/login`
+    target and produced an unusable link. Fixed by registering the canonical host as a platform
+    redirect in the shared hook, targeting `/auth/callback` from this app, and verifying the
+    token hash server-side before entering `/owner`.
