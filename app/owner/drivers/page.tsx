@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * Driver roster: every driver (mock rows + this browser's guest once
- * hydrated), filterable by onboarding status and searchable by name/email.
+ * Driver roster: real drivers from the active data source plus this browser's
+ * guest once hydrated, filterable by onboarding status and searchable by
+ * name/email.
  * The heavy lifting (row model, responsive table/card rendering) lives in
  * DriverTable — this page just owns the filter state.
  */

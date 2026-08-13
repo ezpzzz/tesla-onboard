@@ -20,7 +20,7 @@ export const OWNER_SETUP_KEY = "rtr:owner-setup:v1";
 export interface OwnerSetupState {
   version: 1;
   step: SetupStepId; // resume pointer
-  teslaProfile: TeslaProfile | null; // owner-side profile (mock persona or live /me result)
+  teslaProfile: TeslaProfile | null; // owner-side profile from live /me (mock only in local dev)
   importedTeslaIds: Record<string, string>; // dedupe ledger: (vin ?? tesla vehicle id) -> local Vehicle id
   completedAt: number | null;
   dismissedAt: number | null;
@@ -35,6 +35,10 @@ export const initialOwnerSetupState: OwnerSetupState = {
   dismissedAt: null,
 };
 
+export function removeLegacyMockSetupData(state: OwnerSetupState): OwnerSetupState {
+  return state.teslaProfile?.source === "mock" ? initialOwnerSetupState : state;
+}
+
 /** A host still needs setup until they either finish it or explicitly skip it. */
 export function needsSetup(s: OwnerSetupState): boolean {
   return !s.completedAt && !s.dismissedAt;
@@ -45,7 +49,12 @@ export function loadOwnerSetupState(): OwnerSetupState {
   try {
     const raw = window.localStorage.getItem(OWNER_SETUP_KEY);
     if (!raw) return initialOwnerSetupState;
-    return { ...initialOwnerSetupState, ...JSON.parse(raw) };
+    const parsed = { ...initialOwnerSetupState, ...JSON.parse(raw) } as OwnerSetupState;
+    const migrated = removeLegacyMockSetupData(parsed);
+    if (migrated !== parsed) {
+      window.localStorage.removeItem(OWNER_SETUP_KEY);
+    }
+    return migrated;
   } catch {
     return initialOwnerSetupState;
   }

@@ -2,7 +2,7 @@
 
 /**
  * Trip list — every trip across the fleet, filterable by status. Composes
- * useOwnerData() + useOwnerState() and hands the merged snapshot straight to
+ * useOwnerData() + useOwnerState() and hands the current snapshot straight to
  * TripTable, which owns the two responsive renderings (table on md+, cards
  * below it).
  */
