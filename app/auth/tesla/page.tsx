@@ -9,7 +9,7 @@
  * you can see the adaptive flow respond to an owner vs. a fresh account.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { hostConfig } from "@/lib/config";
 import { loadState, saveState } from "@/lib/store";
 import {
@@ -18,14 +18,67 @@ import {
   deriveExperience,
 } from "@/lib/tesla";
 
+/**
+ * `return` is attacker-controllable (it's a plain query param on a public
+ * route) and gets used as a full-page navigation target in `allow()` and
+ * `cancel()`. Deliberately does NOT decode anything itself — the WHATWG URL
+ * parser silently strips raw tab/CR/LF from a URL before parsing, which lets
+ * something like "/\t/evil.example" or "/%0A/evil.example"-as-raw-bytes slip
+ * past a naive `startsWith("/")` check and get treated as protocol-relative.
+ * So: reject any raw control character (<0x20) or backslash outright, THEN
+ * resolve against a fixed placeholder origin and require the resolved origin
+ * to be unchanged. Only `url.pathname + url.search + url.hash` — never the
+ * raw input, never anything with an origin in it — is ever navigated to.
+ */
+const RETURN_BASE = "https://placeholder.invalid";
+
+function safeReturnPath(raw: string | null): string | null {
+  if (!raw) return null;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw.charCodeAt(i) < 0x20) return null;
+  }
+  if (raw.includes("\\")) return null;
+  let url: URL;
+  try {
+    url = new URL(raw, RETURN_BASE);
+  } catch {
+    return null;
+  }
+  if (url.origin !== RETURN_BASE) return null;
+  return url.pathname + url.search + url.hash;
+}
+
 export default function TeslaConsentPage() {
   const [personaKey, setPersonaKey] = useState(TESLA_PERSONAS[0].key);
   const [busy, setBusy] = useState(false);
+  // Post-mount only: this screen is reused by the owner setup wizard, which
+  // links here as `?mode=owner&return=<path>` instead of driving the guest
+  // flow. Parsed after mount (not at module scope) so the guest path never
+  // touches window/location during render.
+  const [ownerReturn, setOwnerReturn] = useState<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("mode") === "owner") {
+      const raw = params.get("return");
+      setOwnerReturn(safeReturnPath(raw) ?? "/owner/setup");
+    }
+  }, []);
   const persona =
     TESLA_PERSONAS.find((p) => p.key === personaKey) ?? TESLA_PERSONAS[0];
 
   function allow() {
     setBusy(true);
+    if (ownerReturn) {
+      // ownerReturn is already a validated, origin-free pathname+search+hash
+      // (see safeReturnPath). Build the query with URL/searchParams rather than
+      // string-concatenating it so a `?` or `#` embedded in the return path
+      // can never smuggle extra params or override owner_connected/owner_persona.
+      const url = new URL(ownerReturn, RETURN_BASE);
+      url.searchParams.set("owner_connected", "1");
+      url.searchParams.set("owner_persona", persona.key);
+      window.location.href = url.pathname + url.search + url.hash;
+      return;
+    }
     const exp = deriveExperience(persona.profile);
     const prev = loadState();
     saveState({
@@ -44,7 +97,7 @@ export default function TeslaConsentPage() {
   }
 
   function cancel() {
-    window.location.href = "/";
+    window.location.href = ownerReturn ?? "/";
   }
 
   return (
@@ -56,6 +109,12 @@ export default function TeslaConsentPage() {
         >
           TESLA
         </div>
+
+        {ownerReturn && (
+          <p className="mt-3 text-center text-xs font-medium uppercase tracking-wide text-muted">
+            Connecting as the host
+          </p>
+        )}
 
         <div className="mt-10">
           <h1 className="text-xl font-semibold tracking-tight text-ink">

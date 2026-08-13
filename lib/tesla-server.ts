@@ -286,6 +286,7 @@ async function fetchVehicles(
           displayName: p.display_name || model,
           model,
           year,
+          vin,
         } satisfies TeslaVehicle;
       });
     return { ok: true, status: 200, vehicles };
@@ -327,7 +328,15 @@ export async function fetchProfile(
 /* ── Sealed session cookie (AES-256-GCM) ──────────────────────────────────
    We store only the normalized profile (low-sensitivity), never tokens, which
    are discarded after the one-time read. Sealing keeps the profile opaque and
-   tamper-evident in the browser. */
+   tamper-evident in the browser.
+
+   `context` is bound in as AES-GCM additional authenticated data (AAD) — it's
+   not secret, it's a label (e.g. "rtr_tesla" vs "rtr_owner_tesla") baked into
+   the auth tag. Both identities are sealed with the same TESLA_SESSION_SECRET,
+   so without AAD a ciphertext lifted from the guest cookie and replayed into
+   the owner cookie (or vice versa) would unseal cleanly — same key, same
+   cipher, valid tag. Binding context makes the two cookies non-substitutable:
+   unsealing with the wrong context fails the tag check and returns null. */
 
 function keyFrom(secret: string): Buffer {
   // Domain-separated derivation. The >=32-char floor in assertConfigured is what
@@ -337,9 +346,10 @@ function keyFrom(secret: string): Buffer {
   );
 }
 
-export function seal(value: unknown, secret: string): string {
+export function seal(value: unknown, secret: string, context: string): string {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", keyFrom(secret), iv);
+  cipher.setAAD(Buffer.from(context, "utf8"));
   const data = Buffer.concat([
     cipher.update(JSON.stringify(value), "utf8"),
     cipher.final(),
@@ -348,13 +358,14 @@ export function seal(value: unknown, secret: string): string {
   return Buffer.concat([iv, tag, data]).toString("base64url");
 }
 
-export function unseal<T>(sealed: string, secret: string): T | null {
+export function unseal<T>(sealed: string, secret: string, context: string): T | null {
   try {
     const buf = Buffer.from(sealed, "base64url");
     const iv = buf.subarray(0, 12);
     const tag = buf.subarray(12, 28);
     const data = buf.subarray(28);
     const d = crypto.createDecipheriv("aes-256-gcm", keyFrom(secret), iv);
+    d.setAAD(Buffer.from(context, "utf8"));
     d.setAuthTag(tag);
     const out = Buffer.concat([d.update(data), d.final()]).toString("utf8");
     return JSON.parse(out) as T;

@@ -7,9 +7,11 @@
  */
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { useOwnerState } from "@/lib/owner/owner-state";
+import { useOwnerSetupState, needsSetup } from "@/lib/owner/setup-state";
 import { deriveAlerts } from "@/lib/owner/alerts";
 import {
   driverStatus,
@@ -26,8 +28,8 @@ import {
   TripStatusBadge,
 } from "@/components/owner/owner-ui";
 import { MiniBarChart } from "@/components/owner/charts";
-import { Card } from "@/components/ui";
-import { IconChevronRight } from "@/components/icons";
+import { Button, Card } from "@/components/ui";
+import { IconBolt, IconChevronRight } from "@/components/icons";
 import type { DriverStatus } from "@/lib/owner/types";
 
 // Stable pre-hydration fallback so SSR markup matches the first client paint —
@@ -54,8 +56,10 @@ const NEEDS_ATTENTION_RANK: Record<DriverStatus, number> = {
 };
 
 export default function OwnerOverviewPage() {
+  const router = useRouter();
   const { drivers, trips, vehicles, chargingSessions, stats, policyPct } = useOwnerData();
   const { state: ownerState, hydrated: ownerHydrated } = useOwnerState();
+  const { state: setupState, hydrated: setupHydrated, update: updateSetup } = useOwnerSetupState();
   const [now, setNow] = useState(SSR_FALLBACK_NOW);
 
   useEffect(() => {
@@ -87,10 +91,44 @@ export default function OwnerOverviewPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Overview</h1>
-        <p className="mt-1 text-sm text-muted">What needs you, at a glance.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Overview</h1>
+          <p className="mt-1 text-sm text-muted">What needs you, at a glance.</p>
+        </div>
+        <Link
+          href="/owner/setup"
+          className="text-xs font-medium text-muted transition-colors hover:text-ink"
+        >
+          Fleet setup
+        </Link>
       </div>
+
+      {setupHydrated && needsSetup(setupState) && (
+        <section>
+          <Card className="flex flex-wrap items-center justify-between gap-4 border-brand/20 bg-brand/5 p-5">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[15px] font-semibold text-ink">
+                <IconBolt aria-hidden="true" className="h-4 w-4 text-brand" />
+                Set up your fleet
+              </div>
+              <p className="mt-1 max-w-[46ch] text-sm leading-relaxed text-muted">
+                Connect your Tesla account, import your vehicles, and confirm your rental
+                settings — takes about a minute.
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              <button
+                onClick={() => updateSetup({ dismissedAt: Date.now() })}
+                className="flex min-h-[44px] items-center px-1 text-sm font-medium text-muted hover:text-ink"
+              >
+                Not now
+              </button>
+              <Button onClick={() => router.push("/owner/setup")}>Start setup</Button>
+            </div>
+          </Card>
+        </section>
+      )}
 
       <section>
         <AlertsPanel alerts={alerts} />

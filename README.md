@@ -66,6 +66,13 @@ onboarding progress in one place, separate from the guest flow. It shows:
 - **Vehicle management** — add, edit, and archive the cars on the account, with
   a single policy-percentage calculation shared everywhere it's shown. Archived
   vehicles are hidden, not deleted, so past trips and drivers stay intact.
+- **First-run setup wizard** — `/owner/setup` walks a new host through
+  connecting their own Tesla account, importing their vehicles (deduped so
+  re-running it never creates duplicates), and confirming rental settings.
+  It's reached from a dismissible "Set up your fleet" card on the overview
+  page, never an automatic redirect, and its own progress is stored
+  separately from everything else so starting over never touches your
+  vehicle list.
 
 It ships **mock-first**: `lib/owner/mock-data.ts` has literal fixture data, so
 the dashboard works with zero setup. Open <http://localhost:3000/owner> after
@@ -265,6 +272,17 @@ so a few details (the exact `users/me` field names, whether PKCE is supported, a
 whether partner registration is mandatory for read-only OAuth) are handled defensively
 rather than confirmed. See [`lib/tesla-server.ts`](lib/tesla-server.ts) header comments;
 confirm against a live response before launch.
+
+### Owner Tesla connect (live)
+
+The owner-side fleet setup wizard (`/owner/setup`) connects to Tesla
+independently from the guest flow — separate cookies, separate one-shot
+identity/vehicle read, and its own redirect URI. If you're going live with
+both, register a **second** redirect URI at
+<https://developer.tesla.com> — `https://<domain>/api/owner/tesla/login`'s
+callback target — and set it as `TESLA_OWNER_REDIRECT_URI` in `.env.local`,
+distinct from the guest's `TESLA_REDIRECT_URI`. In mock mode there's nothing
+to configure: the wizard reuses the guest's existing mock consent screen.
 
 ---
 

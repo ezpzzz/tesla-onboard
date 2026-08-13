@@ -5,13 +5,13 @@ import type { TeslaProfile } from "@/lib/tesla";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Return the normalized profile from the sealed session cookie (or null). */
+/** Owner-side mirror of `/api/tesla/me`. Reads the owner's own sealed cookie. */
 export async function GET(request: NextRequest) {
   const { sessionSecret } = getConfig();
-  const sealed = request.cookies.get("rtr_tesla")?.value;
+  const sealed = request.cookies.get("rtr_owner_tesla")?.value;
   const profile =
     sealed && sessionSecret
-      ? unseal<TeslaProfile>(sealed, sessionSecret, "rtr_tesla")
+      ? unseal<TeslaProfile>(sealed, sessionSecret, "rtr_owner_tesla")
       : null;
   return NextResponse.json(
     { profile },

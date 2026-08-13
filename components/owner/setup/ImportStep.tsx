@@ -1,0 +1,326 @@
+"use client";
+
+import { useState } from "react";
+import { hostConfig } from "@/lib/config";
+import { parseReturnPolicyPct } from "@/lib/owner/derive";
+import { useVehicleState } from "@/lib/owner/vehicle-state";
+import {
+  mergePreservingOwnerFields,
+  teslaKeyOf,
+  vehicleInputFromTesla,
+} from "@/lib/owner/import-mapping";
+import { VehicleForm } from "@/components/owner/vehicle-form";
+import { Badge, Button, Card, StepFrame, cn } from "@/components/ui";
+import { EmptyState } from "@/components/owner/owner-ui";
+import { IconArrowRight, IconCheck } from "@/components/icons";
+import { indexOfSetupStep } from "@/lib/owner/setup-flow";
+import type { TeslaVehicle } from "@/lib/tesla";
+import type { Vehicle } from "@/lib/owner/types";
+import type { SetupStepProps } from "./types";
+
+export function ImportStep({ state, update, nav }: SetupStepProps) {
+  const profile = state.teslaProfile;
+  const stepNumber = indexOfSetupStep(state.step) + 1;
+  const { vehicles, addVehicle, updateVehicle, unarchiveVehicle } = useVehicleState();
+  const policyPct = parseReturnPolicyPct(hostConfig.rental.returnChargeLevel);
+  const fallbackYear = hostConfig.car.year;
+
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [committed, setCommitted] = useState<string[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+
+  const committedVehicles = committed
+    .map((id) => vehicles.find((v) => v.id === id))
+    .filter((v): v is NonNullable<typeof v> => !!v);
+
+  /**
+   * Resolve a Tesla vehicle to a local Vehicle it's already imported as, if
+   * any. Matches the fleet itself first — by teslaImportKey, then by VIN —
+   * before falling back to the setup-state ledger. The fleet is the durable
+   * source: "Start over" wipes only the ledger (rtr:owner-setup:v1), never
+   * rtr:vehicles:v1, so matching the fleet directly is what makes re-running
+   * Import idempotent after a reset, in both mock mode (VIN-less personas,
+   * teslaImportKey is the Tesla-side id) and live mode (VIN present).
+   */
+  function existingVehicleFor(tv: TeslaVehicle): Vehicle | undefined {
+    const key = teslaKeyOf(tv);
+    const byImportKey = vehicles.find((v) => v.teslaImportKey === key);
+    if (byImportKey) return byImportKey;
+    if (tv.vin) {
+      const byVin = vehicles.find((v) => v.vin === tv.vin);
+      if (byVin) return byVin;
+    }
+    const ledgerId = state.importedTeslaIds[key];
+    return ledgerId ? vehicles.find((v) => v.id === ledgerId) : undefined;
+  }
+
+  function isChecked(tv: TeslaVehicle): boolean {
+    if (existingVehicleFor(tv)) return true;
+    return selected[teslaKeyOf(tv)] ?? true;
+  }
+
+  function toggle(key: string, checked: boolean) {
+    setSelected((prev) => ({ ...prev, [key]: checked }));
+  }
+
+  function handleImport() {
+    if (!profile) return;
+    // null in a patch entry means "delete this ledger key" (heals a stale
+    // entry whose local vehicle is gone).
+    const ledgerPatch: Record<string, string | null> = {};
+    const touched: string[] = [];
+
+    for (const tv of profile.vehicles) {
+      const key = teslaKeyOf(tv);
+      const ledgerId = state.importedTeslaIds[key];
+      const existing = existingVehicleFor(tv);
+
+      if (ledgerId && (!existing || existing.id !== ledgerId)) {
+        ledgerPatch[key] = existing ? existing.id : null;
+      }
+
+      if (existing) {
+        // Already on the fleet — refresh the Tesla-derived fields but keep
+        // whatever the host has since edited by hand. A re-import of an
+        // archived vehicle brings it back into the active fleet.
+        const fresh = vehicleInputFromTesla(tv, fallbackYear);
+        updateVehicle(existing.id, mergePreservingOwnerFields(fresh, existing));
+        if (existing.status === "archived") unarchiveVehicle(existing.id);
+        touched.push(existing.id);
+        continue;
+      }
+
+      if (!isChecked(tv)) continue;
+      const input = vehicleInputFromTesla(tv, fallbackYear);
+      const id = addVehicle(input);
+      ledgerPatch[key] = id;
+      touched.push(id);
+    }
+
+    if (Object.keys(ledgerPatch).length > 0) {
+      update((s) => {
+        const nextLedger = { ...s.importedTeslaIds };
+        for (const [key, id] of Object.entries(ledgerPatch)) {
+          if (id === null) delete nextLedger[key];
+          else nextLedger[key] = id;
+        }
+        return { importedTeslaIds: nextLedger };
+      });
+    }
+    if (touched.length > 0) {
+      setCommitted((prev) => Array.from(new Set([...prev, ...touched])));
+    }
+  }
+
+  function handleManualAdd(input: Parameters<typeof addVehicle>[0]) {
+    const id = addVehicle(input);
+    setCommitted((prev) => Array.from(new Set([...prev, id])));
+    setManualOpen(false);
+  }
+
+  const importedList = committedVehicles.length > 0 && (
+    <div className="mt-6">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+        Imported
+      </div>
+      <div className="space-y-2">
+        {committedVehicles.map((v) => {
+          const expanded = expandedId === v.id;
+          return (
+            <Card key={v.id} className="overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setExpandedId(expanded ? null : v.id)}
+                className="flex min-h-[44px] w-full items-center justify-between gap-3 p-3.5 text-left"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] font-medium text-ink">
+                    {v.displayName}
+                  </span>
+                  <span className="block truncate text-sm text-muted">
+                    {v.trim ? `${v.trim} · ${v.color}` : "Tap to complete details"}
+                  </span>
+                </span>
+                <Badge tone="good">
+                  <IconCheck className="h-3 w-3" /> Imported
+                </Badge>
+              </button>
+              {expanded && (
+                <div className="border-t border-line p-3.5">
+                  <p className="mb-3 text-xs text-muted">
+                    Optional — you can finish later on the Vehicles page.
+                  </p>
+                  <VehicleForm
+                    mode="edit"
+                    initialValues={v}
+                    globalPolicyPct={policyPct}
+                    onSubmit={(input) => {
+                      updateVehicle(v.id, input);
+                      setExpandedId(null);
+                    }}
+                    onCancel={() => setExpandedId(null)}
+                    submitLabel="Save details"
+                  />
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  // No Tesla profile (skipped connect), or a connected account with no
+  // vehicles on it — manual add is the primary path.
+  if (!profile || profile.vehicles.length === 0) {
+    return (
+      <StepFrame
+        inlineFooter
+        footer={
+          <Button fullWidth onClick={nav.next}>
+            Continue <IconArrowRight className="h-4 w-4" />
+          </Button>
+        }
+      >
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-brand">
+          Step {stepNumber}
+        </span>
+        <h1 className="mt-1 text-[24px] font-semibold leading-tight tracking-tight">
+          Add your vehicles.
+        </h1>
+        <p className="mt-3 text-[15px] leading-relaxed text-muted">
+          {profile
+            ? "No vehicles came back from your Tesla account — add one by hand instead."
+            : "You skipped connecting a Tesla account — add vehicles to your fleet by hand."}
+        </p>
+
+        {!manualOpen && committedVehicles.length === 0 ? (
+          <div className="mt-5">
+            <EmptyState
+              title="No vehicles imported yet"
+              detail="Add at least one car so guests have something to walk through."
+            >
+              <Button variant="secondary" onClick={() => setManualOpen(true)}>
+                Add a vehicle manually
+              </Button>
+            </EmptyState>
+          </div>
+        ) : manualOpen ? (
+          <Card className="mt-5 p-4">
+            <VehicleForm
+              mode="create"
+              globalPolicyPct={policyPct}
+              onSubmit={handleManualAdd}
+              onCancel={() => setManualOpen(false)}
+              submitLabel="Add vehicle"
+            />
+          </Card>
+        ) : (
+          <button
+            onClick={() => setManualOpen(true)}
+            className="mt-5 text-sm font-medium text-muted hover:text-ink"
+          >
+            + Add another vehicle manually
+          </button>
+        )}
+
+        {importedList}
+      </StepFrame>
+    );
+  }
+
+  // "Import selected" should be actionable both for genuinely new vehicles
+  // and for archived matches (clicking it is what restores them), even
+  // though an archived match is technically an existingVehicleFor() hit.
+  const hasNewSelections = profile.vehicles.some((tv) => {
+    const existing = existingVehicleFor(tv);
+    if (!existing) return isChecked(tv);
+    return existing.status === "archived";
+  });
+
+  return (
+    <StepFrame
+      inlineFooter
+      footer={
+        <div className="space-y-2.5">
+          <Button fullWidth onClick={handleImport} disabled={!hasNewSelections}>
+            Import selected
+          </Button>
+          <Button variant="secondary" fullWidth onClick={nav.next}>
+            Continue <IconArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
+      }
+    >
+      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-brand">
+        Step {stepNumber}
+      </span>
+      <h1 className="mt-1 text-[24px] font-semibold leading-tight tracking-tight">
+        Import your vehicles.
+      </h1>
+      <p className="mt-3 text-[15px] leading-relaxed text-muted">
+        Everything&apos;s pre-selected. Uncheck anything you don&apos;t want in this fleet.
+      </p>
+
+      <div className="mt-5 space-y-2">
+        {profile.vehicles.map((tv) => {
+          const key = teslaKeyOf(tv);
+          const existing = existingVehicleFor(tv);
+          const alreadyImported = !!existing && existing.status !== "archived";
+          const isArchived = !!existing && existing.status === "archived";
+          const checked = isChecked(tv);
+          return (
+            <label
+              key={key}
+              className={cn(
+                "flex min-h-[44px] items-center gap-3 rounded-2xl border p-3.5",
+                alreadyImported ? "border-line bg-surface opacity-70" : "border-line bg-white",
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={alreadyImported}
+                onChange={(e) => toggle(key, e.target.checked)}
+                className="h-5 w-5 shrink-0 rounded border-line accent-brand"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-medium text-ink">
+                  {tv.displayName || `${tv.year ?? ""} ${tv.model}`.trim()}
+                </span>
+                <span className="block truncate text-sm text-muted">
+                  {tv.model}
+                  {tv.year ? ` · ${tv.year}` : ""}
+                </span>
+              </span>
+              {alreadyImported && <Badge tone="good">Already imported</Badge>}
+              {isArchived && <Badge tone="warn">Archived — re-importing will restore it</Badge>}
+            </label>
+          );
+        })}
+      </div>
+
+      {!manualOpen ? (
+        <button
+          onClick={() => setManualOpen(true)}
+          className="mt-4 text-sm font-medium text-muted hover:text-ink"
+        >
+          + Add another vehicle manually
+        </button>
+      ) : (
+        <Card className="mt-4 p-4">
+          <VehicleForm
+            mode="create"
+            globalPolicyPct={policyPct}
+            onSubmit={handleManualAdd}
+            onCancel={() => setManualOpen(false)}
+            submitLabel="Add vehicle"
+          />
+        </Card>
+      )}
+
+      {importedList}
+    </StepFrame>
+  );
+}

@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useVehicleState } from "@/lib/owner/vehicle-state";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
+import { useOwnerSetupState } from "@/lib/owner/setup-state";
 import { vehicleStats, formatMiles, formatUsd, formatPct } from "@/lib/owner/derive";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconChevronRight } from "@/components/icons";
@@ -66,6 +67,7 @@ export default function VehiclesPage() {
   const router = useRouter();
   const { vehicles, hydrated: vehicleHydrated, unarchiveVehicle } = useVehicleState();
   const { trips, chargingSessions, hydrated: dataHydrated } = useOwnerData();
+  const { hydrated: setupHydrated, update: updateSetupState } = useOwnerSetupState();
   const ready = vehicleHydrated && dataHydrated;
 
   if (!ready) {
@@ -82,9 +84,25 @@ export default function VehiclesPage() {
           <h1 className="text-xl font-semibold tracking-tight text-ink">Vehicles</h1>
           <p className="mt-1 text-sm text-muted">Every car in your fleet, with lifetime stats.</p>
         </div>
-        <Button variant="primary" onClick={() => router.push("/owner/vehicles/new")}>
-          Add vehicle
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              // Force the wizard straight to Import — otherwise it resumes
+              // wherever it last left off (e.g. "All set" for a host who
+              // already finished setup once), making this button look broken.
+              // The wizard is idempotent via the import ledger, so jumping
+              // there directly is safe whether or not setup was completed.
+              if (setupHydrated) updateSetupState({ step: "import" });
+              router.push("/owner/setup");
+            }}
+          >
+            Import from Tesla
+          </Button>
+          <Button variant="primary" onClick={() => router.push("/owner/vehicles/new")}>
+            Add vehicle
+          </Button>
+        </div>
       </div>
 
       {active.length === 0 ? (

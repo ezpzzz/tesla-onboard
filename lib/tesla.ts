@@ -19,6 +19,7 @@ export interface TeslaVehicle {
   displayName: string;
   model: string; // "Model 3", "Model Y", …
   year?: number;
+  vin?: string;
 }
 
 export interface TeslaProfile {

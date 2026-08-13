@@ -29,6 +29,11 @@ export interface Vehicle {
   vin: string | null;
   returnChargeLevelPct: number | null; // null = fall back to global policy
   notes: string;
+  // Dedupe key from the Tesla side (vin, or the Tesla vehicle id when no vin
+  // is available) for the vehicle this record was imported from. Optional/
+  // nullable so pre-existing vehicles (manually added, or seeded) round-trip
+  // unchanged; only import-mapping.ts sets it, on the Tesla -> Vehicle path.
+  teslaImportKey?: string | null;
   status: VehicleStatus;
   createdAt: number;
   updatedAt: number;

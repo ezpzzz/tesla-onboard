@@ -25,8 +25,19 @@ import { updateSession } from "@/lib/supabase/middleware";
  * getClaims() falls back to a network getUser() call against Supabase Auth
  * on every check.
  */
+// Covers the owner dashboard itself, the login page, AND the owner-side Tesla
+// OAuth mirror (both its API routes and its browser-facing auth pages) — that
+// mirror reads/writes the owner's own Tesla session and must sit behind the
+// same gate as /owner. Deliberately does NOT cover /api/owner/magic-link or
+// /api/owner/password-login — those are the pre-auth login endpoints
+// themselves and must stay reachable by a signed-out visitor.
 export const config = {
-  matcher: ["/owner/:path*", "/login"],
+  matcher: [
+    "/owner/:path*",
+    "/login",
+    "/api/owner/tesla/:path*",
+    "/auth/owner/:path*",
+  ],
 };
 
 // updateSession() may have queued a refreshed session cookie (and its
@@ -55,7 +66,14 @@ export async function middleware(request: NextRequest) {
   const { response, email } = await updateSession(request);
   const { pathname, search } = request.nextUrl;
 
-  if (pathname.startsWith("/owner")) {
+  // Same gate for /owner itself and its Tesla OAuth mirror (API + auth pages) —
+  // see the matcher comment above for why the mirror is included here.
+  const isOwnerGated =
+    pathname.startsWith("/owner") ||
+    pathname.startsWith("/api/owner/tesla") ||
+    pathname.startsWith("/auth/owner");
+
+  if (isOwnerGated) {
     if (!email) {
       logOwnerAuthEvent({ type: "signin_required", path: pathname });
       const url = request.nextUrl.clone();
