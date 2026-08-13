@@ -129,6 +129,8 @@ export default function VehicleDetailPage() {
     returnChargeLevelPct: vehicle.returnChargeLevelPct,
     notes: vehicle.notes,
     wheelType: vehicle.wheelType,
+    interior: vehicle.interior,
+    teslaInteriorCode: vehicle.teslaInteriorCode,
     teslaSpecSource: vehicle.teslaSpecSource,
     media: vehicle.media,
     teslaImportKey: vehicle.teslaImportKey,
@@ -165,9 +167,11 @@ export default function VehicleDetailPage() {
         color={vehicle.color}
         trim={vehicle.trim}
         wheelType={vehicle.wheelType}
+        interior={vehicle.interior}
+        interiorCode={vehicle.teslaInteriorCode}
         year={vehicle.year}
         media={vehicle.media}
-        className="h-56"
+        className="h-64 md:h-72"
       />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

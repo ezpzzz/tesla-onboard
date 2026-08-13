@@ -23,6 +23,9 @@ export interface TeslaVehicle {
   trim?: string;
   color?: string;
   wheelType?: string;
+  interior?: string;
+  /** Exact Design Studio option code when Tesla includes option_codes. */
+  interiorCode?: string;
   /** Present only when the owner-side OAuth callback reached vehicle_config. */
   specSource?: "fleet-api";
 }
@@ -70,6 +73,8 @@ export const TESLA_PERSONAS: TeslaPersona[] = [
           trim: "Long Range AWD",
           color: "Deep Blue Metallic",
           wheelType: '19" Gemini Wheels',
+          interior: "Black Interior",
+          interiorCode: "INPB0",
           specSource: "fleet-api",
         },
       ],

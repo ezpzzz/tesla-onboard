@@ -140,6 +140,8 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                   color={v.color}
                   trim={v.trim}
                   wheelType={v.wheelType}
+                  interior={v.interior}
+                  interiorCode={v.teslaInteriorCode}
                   year={v.year}
                   media={v.media}
                   compact
@@ -150,7 +152,9 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                     {v.displayName}
                   </span>
                   <span className="block truncate text-sm text-muted">
-                    {v.trim ? `${v.trim} · ${v.color}` : "Tap to complete details"}
+                    {v.trim
+                      ? [v.trim, v.color, v.interior].filter(Boolean).join(" · ")
+                      : "Tap to complete details"}
                   </span>
                 </span>
                 <Badge tone="good">
@@ -301,6 +305,8 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                 color={tv.color}
                 trim={tv.trim}
                 wheelType={tv.wheelType}
+                interior={tv.interior}
+                interiorCode={tv.interiorCode}
                 year={tv.year}
                 compact
                 className="hidden sm:block"
@@ -310,7 +316,8 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                   {tv.displayName || `${tv.year ?? ""} ${tv.model}`.trim()}
                 </span>
                 <span className="block truncate text-sm text-muted">
-                  {[tv.year, tv.trim, tv.color].filter(Boolean).join(" · ") || tv.model}
+                  {[tv.year, tv.trim, tv.color, tv.interior].filter(Boolean).join(" · ")
+                    || tv.model}
                 </span>
               </span>
               {alreadyImported && <Badge tone="good">Already imported</Badge>}

@@ -41,8 +41,18 @@ export function vehicleInputFromTesla(tv: TeslaVehicle, fallbackYear: number): V
     returnChargeLevelPct: null,
     notes: "",
     wheelType: tv.wheelType ?? null,
+    interior: tv.interior ?? null,
+    teslaInteriorCode: tv.interiorCode ?? null,
     teslaSpecSource: tv.specSource ?? null,
-    media: resolveTeslaVehicleMedia(tv.model, tv.color, tv.trim, tv.wheelType, year),
+    media: resolveTeslaVehicleMedia(
+      tv.model,
+      tv.color,
+      tv.trim,
+      tv.wheelType,
+      year,
+      tv.interior,
+      tv.interiorCode,
+    ),
     teslaImportKey: teslaKeyOf(tv),
   };
 }
@@ -51,11 +61,19 @@ export function vehicleInputFromTesla(tv: TeslaVehicle, fallbackYear: number): V
  * host has since filled in by hand — keep their trim/color/plate/notes/pct,
  * only refreshing the fields Tesla actually reports. */
 export function mergePreservingOwnerFields(fresh: VehicleInput, existing: Vehicle): VehicleInput {
+  const ownerInterior = existing.interior ?? fresh.interior;
+  const interiorUnchanged = !existing.interior || existing.interior === fresh.interior;
   const merged = {
     ...fresh,
     trim: existing.trim || fresh.trim,
     color: existing.color || fresh.color,
     wheelType: existing.wheelType ?? fresh.wheelType,
+    interior: ownerInterior,
+    // A null code paired with an existing label can be an intentional owner
+    // correction. Only reuse Tesla's fresh code when the label still agrees;
+    // otherwise the resolver derives from the corrected label and fails closed.
+    teslaInteriorCode: existing.teslaInteriorCode
+      ?? (interiorUnchanged ? fresh.teslaInteriorCode : null),
     teslaSpecSource: existing.teslaSpecSource ?? fresh.teslaSpecSource,
     licensePlate: existing.licensePlate,
     returnChargeLevelPct: existing.returnChargeLevelPct,
@@ -71,6 +89,8 @@ export function mergePreservingOwnerFields(fresh: VehicleInput, existing: Vehicl
       merged.trim,
       merged.wheelType,
       merged.year,
+      merged.interior,
+      merged.teslaInteriorCode,
     ),
   };
 }

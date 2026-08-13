@@ -39,29 +39,37 @@ function VehicleCard({
 }) {
   const stats = vehicleStats(vehicle.id, trips, chargingSessions);
   return (
-    <Link href={`/owner/vehicles/${vehicle.id}`} className="block">
-      <Card className="overflow-hidden transition-colors hover:bg-surface">
+    <Link
+      href={`/owner/vehicles/${vehicle.id}`}
+      className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+    >
+      <Card className="overflow-hidden bg-white transition-[border-color,box-shadow,transform] duration-200 group-hover:border-black/20 group-hover:shadow-md group-active:scale-[0.995]">
         <VehicleArtwork
           model={vehicle.model}
           color={vehicle.color}
           trim={vehicle.trim}
           wheelType={vehicle.wheelType}
+          interior={vehicle.interior}
+          interiorCode={vehicle.teslaInteriorCode}
           year={vehicle.year}
           media={vehicle.media}
-          className="h-36 rounded-none border-0"
+          className="h-44 rounded-none border-0 md:h-48"
         />
         <div className="p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="truncate font-medium text-ink">{vehicle.displayName}</div>
               <div className="mt-0.5 text-sm text-muted">
-                {vehicle.trim} · {vehicle.color}
+                {[vehicle.trim, vehicle.color, vehicle.interior].filter(Boolean).join(" · ")}
               </div>
               {vehicle.wheelType && (
                 <div className="mt-1 truncate text-xs text-muted">{vehicle.wheelType}</div>
               )}
             </div>
-            <IconChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted" />
+            <IconChevronRight
+              aria-hidden="true"
+              className="h-4 w-4 shrink-0 text-muted transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-ink"
+            />
           </div>
           <div className="mt-4 grid grid-cols-4 gap-2">
             <VehicleStatCell label="Trips" value={String(stats.tripCount)} />

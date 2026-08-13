@@ -163,16 +163,22 @@ export default function OwnerOverviewPage() {
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {activeVehicles.slice(0, 2).map((vehicle) => (
-              <Link key={vehicle.id} href={`/owner/vehicles/${vehicle.id}`}>
-                <Card className="overflow-hidden transition-colors hover:bg-surface">
+              <Link
+                key={vehicle.id}
+                href={`/owner/vehicles/${vehicle.id}`}
+                className="group rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+              >
+                <Card className="overflow-hidden bg-white transition-[border-color,box-shadow,transform] duration-200 group-hover:border-black/20 group-hover:shadow-md group-active:scale-[0.995]">
                   <VehicleArtwork
                     model={vehicle.model}
                     color={vehicle.color}
                     trim={vehicle.trim}
                     wheelType={vehicle.wheelType}
+                    interior={vehicle.interior}
+                    interiorCode={vehicle.teslaInteriorCode}
                     year={vehicle.year}
                     media={vehicle.media}
-                    className="h-32 rounded-none border-0"
+                    className="h-44 rounded-none border-0 md:h-48"
                   />
                   <div className="flex items-center justify-between gap-3 p-3.5">
                     <div className="min-w-0">
@@ -180,10 +186,12 @@ export default function OwnerOverviewPage() {
                         {vehicle.displayName}
                       </div>
                       <div className="truncate text-xs text-muted">
-                        {[vehicle.year, vehicle.trim, vehicle.color].filter(Boolean).join(" · ")}
+                        {[vehicle.year, vehicle.trim, vehicle.color, vehicle.interior]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </div>
                     </div>
-                    <IconChevronRight className="h-4 w-4 shrink-0 text-muted" />
+                    <IconChevronRight className="h-4 w-4 shrink-0 text-muted transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-ink" />
                   </div>
                 </Card>
               </Link>

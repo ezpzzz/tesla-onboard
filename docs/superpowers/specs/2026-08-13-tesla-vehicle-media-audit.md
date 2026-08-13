@@ -16,6 +16,10 @@
    `CarType` (`vehicle_config.car_type`), `Trim` (`trim_badging`), `ExteriorColor`
    (`exterior_color`) and `WheelType` (`wheel_type`). Failed, sleeping, or timed-out cars still
    import from the account vehicle list and remain editable by the owner.
+   Interior configuration is less consistent: some generations return a descriptive interior
+   field or a Design Studio `option_codes` value, while others omit it or return only a numeric
+   seat-hardware package. The importer consumes an explicit name/code when present, never treats
+   a numeric seat package as a color, and exposes an editable interior field for the omitted case.
 4. Fleet API exposes no documented vehicle-image endpoint. Media is therefore sourced from
    Tesla's public website—not from an unsupported vehicle command or legacy owner API.
 5. Tesla's current public Design Studio uses a first-party compositor whose option lexicon maps
@@ -50,7 +54,7 @@ Primary sources:
 Tesla owner OAuth
   -> /api/1/products (vehicle identity + VIN)
   -> /vehicle_data?endpoints=vehicle_config (one optional read, no wake)
-  -> normalized TeslaVehicle (model/year/trim/color/wheels)
+  -> normalized TeslaVehicle (model/year/trim/exterior/interior/wheels + exact option code)
   -> local owner Vehicle record + matched Tesla configurator-media reference
   -> shared VehicleArtwork component
        - owner overview
@@ -74,6 +78,7 @@ separate data-platform change.
 - Owner-only configuration reads; guest Tesla sign-in remains the cheaper list-only flow.
 - At most ten configuration reads per owner connect to bound callback latency and billable use.
 - Missing configuration never blocks the vehicle list import.
-- Exact media is emitted only when model generation, trim, paint and wheels all map to a
-  compatible Tesla option set. All other imported configurations use a neutral fallback.
+- Exact media is emitted only when model generation, trim, paint, wheels and interior all map to
+  a compatible Tesla option set. Missing interior data never silently substitutes a black cabin;
+  owners can fill the optional interior field and re-resolve the exact first-party image.
 - Tesla OAuth tokens remain server-only and are discarded after the one-shot import.

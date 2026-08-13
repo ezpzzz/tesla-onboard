@@ -40,6 +40,7 @@ interface FormValues {
   trim: string;
   year: string;
   color: string;
+  interior: string;
   shifter: "stalk" | "screen";
   licensePlate: string;
   vin: string;
@@ -54,6 +55,7 @@ function initialFormValues(initial: Partial<VehicleInput> | undefined): FormValu
     trim: initial?.trim ?? "",
     year: initial?.year !== undefined ? String(initial.year) : String(SSR_FALLBACK_YEAR),
     color: initial?.color ?? "",
+    interior: initial?.interior ?? "",
     shifter: initial?.shifter ?? "stalk",
     licensePlate: initial?.licensePlate ?? "",
     vin: initial?.vin ?? "",
@@ -72,6 +74,9 @@ function toVehicleInput(
   const trimmedPlate = values.licensePlate.trim();
   const trimmedVin = values.vin.trim();
   const trimmedPct = values.returnChargeLevelPct.trim();
+  const trimmedInterior = values.interior.trim();
+  const interiorChanged = trimmedInterior !== (preserved?.interior ?? "");
+  const interiorCode = interiorChanged ? null : preserved?.teslaInteriorCode ?? null;
   return {
     displayName: values.displayName.trim(),
     model: values.model.trim(),
@@ -84,6 +89,8 @@ function toVehicleInput(
     returnChargeLevelPct: trimmedPct === "" ? null : Number(trimmedPct),
     notes: values.notes,
     wheelType: preserved?.wheelType ?? null,
+    interior: trimmedInterior === "" ? null : trimmedInterior,
+    teslaInteriorCode: interiorCode,
     teslaSpecSource: preserved?.teslaSpecSource ?? null,
     // Recompute from the edited tuple. Retaining an older URL here could show
     // the wrong paint or wheels after an owner correction.
@@ -93,6 +100,8 @@ function toVehicleInput(
       values.trim.trim(),
       preserved?.wheelType,
       Number(values.year),
+      trimmedInterior,
+      interiorCode,
     ),
     teslaImportKey: preserved?.teslaImportKey ?? null,
   };
@@ -267,6 +276,19 @@ export function VehicleForm({
           />
         </Field>
       </div>
+
+      <Field id="vehicle-interior" label="Interior color">
+        <input
+          id="vehicle-interior"
+          name="interior"
+          type="text"
+          autoComplete="off"
+          value={values.interior}
+          onChange={(e) => set("interior", e.target.value)}
+          className="field"
+          placeholder="e.g. White Interior"
+        />
+      </Field>
 
       <div>
         <span id="vehicle-shifter-label" className="mb-1.5 block text-xs font-medium text-muted">

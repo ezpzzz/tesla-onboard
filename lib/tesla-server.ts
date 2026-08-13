@@ -18,7 +18,8 @@ import "server-only";
  *     resolved tolerantly from the response AND the id_token claims.
  *   - model/year aren't fields on the list object; they're derived from VIN.
  *     The owner import then makes one best-effort vehicle_config read per car
- *     for trim, exterior color and wheels. It never wakes or polls a vehicle.
+ *     for trim, exterior/interior colors and wheels. It never wakes or polls
+ *     a vehicle.
  *   - We do a single read then discard tokens — no session, no refresh, so we
  *     request the minimal scope and skip offline_access.
  */
@@ -28,7 +29,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TeslaProfile, TeslaVehicle } from "./tesla";
 import {
+  displayTeslaInterior,
   parseTeslaVehicleConfig,
+  teslaInteriorOptionCode,
   type RawTeslaVehicleConfig,
 } from "./tesla-vehicle-config";
 
@@ -256,6 +259,9 @@ interface RawVehicle {
   id_s?: string;
   vin?: string;
   display_name?: string;
+  option_codes?: unknown;
+  interior_trim_type?: unknown;
+  interior_color?: unknown;
 }
 
 interface VehiclesResult {
@@ -287,12 +293,21 @@ async function fetchVehicles(
         const { model, year } = decodeTeslaVin(vin);
         // Read id_s (string), never id (number) — Tesla ids exceed JS's 53-bit safe range.
         const id = p.id_s ?? (p.id != null ? String(p.id) : vin);
+        const interiorCode = teslaInteriorOptionCode(p.option_codes)
+          ?? teslaInteriorOptionCode(p.interior_trim_type)
+          ?? teslaInteriorOptionCode(p.interior_color);
+        const interior = displayTeslaInterior(p.interior_trim_type)
+          ?? displayTeslaInterior(p.interior_color)
+          ?? displayTeslaInterior(interiorCode);
         return {
           id,
           displayName: p.display_name || model,
           model,
           year,
           vin,
+          interior,
+          interiorCode,
+          ...(interior || interiorCode ? { specSource: "fleet-api" as const } : {}),
         } satisfies TeslaVehicle;
       });
     return { ok: true, status: 200, vehicles };
@@ -336,14 +351,23 @@ async function fetchVehicleConfig(
       response?: { vehicle_config?: RawTeslaVehicleConfig };
     };
     const config = parseTeslaVehicleConfig(data?.response?.vehicle_config, vehicle.model);
-    const hasSpec = !!(config.model || config.trim || config.color || config.wheelType);
+    const hasSpec = !!(
+      config.model
+      || config.trim
+      || config.color
+      || config.wheelType
+      || config.interior
+      || config.interiorCode
+    );
     return hasSpec
       ? {
           ...vehicle,
           model: config.model ?? vehicle.model,
-          trim: config.trim,
-          color: config.color,
-          wheelType: config.wheelType,
+          trim: config.trim ?? vehicle.trim,
+          color: config.color ?? vehicle.color,
+          wheelType: config.wheelType ?? vehicle.wheelType,
+          interior: config.interior ?? vehicle.interior,
+          interiorCode: config.interiorCode ?? vehicle.interiorCode,
           specSource: "fleet-api",
         }
       : vehicle;

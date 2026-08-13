@@ -32,6 +32,8 @@ export interface Vehicle {
   notes: string;
   /** Optional Tesla configuration imported during the one-shot owner connect. */
   wheelType?: string | null;
+  interior?: string | null;
+  teslaInteriorCode?: string | null;
   teslaSpecSource?: "fleet-api" | null;
   /** First-party artwork; recomputed from imported configuration when possible. */
   media?: VehicleMedia | null;

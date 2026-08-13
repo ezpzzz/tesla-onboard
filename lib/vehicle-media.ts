@@ -16,11 +16,16 @@ export interface VehicleMedia {
   paintMatched: boolean;
   trimMatched: boolean;
   wheelsMatched: boolean;
+  interiorMatched: boolean;
   yearMatched: boolean;
 }
 
 const TESLA_IMAGE_BASE =
   "https://digitalassets.tesla.com/tesla-contents/image/upload/f_png,q_auto,w_800,c_scale";
+
+/** Canonical OnlyEVs demo/listing configuration; live owner imports replace it. */
+export const DEFAULT_TESLA_INTERIOR = "White Interior";
+export const DEFAULT_TESLA_INTERIOR_CODE = "IPW4";
 
 const MODEL_MEDIA: Record<string, VehicleMedia> = {
   "Model 3": {
@@ -31,6 +36,7 @@ const MODEL_MEDIA: Record<string, VehicleMedia> = {
     paintMatched: false,
     trimMatched: false,
     wheelsMatched: false,
+    interiorMatched: false,
     yearMatched: false,
   },
   "Model Y": {
@@ -41,6 +47,7 @@ const MODEL_MEDIA: Record<string, VehicleMedia> = {
     paintMatched: false,
     trimMatched: false,
     wheelsMatched: false,
+    interiorMatched: false,
     yearMatched: false,
   },
   Cybertruck: {
@@ -51,6 +58,7 @@ const MODEL_MEDIA: Record<string, VehicleMedia> = {
     paintMatched: false,
     trimMatched: false,
     wheelsMatched: false,
+    interiorMatched: false,
     yearMatched: false,
   },
   "Model S": {
@@ -61,6 +69,7 @@ const MODEL_MEDIA: Record<string, VehicleMedia> = {
     paintMatched: false,
     trimMatched: false,
     wheelsMatched: false,
+    interiorMatched: false,
     yearMatched: false,
   },
   "Model X": {
@@ -71,6 +80,7 @@ const MODEL_MEDIA: Record<string, VehicleMedia> = {
     paintMatched: false,
     trimMatched: false,
     wheelsMatched: false,
+    interiorMatched: false,
     yearMatched: false,
   },
 };
@@ -141,8 +151,26 @@ function configuratorMedia({
     paintMatched,
     trimMatched: true,
     wheelsMatched: true,
+    interiorMatched: true,
     yearMatched: true,
   };
+}
+
+function exactInteriorCode(
+  blackCode: string,
+  interior: string | null | undefined,
+  importedCode: string | null | undefined,
+): string | null {
+  const whiteCode = blackCode.replace(/B(?=\d+$)/, "W");
+  const explicit = (importedCode ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (explicit === blackCode || explicit === whiteCode) return explicit;
+
+  const value = normalizedSpec(interior);
+  if (/(white|blackandwhite|ultrawhite)/.test(value)) return whiteCode;
+  if (/(black|allblack)/.test(value)) return blackCode;
+  // Tesla does not consistently expose an interior field on every vehicle
+  // generation. Do not silently substitute black when it is unknown.
+  return null;
 }
 
 interface Model3TrimConfig {
@@ -224,6 +252,8 @@ function model3ConfiguratorMedia(
   color: string | null | undefined,
   trim: string | null | undefined,
   wheelType: string | null | undefined,
+  interior: string | null | undefined,
+  importedInteriorCode: string | null | undefined,
   year: number | null | undefined,
 ): VehicleMedia | null {
   const paintCode = teslaPaintCode(color);
@@ -232,12 +262,18 @@ function model3ConfiguratorMedia(
   if (!trimConfig.allowedPaintCodes.includes(paintCode)) return null;
   const wheel = model3WheelCode(wheelType, trimConfig);
   if (!wheel?.matched) return null;
+  const interiorCode = exactInteriorCode(
+    trimConfig.interiorCode,
+    interior,
+    importedInteriorCode,
+  );
+  if (!interiorCode) return null;
 
   const options = [
     `$${trimConfig.trimCode}`,
     `$${paintCode}`,
     `$${wheel.code}`,
-    `$${trimConfig.interiorCode}`,
+    `$${interiorCode}`,
   ];
   if (trimConfig.trimCode === "MT371") options.push("$T30A");
   return configuratorMedia({
@@ -360,6 +396,8 @@ function modelYConfiguratorMedia(
   color: string | null | undefined,
   trim: string | null | undefined,
   wheelType: string | null | undefined,
+  interior: string | null | undefined,
+  importedInteriorCode: string | null | undefined,
   year: number | null | undefined,
 ): VehicleMedia | null {
   if (!year || year < 2020) return null;
@@ -369,11 +407,17 @@ function modelYConfiguratorMedia(
   if (!trimConfig || !paintCode || !wheelCode) return null;
   if (!trimConfig.allowedPaintCodes.includes(paintCode)) return null;
   if (!trimConfig.allowedWheelCodes.includes(wheelCode)) return null;
+  const interiorCode = exactInteriorCode(
+    trimConfig.interiorCode,
+    interior,
+    importedInteriorCode,
+  );
+  if (!interiorCode) return null;
 
   return configuratorMedia({
     model: "my",
     view: "FRONT34",
-    options: [trimConfig.trimCode, paintCode, wheelCode, trimConfig.interiorCode],
+    options: [trimConfig.trimCode, paintCode, wheelCode, interiorCode],
     sourcePage: "https://www.tesla.com/modely/design",
   });
 }
@@ -461,13 +505,15 @@ export function resolveTeslaVehicleMedia(
   trim?: string | null,
   wheelType?: string | null,
   year?: number | null,
+  interior?: string | null,
+  interiorCode?: string | null,
 ): VehicleMedia | null {
   const canonicalModel = canonicalTeslaModel(model);
   if (canonicalModel === "Model 3") {
-    return model3ConfiguratorMedia(color, trim, wheelType, year);
+    return model3ConfiguratorMedia(color, trim, wheelType, interior, interiorCode, year);
   }
   if (canonicalModel === "Model Y") {
-    return modelYConfiguratorMedia(color, trim, wheelType, year);
+    return modelYConfiguratorMedia(color, trim, wheelType, interior, interiorCode, year);
   }
   if (canonicalModel === "Cybertruck") {
     return cybertruckConfiguratorMedia(color, trim, wheelType, year);
@@ -476,7 +522,7 @@ export function resolveTeslaVehicleMedia(
   // supported configurator surface. A current marketing photo would falsely
   // imply matching paint/trim/wheels, so only use it when we have no imported
   // configuration to represent.
-  if (!color && !trim && !wheelType && !year) {
+  if (!color && !trim && !wheelType && !year && !interior && !interiorCode) {
     return MODEL_MEDIA[canonicalModel] ?? null;
   }
   return null;

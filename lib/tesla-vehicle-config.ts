@@ -5,6 +5,11 @@ export interface RawTeslaVehicleConfig {
   trim_badging?: unknown;
   exterior_color?: unknown;
   wheel_type?: unknown;
+  /** Present on some vehicle/firmware generations; newer cars may omit it. */
+  seat_type?: unknown;
+  interior_color?: unknown;
+  interior_trim_type?: unknown;
+  option_codes?: unknown;
 }
 
 export interface TeslaVehicleConfig {
@@ -12,6 +17,8 @@ export interface TeslaVehicleConfig {
   trim?: string;
   color?: string;
   wheelType?: string;
+  interior?: string;
+  interiorCode?: string;
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -198,6 +205,94 @@ export function displayTeslaWheel(value: unknown): string | undefined {
   return words(withSize).replace(/\bWheel$/, "Wheels");
 }
 
+/**
+ * Tesla has returned interior configuration as a descriptive string on some
+ * platforms and as a Design Studio option code on others. Numeric seat_type
+ * values describe seat hardware packages and are deliberately not guessed as
+ * colors; an owner can correct an omitted color in the vehicle form.
+ */
+export function displayTeslaInterior(value: unknown): string | undefined {
+  const raw = nonEmptyString(value);
+  if (!raw || /^\d+$/.test(raw)) return undefined;
+  const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const known: Record<string, string> = {
+    black: "Black Interior",
+    allblack: "Black Interior",
+    allblackpremium: "Black Interior",
+    blackpremium: "Black Interior",
+    white: "White Interior",
+    blackandwhite: "White Interior",
+    whitepremium: "White Interior",
+    blackandwhitepremium: "White Interior",
+    ultrawhite: "Ultra White Interior",
+    cream: "Cream Interior",
+    tan: "Tan Interior",
+    beige: "Tan Interior",
+    grey: "Grey Interior",
+    gray: "Grey Interior",
+    zengrey: "Zen Grey Interior",
+    zengray: "Zen Grey Interior",
+    ibb0: "Black Interior",
+    ibb1: "Black Interior",
+    ibw0: "White Interior",
+    ibw1: "White Interior",
+    in3bb: "Black Interior",
+    in3bw: "White Interior",
+    in3pb: "Black Interior",
+    in3pw: "White Interior",
+    ibe00: "Black Interior",
+    icw00: "Cream Interior",
+    iww00: "White Interior",
+    ibc00: "Black Interior",
+    iwc00: "White Interior",
+    icc00: "Cream Interior",
+    inbbw: "White Interior",
+    inb3c: "Tan Interior",
+    inbc3w: "White Interior",
+    inpb0: "Black Interior",
+    inpb1: "Black Interior",
+    inpw0: "White Interior",
+    inpw1: "White Interior",
+    inbfp: "Black Interior",
+    inbpp: "Black Interior",
+    inbpw: "White Interior",
+    inbtb: "Black Interior",
+    infbp: "Black Interior",
+    inlpc: "Cream Interior",
+    inlpp: "Black Interior",
+    inwpt: "Tan Interior",
+    inypb: "Black Interior",
+    inypw: "White Interior",
+    ivbpp: "Black Interior",
+    ivbsw: "Ultra White Interior",
+    ivbtb: "Black Interior",
+    ivlpc: "Cream Interior",
+    ic00: "Black Interior",
+    ic01: "White Interior",
+    ic02: "Cream Interior",
+  };
+  if (known[key]) return known[key];
+  if (/^(?:inpw|ipw|ibw|iww)\d+$/.test(key)) return "White Interior";
+  if (/^(?:inpb|ipb|ibb)\d+$/.test(key)) return "Black Interior";
+  if (/^ig\d{2}$/.test(key)) return undefined;
+  return words(raw).replace(/\bInterior\b.*\bInterior\b/, "Interior");
+}
+
+function optionCodeList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => optionCodeList(entry));
+  }
+  const raw = nonEmptyString(value);
+  return raw ? raw.split(/[\s,]+/).map((part) => part.trim()).filter(Boolean) : [];
+}
+
+/** Return only an explicit Tesla interior option code; never infer one here. */
+export function teslaInteriorOptionCode(value: unknown): string | undefined {
+  return optionCodeList(value)
+    .map((code) => code.toUpperCase().replace(/^\$/, ""))
+    .find((code) => /^(?:IB[WB][01]|IN3(?:BB|BW|PB|PW)|I(?:BE|CW|WW|BC|WC|CC)00|IN(?:BBW|B3C|BC3W|PB[01]|PW[01]|BFP|BPP|BPW|BTB|FBP|LPC|LPP|WPT|YPB|YPW)|IP[WB]\d{1,2}|IV(?:BPP|BSW|BTB|LPC)|IC0[0-2]|IG\d{2}|IWW\d{1,2}|IB[WB]\d{1,2})$/.test(code));
+}
+
 export function parseTeslaVehicleConfig(
   value: RawTeslaVehicleConfig | null | undefined,
   fallbackModel: string,
@@ -205,10 +300,19 @@ export function parseTeslaVehicleConfig(
   if (!value) return {};
   const rawModel = nonEmptyString(value.car_type);
   const model = rawModel ? canonicalTeslaModel(rawModel) : fallbackModel;
+  const interiorCode = teslaInteriorOptionCode(value.option_codes)
+    ?? teslaInteriorOptionCode(value.interior_trim_type)
+    ?? teslaInteriorOptionCode(value.interior_color);
+  const interior = displayTeslaInterior(value.interior_trim_type)
+    ?? displayTeslaInterior(value.interior_color)
+    ?? displayTeslaInterior(value.seat_type)
+    ?? displayTeslaInterior(interiorCode);
   return {
     model: model !== fallbackModel ? model : undefined,
     trim: displayTeslaTrim(value.trim_badging, model),
     color: displayTeslaColor(value.exterior_color),
     wheelType: displayTeslaWheel(value.wheel_type),
+    interior,
+    interiorCode,
   };
 }

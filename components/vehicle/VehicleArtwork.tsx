@@ -14,6 +14,8 @@ interface VehicleArtworkProps {
   color?: string | null;
   trim?: string | null;
   wheelType?: string | null;
+  interior?: string | null;
+  interiorCode?: string | null;
   year?: number | null;
   media?: VehicleMedia | null;
   className?: string;
@@ -26,14 +28,26 @@ export function VehicleArtwork({
   color,
   trim,
   wheelType,
+  interior,
+  interiorCode,
   year,
   media,
   className,
   compact = false,
   eager = false,
 }: VehicleArtworkProps) {
-  const exactMedia = resolveTeslaVehicleMedia(model, color, trim, wheelType, year);
-  const hasImportedConfiguration = !!(color || trim || wheelType || year);
+  const exactMedia = resolveTeslaVehicleMedia(
+    model,
+    color,
+    trim,
+    wheelType,
+    year,
+    interior,
+    interiorCode,
+  );
+  const hasImportedConfiguration = !!(
+    color || trim || wheelType || year || interior || interiorCode
+  );
   const resolved = exactMedia ?? (!hasImportedConfiguration ? media : null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const imageFailed = !!resolved && failedUrl === resolved.imageUrl;
@@ -61,8 +75,8 @@ export function VehicleArtwork({
           referrerPolicy="no-referrer"
           onError={() => setFailedUrl(resolved.imageUrl)}
           className={cn(
-            "h-full w-full object-contain",
-            compact ? "scale-[1.15]" : "scale-[1.08]",
+            "h-full w-full transform-gpu object-contain",
+            compact ? "scale-[1.45]" : "scale-[1.42]",
           )}
         />
       ) : (

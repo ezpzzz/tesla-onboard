@@ -5,6 +5,10 @@ import { hostConfig } from "@/lib/config";
 import { Button, StepFrame } from "@/components/ui";
 import { IconArrowRight, IconBolt, IconCar, IconSparkle } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
+import {
+  DEFAULT_TESLA_INTERIOR,
+  DEFAULT_TESLA_INTERIOR_CODE,
+} from "@/lib/vehicle-media";
 import type { SetupStepProps } from "./types";
 
 const highlights = [
@@ -56,9 +60,11 @@ export function WelcomeStep({ nav, update }: SetupStepProps) {
           model={hostConfig.car.model}
           color={hostConfig.car.color}
           trim={hostConfig.car.trim}
+          interior={DEFAULT_TESLA_INTERIOR}
+          interiorCode={DEFAULT_TESLA_INTERIOR_CODE}
           year={hostConfig.car.year}
           eager
-          className="mt-2 h-56"
+          className="mt-2 h-64"
         />
         <div className="mt-1">
           <div className="text-2xl font-semibold tracking-tight text-ink">Set up your fleet</div>
