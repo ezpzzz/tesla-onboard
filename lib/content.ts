@@ -24,10 +24,11 @@ export interface ModuleVideo {
   title: string;
   /**
    * Official Tesla YouTube video id — VERIFIED OFFICIAL ONLY.
-   * Every id here was checked via YouTube oEmbed to confirm the uploader is an
-   * official Tesla channel: author_url is youtube.com/@tesla OR
-   * youtube.com/@tesla_tutorials (Tesla's dedicated tutorial channel, the source
-   * Tesla embeds on its own support pages). No other third-party / aggregator videos.
+   * Every id here was checked via YouTube oEmbed and must return
+   * author_name === "Tesla" (the youtube.com/@tesla channel) exactly, per the
+   * project rule in CLAUDE.md. "Tesla Tutorials" (@tesla_tutorials) is a
+   * separate, third-party channel and does NOT qualify, despite its name.
+   *   curl -s "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=<ID>" | jq .author_name
    */
   youtubeId: string;
 }
@@ -82,7 +83,7 @@ export const MODULES: Module[] = [
       },
     ],
     rentalNote: rental.keyAccess,
-    video: { title: "Model 3 Essentials: Access", youtubeId: "ya5iYfWqMN0" },
+    video: { title: "Model 3 Guide | Phone Key", youtubeId: "mW0Z2Y_M5qI" },
   },
   {
     id: "driving-basics",
@@ -145,7 +146,7 @@ export const MODULES: Module[] = [
           'Press the right scroll button on the wheel and just say it: "Set temperature to 70", "Navigate home", "Take me to a Supercharger".',
       },
     ],
-    video: { title: "Model 3 Essentials: Driver Controls", youtubeId: "HfeXzeA0s3Q" },
+    video: { title: "Tesla Touchscreen | Controls", youtubeId: "nW69QKyZTss" },
   },
   {
     id: "autopilot",
@@ -213,7 +214,7 @@ export const MODULES: Module[] = [
           "For day-to-day driving, keeping the battery roughly between 20% and 80% is healthiest and fastest. No need to charge to 100% unless you're heading on a long trip.",
       },
     ],
-    video: { title: "Supercharging Your Tesla", youtubeId: "WL6UWX26NaE" },
+    video: { title: "Model 3 Guide | Charging", youtubeId: "cR-EbAM5DcE" },
   },
   {
     id: "charging-this-car",
@@ -233,7 +234,7 @@ export const MODULES: Module[] = [
       },
     ],
     rentalNote: rental.chargeAccess,
-    video: { title: "Supercharging Your Tesla", youtubeId: "WL6UWX26NaE" },
+    video: { title: "Model 3 Guide | Charging", youtubeId: "cR-EbAM5DcE" },
   },
   {
     id: "house-rules",

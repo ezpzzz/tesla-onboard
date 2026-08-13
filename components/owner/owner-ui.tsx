@@ -622,9 +622,11 @@ export function ReturnChecklistCard({ tripId }: { tripId: string }) {
           );
         })}
       </div>
-      <label className="mt-4 block">
+      <label className="mt-4 block" htmlFor={`return-checklist-notes-${tripId}`}>
         <span className="text-xs font-medium uppercase tracking-wide text-muted">Notes</span>
         <textarea
+          id={`return-checklist-notes-${tripId}`}
+          name="returnChecklistNotes"
           value={checklist.notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
