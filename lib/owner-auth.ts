@@ -5,9 +5,11 @@ import "server-only";
  *
  * /owner has no auth at all when NEXT_PUBLIC_SUPABASE_URL /
  * NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY are unset — that's "demo mode", and it
- * must behave byte-identically to the app before this feature existed (see
- * middleware.ts). Partial config (only one of the pair set) counts as
- * unconfigured — fail toward demo mode, not toward a half-working gate.
+ * must be visually and behaviorally equivalent to the app before this
+ * feature existed (see middleware.ts), modulo the force-dynamic rendering
+ * and OwnerShell markup-wrapper deltas that equivalence necessarily carries.
+ * Partial config (only one of the pair set) counts as unconfigured — fail
+ * toward demo mode, not toward a half-working gate.
  *
  * The allowlist is server-only and separate from the Supabase project's user
  * pool: a user can authenticate (prove they have an account in the SHARED
@@ -50,7 +52,9 @@ export function warnOwnerAuthDisabledOnce(): void {
   warnedDisabled = true;
   console.warn(
     "[owner-auth] NEXT_PUBLIC_SUPABASE_URL and/or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY are unset — " +
-      "/owner is running with NO SIGN-IN required (demo mode). Set both to enable the owner auth gate.",
+      "/owner is running with NO SIGN-IN required (demo mode). Set both to enable the owner auth gate. " +
+      "NEXT_PUBLIC_* env vars are inlined into the client bundle at BUILD time, not read at runtime — " +
+      "setting them only in the running environment (without rebuilding) will NOT enable this gate.",
   );
 }
 

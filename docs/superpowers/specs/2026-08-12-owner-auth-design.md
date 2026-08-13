@@ -123,10 +123,13 @@ same "check your email" interstitial regardless of whether Supabase actually sen
 `supabase.auth.getSession()`, which is simpler and doesn't require a network/JWKS round trip.
 Rejected because `getSession()` on the server reads the session straight out of the cookie
 *without revalidating it* — a stale, forged, or already-revoked cookie would pass. `getClaims()`
-verifies the JWT (via Supabase's JWKS, cached locally by the SSR helper) before handing back
-claims, so every server-side auth decision in this feature is based on a cryptographically
-verified identity, not a client-supplied cookie taken on faith. This applies uniformly:
-middleware, the owner layout, and `/not-authorized`'s display read all use `getClaims()`.
+verifies the session before handing back claims — with local JWKS/WebCrypto verification when
+the project uses asymmetric signing keys, or (as is the case for this project, which still uses
+legacy symmetric JWT signing) a network `getUser()` fallback per call when it doesn't — so every
+server-side auth decision in this feature is based on a revalidated identity, not a
+client-supplied cookie taken on faith, even though on this project that revalidation currently
+costs a network round trip rather than a local check. This applies uniformly: middleware, the
+owner layout, and `/not-authorized`'s display read all use `getClaims()`.
 
 **(7) No `service_role` key anywhere in the app runtime.** *Rejected alternative:* use the
 service-role key in the admin script *and* keep it available as a server env var for
@@ -170,7 +173,7 @@ export const config = { matcher: ["/owner/:path*", "/login"] }
 // (2) const { response, email } = await updateSession(request)
 // (3) path starts with /owner: no email -> logOwnerAuthEvent signin_required -> redirect /login?next=<encoded original path+search>. email && !isAllowedOwnerEmail(email) -> logOwnerAuthEvent denied -> redirect /not-authorized. else return response UNMODIFIED (refreshed cookies must reach the browser).
 // (4) path === /login && email -> redirect /owner (allowlist enforcement happens at /owner). else return response.
-// Edge runtime default (getClaims uses WebCrypto; no Node-only crypto anywhere in this feature).
+// Edge runtime default (getClaims verifies locally via WebCrypto/JWKS only if the project uses asymmetric signing keys; this project uses legacy symmetric signing, so getClaims falls back to a network getUser() call per invocation — no Node-only crypto anywhere in this feature either way).
 
 // ---- app/login/page.tsx ("use client", OUTSIDE app/owner so no OwnerShell chrome; wrapped in OwnerAuthShell) ----
 // Segmented control: "Password" (DEFAULT tab) | "Magic link". Inputs use the new .field class. Reads ?next= and ?error= params (useSearchParams — wrap the component in <Suspense> per Next requirements).
@@ -196,7 +199,7 @@ export const config = { matcher: ["/owner/:path*", "/login"] }
 // Props { email: string }. Truncated email (Badge tone="neutral" or muted text), "Account" link -> /owner/account, sign-out <form action="/auth/signout" method="post"> ghost Button. useEffect: browser client onAuthStateChange — on SIGNED_OUT, window.location.href = "/login" (hard nav so middleware re-runs). Unsubscribe on cleanup.
 
 // ---- components/owner/OwnerShell.tsx (EDIT, additive) ----
-// New optional prop ownerEmail?: string | null. When set, render <OwnerIdentity email={ownerEmail}/> in the desktop sidebar (near the existing "Host view" Badge / guest-walkthrough link) AND in the mobile topbar. When null/undefined: byte-identical to today. Update the stale "no auth" header comment to point at middleware.ts + lib/owner-auth.ts.
+// New optional prop ownerEmail?: string | null. When set, render <OwnerIdentity email={ownerEmail}/> in the desktop sidebar (near the existing "Host view" Badge / guest-walkthrough link) AND in the mobile topbar. When null/undefined: visually and behaviorally equivalent to today (owner routes are now force-dynamic; mobile topbar markup differs slightly to make room for the identity slot). Update the stale "no auth" header comment to point at middleware.ts + lib/owner-auth.ts.
 
 // ---- app/owner/layout.tsx (EDIT) ----
 // async Server Component + export const dynamic = "force-dynamic". If !isOwnerAuthConfigured(): <OwnerShell> exactly as today (ownerEmail undefined). Else: server client getClaims(); DEFENSE-IN-DEPTH: if no email or !isAllowedOwnerEmail(email), redirect("/login") (middleware should have caught it; this is the second independent layer). Pass ownerEmail into OwnerShell.
@@ -429,3 +432,49 @@ Checked this spec for placeholders, contradictions, and ambiguity before finaliz
 - **A dedicated Supabase project for this app.** Explicitly rejected in §1 — this app is a
   tenant of `sophosic-platform` by the user's own choice, not a candidate for its own project in
   this pass. Revisiting that is a future decision, not part of this spec.
+
+## 11. Post-audit remediation
+
+A post-implementation audit of this feature found 10 gaps between the spec above and the
+shipped behavior (or between the spec's prose and its own internal accuracy). Each is listed
+with the fix that closed it:
+
+1. **Demo-mode guards were incomplete in places that read Supabase env directly.** Fixed by
+   routing every demo-mode check through `isOwnerAuthConfigured()` rather than re-deriving the
+   env-presence condition ad hoc at each call site.
+2. **Sign-out had no CSRF check** on `app/auth/signout/route.ts`. Fixed by verifying the request
+   before calling `supabase.auth.signOut({ scope: "local" })`, so the sign-out POST can't be
+   triggered cross-site.
+3. **No app-level throttle on auth requests**, leaving password/magic-link attempts able to hit
+   the shared Supabase project's rate limits with no local backpressure. Fixed by adding a light
+   app-side throttle in front of both the password sign-in and magic-link-request paths.
+4. **Password login was client-only**, calling `signInWithPassword` straight from the browser
+   client with no server-side path. Fixed by adding a server-side password sign-in route so the
+   throttle in (3) and future server-side checks have a single enforcement point, matching the
+   "single enforcement point" philosophy of decision (1) in §3.
+5. **Docs described magic link as a future/optional add-on** rather than the shipped secondary
+   tab, and described `getClaims()` as verifying "via JWKS/WebCrypto locally" unconditionally.
+   Fixed in README.md and CLAUDE.md (magic link is live today, redirect-URL step is required for
+   it) and in this spec (§3 decision 6 and the `updateSession` contract in §4, both corrected to
+   describe the symmetric-signing fallback this project actually uses).
+6. **`.env.example` had no safe default documented for build-time inlining**, risking a deploy
+   where the vars are set only at runtime and the app silently stays in demo mode forever. Fixed
+   by adding a comment in `.env.example`'s owner-auth banner section calling out that both
+   `NEXT_PUBLIC_SUPABASE_*` vars must be present at **build time**, not just runtime.
+7. **`OwnerShell`'s "byte-identical when unauthenticated" claim was inaccurate** — owner routes
+   became force-dynamic and mobile topbar markup shifted slightly to make room for the identity
+   slot. Fixed by rewording every "byte-identical" claim (here, in CLAUDE.md, and in the
+   `OwnerShell` contract in §4) to "visually and behaviorally equivalent," with the force-dynamic
+   and topbar-markup caveats stated explicitly rather than implied away.
+8. **The symmetric-JWT round-trip cost was undocumented**, meaning nothing warned a future editor
+   that `getClaims()` on this project is a network call, not a local check — relevant both for
+   performance reasoning and for understanding why enabling asymmetric signing keys (a
+   shared-project change) would be a meaningful win. Fixed by documenting the ~2-round-trip-per-
+   page-view cost in CLAUDE.md and correcting the local-verification claims in §3/§4 above.
+9. **Rate-limit protection was assumed to live entirely on Supabase's side.** Fixed by pairing
+   the app-level throttle in (3) with docs (README.md) stating plainly that both password and
+   magic-link requests are throttled app-side, not just relying on Supabase's own limits.
+10. **`.env.example`'s owner-auth section had no stated default posture**, leaving a fresh
+    checkout ambiguous about what happens with the file copied as-is. Fixed by confirming (and
+    documenting) that the section's default — all three vars blank — keeps `/owner` open in demo
+    mode, consistent with §7's operational runbook.

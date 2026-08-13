@@ -118,9 +118,23 @@ is shared.
 
 Sign-in is **password-first**, not magic-link-first: a password round-trip
 needs no email deliverability setup and doesn't depend on the shared
-project's email template (which this app is not allowed to touch). The
-redirect URL above exists to support a magic-link fallback if you choose to
-enable one later, without requiring template changes now.
+project's email template (which this app is not allowed to touch). Magic
+link ships too, as the secondary tab on the sign-in page — it uses the
+project's unmodified default "Magic Link" email template as-is. The
+Supabase dashboard redirect-URL step above is **required** for that tab to
+work (Supabase only redirects a magic-link callback to a URL on the
+project's allowlist); the template itself is unchanged either way.
+
+**Build-time requirement:** both `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` must be present at **build time**, not
+just at runtime. Next.js inlines `NEXT_PUBLIC_*` vars into the client bundle
+during `pnpm build`; setting them only in the runtime environment (e.g. after
+a build already ran without them) leaves the app permanently in demo mode
+with `/owner` open, since the browser bundle never saw the vars to begin
+with. Rebuild after adding or changing them.
+
+Password sign-in and magic-link requests are lightly throttled app-side to
+protect the shared Supabase project's rate limits.
 
 ---
 

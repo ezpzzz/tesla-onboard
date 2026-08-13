@@ -18,7 +18,12 @@ import { updateSession } from "@/lib/supabase/middleware";
  * not on the allowlist -> /not-authorized. Otherwise the refreshed-session
  * response is returned UNMODIFIED so the browser gets the updated cookies.
  *
- * Runs on the default Edge runtime (getClaims() uses WebCrypto only).
+ * Runs on the default Edge runtime. NOTE: getClaims() does NOT verify
+ * locally via WebCrypto alone on this project — that fast path requires an
+ * asymmetric JWT signing key (JWKS) configured on the Supabase project, and
+ * this one still uses the legacy symmetric HS256 secret (empty JWKS), so
+ * getClaims() falls back to a network getUser() call against Supabase Auth
+ * on every check.
  */
 export const config = {
   matcher: ["/owner/:path*", "/login"],

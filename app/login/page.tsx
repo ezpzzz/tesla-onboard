@@ -7,7 +7,11 @@
  *
  * Two ways in, one anti-enumeration posture:
  *  - Password: identical failure message for "wrong password" and "no such
- *    user" (only rate-limit errors get a distinct message).
+ *    user" (only rate-limit errors get a distinct message). The request is
+ *    proxied through /api/owner/password-login rather than calling
+ *    supabase.auth.signInWithPassword directly, so the *network response* is
+ *    identical too — Supabase distinguishes invalid_credentials from
+ *    email_not_confirmed over the wire even though the UI can't.
  *  - Magic link: ALWAYS shows the same "check your email" interstitial
  *    regardless of whether the address has an account (shouldCreateUser is
  *    false, so a non-account email silently gets no email — the UI can't
@@ -38,11 +42,6 @@ const SUPABASE_CONFIGURED =
 const RESEND_SECONDS = 60;
 
 type Tab = "password" | "magic-link";
-
-function isRateLimitError(error: { code?: string; status?: number } | null): boolean {
-  if (!error) return false;
-  return error.code === "over_request_rate_limit" || error.status === 429;
-}
 
 // Post-login destination must stay same-origin: a bare "/" path, never a
 // protocol-relative ("//evil.com") or absolute ("https://evil.com") URL. The
@@ -164,12 +163,25 @@ function LoginForm() {
     e.preventDefault();
     setErrorMsg(null);
     setSubmitting(true);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    let ok = false;
+    let rateLimited = false;
+    try {
+      const res = await fetch("/api/owner/password-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      ok = Boolean(data?.ok);
+      rateLimited = data?.error === "rate_limited";
+    } catch {
+      // Network failure talking to our own API route — falls through to the
+      // generic error message below, same as any other failure.
+    }
     setSubmitting(false);
-    if (error) {
+    if (!ok) {
       setErrorMsg(
-        isRateLimitError(error)
+        rateLimited
           ? "Too many attempts. Wait a minute and try again."
           : "Incorrect email or password.",
       );

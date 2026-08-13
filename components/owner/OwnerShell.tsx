@@ -11,7 +11,8 @@
  * second defense-in-depth check in app/owner/layout.tsx. When Supabase auth
  * env vars are unset, the app runs in demo mode — /owner stays open exactly
  * as before, `ownerEmail` is left undefined, and this shell renders
- * byte-identically to the no-auth original.
+ * visually and behaviorally equivalent to the no-auth original (markup
+ * wrapper + dynamic-rendering deltas exist).
  */
 
 import Link from "next/link";
