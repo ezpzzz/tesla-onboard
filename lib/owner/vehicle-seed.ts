@@ -10,6 +10,7 @@
  */
 
 import { hostConfig } from "@/lib/config";
+import { resolveTeslaVehicleMedia } from "@/lib/vehicle-media";
 import type { Vehicle } from "./types";
 
 // Fixed literal, not Date.now() — keeps the seed deterministic across every
@@ -30,6 +31,13 @@ export function buildSeedVehicle(): Vehicle {
     vin: null,
     returnChargeLevelPct: null,
     notes: "",
+    media: resolveTeslaVehicleMedia(
+      hostConfig.car.model,
+      hostConfig.car.color,
+      hostConfig.car.trim,
+      undefined,
+      hostConfig.car.year,
+    ),
     status: "active",
     createdAt: SEED_EPOCH,
     updatedAt: SEED_EPOCH,

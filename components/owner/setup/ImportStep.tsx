@@ -12,6 +12,7 @@ import {
 import { VehicleForm } from "@/components/owner/vehicle-form";
 import { Badge, Button, Card, StepFrame, cn } from "@/components/ui";
 import { EmptyState } from "@/components/owner/owner-ui";
+import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import { IconArrowRight, IconCheck } from "@/components/icons";
 import { indexOfSetupStep } from "@/lib/owner/setup-flow";
 import type { TeslaVehicle } from "@/lib/tesla";
@@ -134,6 +135,16 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                 onClick={() => setExpandedId(expanded ? null : v.id)}
                 className="flex min-h-[44px] w-full items-center justify-between gap-3 p-3.5 text-left"
               >
+                <VehicleArtwork
+                  model={v.model}
+                  color={v.color}
+                  trim={v.trim}
+                  wheelType={v.wheelType}
+                  year={v.year}
+                  media={v.media}
+                  compact
+                  className="hidden sm:block"
+                />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15px] font-medium text-ink">
                     {v.displayName}
@@ -285,13 +296,21 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                 onChange={(e) => toggle(key, e.target.checked)}
                 className="h-5 w-5 shrink-0 rounded border-line accent-brand"
               />
+              <VehicleArtwork
+                model={tv.model}
+                color={tv.color}
+                trim={tv.trim}
+                wheelType={tv.wheelType}
+                year={tv.year}
+                compact
+                className="hidden sm:block"
+              />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[15px] font-medium text-ink">
                   {tv.displayName || `${tv.year ?? ""} ${tv.model}`.trim()}
                 </span>
                 <span className="block truncate text-sm text-muted">
-                  {tv.model}
-                  {tv.year ? ` · ${tv.year}` : ""}
+                  {[tv.year, tv.trim, tv.color].filter(Boolean).join(" · ") || tv.model}
                 </span>
               </span>
               {alreadyImported && <Badge tone="good">Already imported</Badge>}

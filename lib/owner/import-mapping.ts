@@ -6,6 +6,7 @@
  */
 
 import type { TeslaVehicle } from "@/lib/tesla";
+import { resolveTeslaVehicleMedia } from "@/lib/vehicle-media";
 import type { Vehicle, VehicleInput } from "./types";
 
 /** Stable dedupe key for a Tesla vehicle: VIN when we have one (live mode,
@@ -31,14 +32,17 @@ export function vehicleInputFromTesla(tv: TeslaVehicle, fallbackYear: number): V
   return {
     displayName,
     model: tv.model,
-    trim: "",
+    trim: tv.trim ?? "",
     year,
-    color: "",
+    color: tv.color ?? "",
     shifter: shifterFor(tv.model, year),
     licensePlate: null,
     vin: tv.vin ?? null,
     returnChargeLevelPct: null,
     notes: "",
+    wheelType: tv.wheelType ?? null,
+    teslaSpecSource: tv.specSource ?? null,
+    media: resolveTeslaVehicleMedia(tv.model, tv.color, tv.trim, tv.wheelType, year),
     teslaImportKey: teslaKeyOf(tv),
   };
 }
@@ -47,12 +51,26 @@ export function vehicleInputFromTesla(tv: TeslaVehicle, fallbackYear: number): V
  * host has since filled in by hand — keep their trim/color/plate/notes/pct,
  * only refreshing the fields Tesla actually reports. */
 export function mergePreservingOwnerFields(fresh: VehicleInput, existing: Vehicle): VehicleInput {
-  return {
+  const merged = {
     ...fresh,
-    trim: existing.trim,
-    color: existing.color,
+    trim: existing.trim || fresh.trim,
+    color: existing.color || fresh.color,
+    wheelType: existing.wheelType ?? fresh.wheelType,
+    teslaSpecSource: existing.teslaSpecSource ?? fresh.teslaSpecSource,
     licensePlate: existing.licensePlate,
     returnChargeLevelPct: existing.returnChargeLevelPct,
     notes: existing.notes,
+  };
+  return {
+    ...merged,
+    // Never carry an image generated from a previous configuration across a
+    // manual trim/paint/wheel edit. Re-resolve the exact tuple fail-closed.
+    media: resolveTeslaVehicleMedia(
+      merged.model,
+      merged.color,
+      merged.trim,
+      merged.wheelType,
+      merged.year,
+    ),
   };
 }

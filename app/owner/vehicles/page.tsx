@@ -16,6 +16,7 @@ import { useOwnerSetupState } from "@/lib/owner/setup-state";
 import { vehicleStats, formatMiles, formatUsd, formatPct } from "@/lib/owner/derive";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconChevronRight } from "@/components/icons";
+import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { ChargingSession, Trip, Vehicle } from "@/lib/owner/types";
 
 function VehicleStatCell({ label, value }: { label: string; value: string }) {
@@ -39,24 +40,38 @@ function VehicleCard({
   const stats = vehicleStats(vehicle.id, trips, chargingSessions);
   return (
     <Link href={`/owner/vehicles/${vehicle.id}`} className="block">
-      <Card className="p-4 transition-colors hover:bg-surface">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="truncate font-medium text-ink">{vehicle.displayName}</div>
-            <div className="mt-0.5 text-sm text-muted">
-              {vehicle.trim} · {vehicle.color}
+      <Card className="overflow-hidden transition-colors hover:bg-surface">
+        <VehicleArtwork
+          model={vehicle.model}
+          color={vehicle.color}
+          trim={vehicle.trim}
+          wheelType={vehicle.wheelType}
+          year={vehicle.year}
+          media={vehicle.media}
+          className="h-36 rounded-none border-0"
+        />
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate font-medium text-ink">{vehicle.displayName}</div>
+              <div className="mt-0.5 text-sm text-muted">
+                {vehicle.trim} · {vehicle.color}
+              </div>
+              {vehicle.wheelType && (
+                <div className="mt-1 truncate text-xs text-muted">{vehicle.wheelType}</div>
+              )}
             </div>
+            <IconChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted" />
           </div>
-          <IconChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted" />
-        </div>
-        <div className="mt-4 grid grid-cols-4 gap-2">
-          <VehicleStatCell label="Trips" value={String(stats.tripCount)} />
-          <VehicleStatCell label="Miles" value={formatMiles(stats.milesRented)} />
-          <VehicleStatCell label="Energy" value={formatUsd(stats.energyCostUsd)} />
-          <VehicleStatCell
-            label="Avg return"
-            value={stats.avgReturnChargePct === null ? "—" : formatPct(stats.avgReturnChargePct)}
-          />
+          <div className="mt-4 grid grid-cols-4 gap-2">
+            <VehicleStatCell label="Trips" value={String(stats.tripCount)} />
+            <VehicleStatCell label="Miles" value={formatMiles(stats.milesRented)} />
+            <VehicleStatCell label="Energy" value={formatUsd(stats.energyCostUsd)} />
+            <VehicleStatCell
+              label="Avg return"
+              value={stats.avgReturnChargePct === null ? "—" : formatPct(stats.avgReturnChargePct)}
+            />
+          </div>
         </div>
       </Card>
     </Link>

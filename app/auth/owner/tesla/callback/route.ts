@@ -42,7 +42,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const token = await exchangeCode(c, code);
-    const { profile, vehiclesOk } = await fetchProfile(c, token);
+    const { profile, vehiclesOk } = await fetchProfile(c, token, {
+      includeVehicleConfig: true,
+    });
 
     // Identity succeeded but the vehicle read hard-failed (scope/region): surface it
     // rather than silently importing an owner with zero vehicles.

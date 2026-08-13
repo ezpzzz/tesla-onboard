@@ -16,7 +16,9 @@ import "server-only";
  *     for the wrong region returns HTTP 412).
  *   - /api/1/users/me field names aren't officially published, so identity is
  *     resolved tolerantly from the response AND the id_token claims.
- *   - model/year aren't fields on the vehicle object; they're derived from VIN.
+ *   - model/year aren't fields on the list object; they're derived from VIN.
+ *     The owner import then makes one best-effort vehicle_config read per car
+ *     for trim, exterior color and wheels. It never wakes or polls a vehicle.
  *   - We do a single read then discard tokens — no session, no refresh, so we
  *     request the minimal scope and skip offline_access.
  */
@@ -25,6 +27,10 @@ import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TeslaProfile, TeslaVehicle } from "./tesla";
+import {
+  parseTeslaVehicleConfig,
+  type RawTeslaVehicleConfig,
+} from "./tesla-vehicle-config";
 
 export const AUTHORIZE_URL = "https://auth.tesla.com/oauth2/v3/authorize";
 export const TOKEN_URL =
@@ -296,6 +302,73 @@ async function fetchVehicles(
   }
 }
 
+const MAX_OWNER_SPEC_VEHICLES = 10;
+const VEHICLE_CONFIG_TIMEOUT_MS = 4_000;
+
+async function fetchVehicleConfig(
+  base: string,
+  accessToken: string,
+  vehicle: TeslaVehicle,
+): Promise<TeslaVehicle> {
+  if (!vehicle.vin) return vehicle;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), VEHICLE_CONFIG_TIMEOUT_MS);
+  try {
+    const url = new URL(
+      `/api/1/vehicles/${encodeURIComponent(vehicle.vin)}/vehicle_data`,
+      base,
+    );
+    // Tesla documents vehicle_config as the vehicle_data equivalent for
+    // CarType, Trim, ExteriorColor and WheelType. Request that group only.
+    url.searchParams.set("endpoints", "vehicle_config");
+    const res = await fetch(url, {
+      headers: authHeaders(accessToken),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      // Sleeping/offline vehicles commonly fail this optional enrichment. The
+      // product list remains authoritative and import continues without specs.
+      console.warn(`[tesla] vehicle_config unavailable (${res.status}) for ${vehicle.vin}`);
+      return vehicle;
+    }
+    const data = (await res.json()) as {
+      response?: { vehicle_config?: RawTeslaVehicleConfig };
+    };
+    const config = parseTeslaVehicleConfig(data?.response?.vehicle_config, vehicle.model);
+    const hasSpec = !!(config.model || config.trim || config.color || config.wheelType);
+    return hasSpec
+      ? {
+          ...vehicle,
+          model: config.model ?? vehicle.model,
+          trim: config.trim,
+          color: config.color,
+          wheelType: config.wheelType,
+          specSource: "fleet-api",
+        }
+      : vehicle;
+  } catch (error) {
+    if (error instanceof Error && error.name !== "AbortError") {
+      console.warn(`[tesla] vehicle_config read threw for ${vehicle.vin}`);
+    }
+    return vehicle;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function enrichOwnerVehicleConfigs(
+  base: string,
+  accessToken: string,
+  vehicles: TeslaVehicle[],
+): Promise<TeslaVehicle[]> {
+  const enrichable = vehicles.slice(0, MAX_OWNER_SPEC_VEHICLES);
+  const enriched = await Promise.all(
+    enrichable.map((vehicle) => fetchVehicleConfig(base, accessToken, vehicle)),
+  );
+  return [...enriched, ...vehicles.slice(MAX_OWNER_SPEC_VEHICLES)];
+}
+
 export interface ProfileResult {
   profile: TeslaProfile;
   /** false when the vehicle read hard-failed (scope/region) vs. a genuinely empty account. */
@@ -305,12 +378,17 @@ export interface ProfileResult {
 export async function fetchProfile(
   c: TeslaServerConfig,
   token: TokenResponse,
+  options: { includeVehicleConfig?: boolean } = {},
 ): Promise<ProfileResult> {
   const base = await resolveRegionBase(c.audience, token.access_token);
   const [identity, vehiclesRes] = await Promise.all([
     fetchIdentity(base, token.access_token, token.id_token),
     fetchVehicles(base, token.access_token),
   ]);
+  const vehicles =
+    options.includeVehicleConfig && vehiclesRes.ok
+      ? await enrichOwnerVehicleConfigs(base, token.access_token, vehiclesRes.vehicles)
+      : vehiclesRes.vehicles;
   const sub = decodeJwt(token.access_token)?.sub;
   return {
     profile: {
@@ -318,7 +396,7 @@ export async function fetchProfile(
       fullName: identity.fullName,
       firstName: identity.firstName,
       email: identity.email,
-      vehicles: vehiclesRes.vehicles,
+      vehicles,
       source: "live",
     },
     vehiclesOk: vehiclesRes.ok,

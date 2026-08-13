@@ -17,6 +17,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { VehicleInput } from "@/lib/owner/types";
 import { validateVehicleInput } from "@/lib/owner/vehicle-state";
+import { resolveTeslaVehicleMedia } from "@/lib/vehicle-media";
 import { Button, Segmented } from "../ui";
 
 // Fixed SSR-safe fallback for "current year" — reading Date.now() during
@@ -64,7 +65,10 @@ function initialFormValues(initial: Partial<VehicleInput> | undefined): FormValu
   };
 }
 
-function toVehicleInput(values: FormValues): VehicleInput {
+function toVehicleInput(
+  values: FormValues,
+  preserved?: Partial<VehicleInput>,
+): VehicleInput {
   const trimmedPlate = values.licensePlate.trim();
   const trimmedVin = values.vin.trim();
   const trimmedPct = values.returnChargeLevelPct.trim();
@@ -79,6 +83,18 @@ function toVehicleInput(values: FormValues): VehicleInput {
     vin: trimmedVin === "" ? null : trimmedVin,
     returnChargeLevelPct: trimmedPct === "" ? null : Number(trimmedPct),
     notes: values.notes,
+    wheelType: preserved?.wheelType ?? null,
+    teslaSpecSource: preserved?.teslaSpecSource ?? null,
+    // Recompute from the edited tuple. Retaining an older URL here could show
+    // the wrong paint or wheels after an owner correction.
+    media: resolveTeslaVehicleMedia(
+      values.model.trim(),
+      values.color.trim(),
+      values.trim.trim(),
+      preserved?.wheelType,
+      Number(values.year),
+    ),
+    teslaImportKey: preserved?.teslaImportKey ?? null,
   };
 }
 
@@ -142,7 +158,7 @@ export function VehicleForm({
       // its message immediately instead of staying stuck until resubmit.
       setErrors((prevErrors) =>
         Object.keys(prevErrors).length > 0
-          ? validateVehicleInput(toVehicleInput(next), currentYear)
+          ? validateVehicleInput(toVehicleInput(next, initialValues), currentYear)
           : prevErrors,
       );
       return next;
@@ -151,7 +167,7 @@ export function VehicleForm({
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const input = toVehicleInput(values);
+    const input = toVehicleInput(values, initialValues);
     const fieldErrors = validateVehicleInput(input, currentYear);
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors);

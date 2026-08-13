@@ -3,6 +3,7 @@
 import { hostConfig } from "@/lib/config";
 import { Button, StepFrame } from "../ui";
 import { IconArrowRight, IconBolt, IconCheck, IconSparkle } from "../icons";
+import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { StepProps } from "../step-types";
 
 const highlights = [
@@ -38,25 +39,27 @@ export function WelcomeStep({ nav, update, state }: StepProps) {
         </Button>
       }
     >
-      <div
-        className="relative mb-6 overflow-hidden rounded-3xl p-6 text-white"
-        style={{ backgroundImage: "linear-gradient(135deg, #171a20, #393c41)" }}
-      >
+      <div className="relative mb-7">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/60">
+          <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
             {companyName}
           </span>
           <span className="h-3 w-3 rounded-full bg-brand shadow-[0_0_12px_2px] shadow-brand/50" />
         </div>
-        <div className="mt-10 flex items-end justify-between">
-          <div>
-            <div className="text-5xl leading-none">🚗⚡</div>
-            <div className="mt-3 text-2xl font-semibold tracking-tight">
-              {car.model} {car.trim}
-            </div>
-            <div className="text-sm text-white/60">
-              {car.year} · {car.color}
-            </div>
+        <VehicleArtwork
+          model={car.model}
+          color={car.color}
+          trim={car.trim}
+          year={car.year}
+          eager
+          className="mt-2 h-60"
+        />
+        <div className="mt-1">
+          <div className="text-2xl font-semibold tracking-tight text-ink">
+            {car.model} {car.trim}
+          </div>
+          <div className="text-sm text-muted">
+            {car.year} · {car.color}
           </div>
         </div>
       </div>

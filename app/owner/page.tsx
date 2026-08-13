@@ -30,6 +30,7 @@ import {
 import { MiniBarChart } from "@/components/owner/charts";
 import { Button, Card } from "@/components/ui";
 import { IconBolt, IconChevronRight } from "@/components/icons";
+import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { DriverStatus } from "@/lib/owner/types";
 
 // Stable pre-hydration fallback so SSR markup matches the first client paint —
@@ -79,6 +80,7 @@ export default function OwnerOverviewPage() {
     .slice(0, 4);
 
   const recentTrips = trips.slice().sort((a, b) => b.startAt - a.startAt).slice(0, 4);
+  const activeVehicles = vehicles.filter((vehicle) => vehicle.status === "active");
 
   const completedTrips = trips.filter((t) => t.status === "completed");
   const energyChartData = completedTrips
@@ -146,6 +148,49 @@ export default function OwnerOverviewPage() {
           value={stats.tripCounts.active + stats.tripCounts.upcoming}
         />
       </section>
+
+      {activeVehicles.length > 0 && (
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-ink">Your vehicles</h2>
+            <Link
+              href="/owner/vehicles"
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-ink"
+            >
+              Manage fleet
+              <IconChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {activeVehicles.slice(0, 2).map((vehicle) => (
+              <Link key={vehicle.id} href={`/owner/vehicles/${vehicle.id}`}>
+                <Card className="overflow-hidden transition-colors hover:bg-surface">
+                  <VehicleArtwork
+                    model={vehicle.model}
+                    color={vehicle.color}
+                    trim={vehicle.trim}
+                    wheelType={vehicle.wheelType}
+                    year={vehicle.year}
+                    media={vehicle.media}
+                    className="h-32 rounded-none border-0"
+                  />
+                  <div className="flex items-center justify-between gap-3 p-3.5">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-ink">
+                        {vehicle.displayName}
+                      </div>
+                      <div className="truncate text-xs text-muted">
+                        {[vehicle.year, vehicle.trim, vehicle.color].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+                    <IconChevronRight className="h-4 w-4 shrink-0 text-muted" />
+                  </div>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <div className="mb-3 flex items-center justify-between">

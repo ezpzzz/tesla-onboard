@@ -10,6 +10,7 @@
 
 import type { ExperienceLevel } from "@/lib/tesla";
 import type { ProgressSummary } from "@/lib/flow";
+import type { VehicleMedia } from "@/lib/vehicle-media";
 
 export type TripStatus = "upcoming" | "active" | "completed";
 
@@ -29,6 +30,11 @@ export interface Vehicle {
   vin: string | null;
   returnChargeLevelPct: number | null; // null = fall back to global policy
   notes: string;
+  /** Optional Tesla configuration imported during the one-shot owner connect. */
+  wheelType?: string | null;
+  teslaSpecSource?: "fleet-api" | null;
+  /** First-party artwork; recomputed from imported configuration when possible. */
+  media?: VehicleMedia | null;
   // Dedupe key from the Tesla side (vin, or the Tesla vehicle id when no vin
   // is available) for the vehicle this record was imported from. Optional/
   // nullable so pre-existing vehicles (manually added, or seeded) round-trip
