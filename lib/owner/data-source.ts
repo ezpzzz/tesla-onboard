@@ -1,10 +1,11 @@
 /**
- * Owner data source seam — mock now, live Fleet API later.
+ * Owner data source seam — intentionally empty until a persistent bookings
+ * backend is connected.
  *
- * This module is v1's only implementation: a mock source over the literal
- * fixtures in `mock-data.ts`. It exists as its own file (instead of importing
- * mock-data directly from `use-owner-data.ts`) so a future live adapter has a
- * single place to slot in behind the same `OwnerDataSource` interface.
+ * Production must never manufacture drivers, trips, charging sessions, or
+ * vehicles. The local vehicle roster is layered in by `use-owner-data.ts`;
+ * this source represents only data that will eventually come from a trusted
+ * host backend.
  *
  * Notes for building that live adapter, verified against Tesla Fleet API docs:
  *
@@ -31,37 +32,38 @@
  *     `/api/1/dx/charging/sessions` endpoint (kWh/cost broken out per
  *     session, no PDF parsing needed) is business-fleet-account only — out of
  *     reach for an individual host, so the invoice-PDF path is the real one.
- *   - Whatever replaces `MockOwnerDataSource` should CACHE reads (e.g. next
+ *   - Whatever replaces `EmptyOwnerDataSource` should CACHE reads (e.g. next
  *     to the profile cookie pattern in lib/tesla-server.ts) and serve the
  *     dashboard from that cache — never poll Tesla per page view.
  */
 
-import {
-  MOCK_CHARGING_SESSIONS,
-  MOCK_DRIVERS,
-  MOCK_TRIPS,
-  MOCK_VEHICLE_SEED,
-} from "./mock-data";
 import type { OwnerDataSource, OwnerSnapshot } from "./types";
 
-export class MockOwnerDataSource implements OwnerDataSource {
+export const EMPTY_OWNER_SNAPSHOT: OwnerSnapshot = {
+  drivers: [],
+  trips: [],
+  chargingSessions: [],
+  vehicles: [],
+};
+
+export class EmptyOwnerDataSource implements OwnerDataSource {
   async getSnapshot(): Promise<OwnerSnapshot> {
     return {
-      drivers: MOCK_DRIVERS,
-      trips: MOCK_TRIPS,
-      chargingSessions: MOCK_CHARGING_SESSIONS,
-      vehicles: [MOCK_VEHICLE_SEED],
+      drivers: [],
+      trips: [],
+      chargingSessions: [],
+      vehicles: [],
     };
   }
 }
 
-const mockSource = new MockOwnerDataSource();
+const emptySource = new EmptyOwnerDataSource();
 
 /**
- * The active data source. NO env switch in v1, deliberately: an env mode
- * whose only live behavior is throwing "not implemented" is worse than no
- * mode at all. Swap this function's body when a live adapter exists.
+ * The active data source. Swap this function's body when a live bookings and
+ * charging adapter exists; until then, honest empty states are safer than
+ * placeholder records that look like real customer activity.
  */
 export function getOwnerDataSource(): OwnerDataSource {
-  return mockSource;
+  return emptySource;
 }

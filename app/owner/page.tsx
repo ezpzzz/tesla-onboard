@@ -233,7 +233,9 @@ export default function OwnerOverviewPage() {
           </Link>
         </div>
         {needsAttention.length === 0 ? (
-          <Card className="p-4 text-sm text-muted">Every driver is on track or ready.</Card>
+          <Card className="p-4 text-sm text-muted">
+            {drivers.length === 0 ? "No drivers yet." : "Every driver is on track or ready."}
+          </Card>
         ) : (
           <ul className="space-y-2">
             {needsAttention.map(({ driver, status }) => (

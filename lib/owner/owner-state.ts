@@ -41,12 +41,29 @@ export const initialOwnerState: OwnerState = {
   tripChecklists: {},
 };
 
+const LEGACY_MOCK_TRIP_IDS = new Set(
+  Array.from({ length: 11 }, (_, index) => `trip-${String(index + 1).padStart(2, "0")}`),
+);
+
+export function removeLegacyMockTripChecklists(state: OwnerState): OwnerState {
+  const tripChecklists = Object.fromEntries(
+    Object.entries(state.tripChecklists).filter(([tripId]) => !LEGACY_MOCK_TRIP_IDS.has(tripId)),
+  );
+  if (Object.keys(tripChecklists).length === Object.keys(state.tripChecklists).length) return state;
+  return { ...state, tripChecklists };
+}
+
 export function loadOwnerState(): OwnerState {
   if (typeof window === "undefined") return initialOwnerState;
   try {
     const raw = window.localStorage.getItem(OWNER_KEY);
     if (!raw) return initialOwnerState;
-    return { ...initialOwnerState, ...JSON.parse(raw) };
+    const parsed = { ...initialOwnerState, ...JSON.parse(raw) } as OwnerState;
+    const migrated = removeLegacyMockTripChecklists(parsed);
+    if (migrated !== parsed) {
+      window.localStorage.setItem(OWNER_KEY, JSON.stringify(migrated));
+    }
+    return migrated;
   } catch {
     return initialOwnerState;
   }

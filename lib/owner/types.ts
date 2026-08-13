@@ -1,8 +1,8 @@
 /**
  * Owner-dashboard domain types.
  *
- * These describe the host's view of the fleet: drivers (guests, mock or the
- * real browser-local guest), trips, charging sessions, and the alerts derived
+ * These describe the host's view of the fleet: real browser-local guests,
+ * trips, charging sessions, vehicles, and the alerts derived
  * from them. Nothing here talks to a data source directly — see
  * `data-source.ts` for the fetch seam and `derive.ts` / `alerts.ts` for the
  * pure functions that turn a snapshot into what the UI renders.
@@ -74,15 +74,15 @@ export interface VehicleStats {
 }
 
 export interface Driver {
-  id: string; // mock rows "drv-01".."drv-08"; the real browser-local guest is ALWAYS "guest-local"
+  id: string; // the browser-local guest is always "guest-local"
   name: string;
   email: string;
-  source: "mock" | "guest-local";
+  source: "live" | "guest-local";
   progress: ProgressSummary | null; // null = never opened onboarding
 }
 
 export interface ChargingSession {
-  id: string; // "chg-01"..
+  id: string;
   tripId: string;
   startedAt: number;
   endedAt: number;
@@ -93,12 +93,12 @@ export interface ChargingSession {
 }
 
 export interface Trip {
-  id: string; // "trip-01".."trip-11"
-  driverId: string | null; // null = unassigned; trip-11 MUST be seeded unassigned + upcoming (reserved for the ?trip= demo link)
-  vehicleId: string; // "veh-01".. — which vehicle this trip was/is on
+  id: string;
+  driverId: string | null;
+  vehicleId: string;
   status: TripStatus;
   startAt: number;
-  endAt: number; // absolute epoch ms literals in mock data
+  endAt: number;
   odometerStartMi: number | null; // float, mirrors Fleet API vehicle_state.odometer; null for upcoming
   odometerEndMi: number | null; // null until completed
   batteryStartPct: number | null; // int, mirrors charge_state.battery_level

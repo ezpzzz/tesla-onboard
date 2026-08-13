@@ -7,16 +7,14 @@
  * access), but keyed separately so it never collides with `rtr:owner:v1` or
  * the guest's `rtr:state:v1`.
  *
- * Seed-once: the very first load (no key in storage yet) seeds a single
- * "veh-01" from `hostConfig.car` so a fresh install always has at least one
- * vehicle to attach trips to. Every field of that seed is deterministic (no
- * Date.now()) so server-rendered and first-client-paint fixtures elsewhere
- * (see mock-data.ts's MOCK_VEHICLE_SEED) can byte-match it.
+ * Fresh stores start empty. Vehicles enter the roster only through a real
+ * Tesla import or an explicit manual add. The load migration removes the old
+ * deterministic listing seed and the former mock-Tesla persona import while
+ * preserving every real, imported, or owner-edited vehicle.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import type { Vehicle, VehicleInput } from "./types";
-import { buildSeedVehicle } from "./vehicle-seed";
 
 export const VEHICLE_KEY = "rtr:vehicles:v1";
 
@@ -38,44 +36,44 @@ function notifyVehicleStateChange(): void {
   listeners.forEach((listener) => listener());
 }
 
-function seedState(): VehicleState {
-  const veh = buildSeedVehicle();
-  return { version: 1, vehicles: { [veh.id]: veh } };
+const LEGACY_MOCK_SEED_EPOCH = Date.UTC(2026, 0, 1);
+
+function isLegacyMockVehicle(vehicle: Vehicle): boolean {
+  // The former listing seed was the only record created with this fixed pair
+  // of timestamps. Any owner edit updates `updatedAt`, so edited records stay.
+  const isUntouchedListingSeed = vehicle.id === "veh-01"
+    && vehicle.createdAt === LEGACY_MOCK_SEED_EPOCH
+    && vehicle.updatedAt === LEGACY_MOCK_SEED_EPOCH
+    && vehicle.vin === null
+    && !vehicle.teslaImportKey;
+
+  // The former Tesla owner persona used the non-numeric synthetic id `v1`.
+  // Real Fleet API vehicle ids are not this fixture key, so removing it does
+  // not touch a genuine Tesla import even if other presentation fields changed.
+  const isMockTeslaPersonaImport = vehicle.teslaImportKey === "v1";
+
+  return isUntouchedListingSeed || isMockTeslaPersonaImport;
 }
 
-function migrateSeedPresentation(state: VehicleState): VehicleState {
-  const seed = buildSeedVehicle();
-  const existing = state.vehicles[seed.id];
-  const isOriginalSeed = !!existing
-    && existing.createdAt === seed.createdAt
-    && existing.vin === null
-    && !existing.teslaImportKey
-    && existing.model === seed.model
-    && existing.trim === seed.trim
-    && existing.year === seed.year
-    && existing.color === seed.color;
-  if (!isOriginalSeed || !existing) return state;
-  if (Object.prototype.hasOwnProperty.call(existing, "interior")) return state;
-  return {
-    ...state,
-    vehicles: {
-      ...state.vehicles,
-      [seed.id]: {
-        ...existing,
-        interior: seed.interior,
-        teslaInteriorCode: seed.teslaInteriorCode,
-        teslaPaintCode: seed.teslaPaintCode,
-      },
-    },
-  };
+export function removeLegacyMockVehicles(state: VehicleState): VehicleState {
+  const vehicles = Object.fromEntries(
+    Object.entries(state.vehicles).filter(([, vehicle]) => !isLegacyMockVehicle(vehicle)),
+  );
+  if (Object.keys(vehicles).length === Object.keys(state.vehicles).length) return state;
+  return { ...state, vehicles };
 }
 
 export function loadVehicleState(): VehicleState {
   if (typeof window === "undefined") return initialVehicleState;
   try {
     const raw = window.localStorage.getItem(VEHICLE_KEY);
-    if (!raw) return seedState();
-    return migrateSeedPresentation({ ...initialVehicleState, ...JSON.parse(raw) });
+    if (!raw) return initialVehicleState;
+    const parsed = { ...initialVehicleState, ...JSON.parse(raw) } as VehicleState;
+    const migrated = removeLegacyMockVehicles(parsed);
+    if (migrated !== parsed) {
+      window.localStorage.setItem(VEHICLE_KEY, JSON.stringify(migrated));
+    }
+    return migrated;
   } catch {
     return initialVehicleState;
   }

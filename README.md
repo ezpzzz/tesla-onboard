@@ -61,8 +61,9 @@ onboarding progress in one place, separate from the guest flow. It shows:
 - **Live onboarding progress** — if a guest opened their onboarding link in the
   same browser, the matching trip shows their real-time progress (path chosen,
   modules completed, readiness score) as they move through the flow.
-- **Charging sessions**, driver history, and alerts, all derived from the same
-  mock snapshot.
+- **Charging sessions**, driver history, and alerts, ready for a persistent
+  bookings/charging adapter; until one is connected these surfaces render
+  explicit empty states rather than sample activity.
 - **Vehicle management** — add, edit, and archive the cars on the account, with
   a single policy-percentage calculation shared everywhere it's shown. Archived
   vehicles are hidden, not deleted, so past trips and drivers stay intact.
@@ -80,15 +81,15 @@ onboarding progress in one place, separate from the guest flow. It shows:
   separately from everything else so starting over never touches your
   vehicle list.
 
-It ships **mock-first**: `lib/owner/mock-data.ts` has literal fixture data, so
-the dashboard works with zero setup. Open <http://localhost:3000/owner> after
-`pnpm dev`.
+It ships without sample owner records. A fresh owner account starts with no
+drivers, trips, charging sessions, or vehicles; real or manually entered
+vehicles appear after Tesla import or manual add. The temporary data-source
+seam in `lib/owner/data-source.ts` returns empty collections until a persistent
+bookings/charging backend replaces it.
 
-To see the live-progress feature, open the guest flow with a trip id attached —
-e.g. <http://localhost:3000/?trip=trip-11> — walk through a few steps, then
-check that trip's page under `/owner/trips/trip-11` in another tab. This only
-works within the same browser (there's no server sync yet); see
-[`lib/progress-bridge.ts`](lib/progress-bridge.ts) for how it works.
+The browser-local guest-progress bridge remains available for real progress
+created in the same browser, but it never invents a booking or fixture trip.
+See [`lib/progress-bridge.ts`](lib/progress-bridge.ts) for that boundary.
 
 ### Owner login (Supabase Auth)
 
@@ -317,7 +318,7 @@ lib/
   flow.ts                 Adaptive step machine (which steps, in what order)
   history-nav.ts          Mirrors steps into the browser History API (Back/Forward)
   store.ts                localStorage-backed onboarding state
-  owner/                  Owner-side data: types, mock-data, data-source, derive, alerts,
+  owner/                  Owner-side data: types, empty data-source seam, derive, alerts,
                            owner-state.ts (rtr:owner:v1), vehicle-state.ts (rtr:vehicles:v1)
 components/
   OnboardingApp.tsx       Controller: flow + navigation
