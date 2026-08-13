@@ -8,13 +8,19 @@
  * Math.random(), no relative-time math — every timestamp is an explicit
  * Date.UTC(...) call with literal arguments).
  *
- * Anchor era: mid-August 2026, one Model Y, one continuous odometer/battery
- * history across the 6 completed trips + the 1 active trip. Module ids and
- * checklist ids are the real ones from lib/content.ts (MODULES / CHECKLIST) —
- * do not invent new ones here.
+ * Anchor era: mid-August 2026, one car (hostConfig.car — Model 3 Performance),
+ * one continuous odometer/battery history across the 6 completed trips + the
+ * 1 active trip. Module ids and checklist ids are the real ones from
+ * lib/content.ts (MODULES / CHECKLIST) — do not invent new ones here.
  */
 
-import type { ChargingSession, Driver, Trip } from "./types";
+import type { ChargingSession, Driver, Trip, Vehicle } from "./types";
+import { seedVehicle } from "./vehicle-state";
+
+/** Identical field values to vehicle-state.ts's store-seeded veh-01 (same
+ * hostConfig.car source, same SEED_EPOCH) so the mock snapshot and a freshly
+ * seeded VehicleState never disagree about vehicle-01's identity. */
+export const MOCK_VEHICLE_SEED: Vehicle = seedVehicle();
 
 const ts = (y: number, m: number, d: number, h = 0, min = 0) => Date.UTC(y, m - 1, d, h, min);
 
@@ -239,6 +245,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-01",
     driverId: "drv-01",
+    vehicleId: "veh-01",
     status: "completed",
     startAt: ts(2026, 6, 3, 10, 0),
     endAt: ts(2026, 6, 6, 17, 0),
@@ -251,6 +258,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-02",
     driverId: "drv-05",
+    vehicleId: "veh-01",
     status: "completed",
     startAt: ts(2026, 6, 15, 9, 30),
     endAt: ts(2026, 6, 17, 16, 0),
@@ -263,6 +271,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-03",
     driverId: "drv-02",
+    vehicleId: "veh-01",
     status: "completed",
     startAt: ts(2026, 6, 28, 11, 0),
     endAt: ts(2026, 7, 2, 18, 30),
@@ -275,6 +284,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-04",
     driverId: "drv-06",
+    vehicleId: "veh-01",
     status: "completed",
     startAt: ts(2026, 7, 10, 8, 45),
     endAt: ts(2026, 7, 12, 15, 0),
@@ -287,6 +297,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-05",
     driverId: "drv-01",
+    vehicleId: "veh-01",
     status: "completed",
     startAt: ts(2026, 7, 22, 10, 15),
     endAt: ts(2026, 7, 25, 17, 30),
@@ -299,6 +310,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-06",
     driverId: "drv-05",
+    vehicleId: "veh-01",
     status: "completed",
     startAt: ts(2026, 8, 1, 9, 0),
     endAt: ts(2026, 8, 4, 16, 15),
@@ -311,6 +323,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-07",
     driverId: "drv-02",
+    vehicleId: "veh-01",
     status: "active",
     startAt: ts(2026, 8, 10, 9, 0),
     endAt: ts(2026, 8, 14, 17, 0),
@@ -323,6 +336,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-08",
     driverId: "drv-03",
+    vehicleId: "veh-01",
     status: "upcoming",
     startAt: ts(2026, 8, 13, 9, 0),
     endAt: ts(2026, 8, 16, 17, 0),
@@ -335,6 +349,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-09",
     driverId: "drv-06",
+    vehicleId: "veh-01",
     status: "upcoming",
     startAt: ts(2026, 8, 13, 6, 0),
     endAt: ts(2026, 8, 15, 12, 0),
@@ -347,6 +362,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-10",
     driverId: "drv-04",
+    vehicleId: "veh-01",
     status: "upcoming",
     startAt: ts(2026, 8, 18, 10, 0),
     endAt: ts(2026, 8, 21, 17, 0),
@@ -359,6 +375,7 @@ export const MOCK_TRIPS: Trip[] = [
   {
     id: "trip-11",
     driverId: null, // unassigned — reserved for the ?trip= demo link
+    vehicleId: "veh-01",
     status: "upcoming",
     startAt: ts(2026, 8, 20, 10, 0),
     endAt: ts(2026, 8, 23, 17, 0),

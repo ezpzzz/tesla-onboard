@@ -63,6 +63,9 @@ onboarding progress in one place, separate from the guest flow. It shows:
   modules completed, readiness score) as they move through the flow.
 - **Charging sessions**, driver history, and alerts, all derived from the same
   mock snapshot.
+- **Vehicle management** — add, edit, and archive the cars on the account, with
+  a single policy-percentage calculation shared everywhere it's shown. Archived
+  vehicles are hidden, not deleted, so past trips and drivers stay intact.
 
 It ships **mock-first**: `lib/owner/mock-data.ts` has literal fixture data, so
 the dashboard works with zero setup. Open <http://localhost:3000/owner> after
@@ -189,12 +192,11 @@ Tutorial copy and the readiness checklist live in
 
 ### Official Tesla videos only
 
-Modules embed videos **exclusively from Tesla's own YouTube channels** —
-[`@tesla`](https://www.youtube.com/@tesla) and
-[`@tesla_tutorials`](https://www.youtube.com/@tesla_tutorials) (Tesla's dedicated
-tutorial channel, the same source Tesla embeds on its support pages). Every id was
-verified via YouTube's oEmbed endpoint to confirm the uploader is one of those two
-channels before being added — no third-party or aggregator videos. A module either
+Modules embed videos **exclusively from Tesla's own YouTube channel**,
+[`@tesla`](https://www.youtube.com/@tesla). Every id was verified via YouTube's
+oEmbed endpoint to confirm `author_name == "Tesla"` before being added — no
+third-party or aggregator videos. (`@tesla_tutorials` / "Tesla Tutorials" is a
+third-party fan channel despite the name and does not qualify.) A module either
 has a verified official video or shows none (there is no link-card fallback, so no
 dead links).
 
@@ -202,16 +204,13 @@ Currently embedded:
 
 | Module | Official video | Channel |
 | --- | --- | --- |
-| Getting in | Access \| Model 3 Essentials | `@tesla_tutorials` |
 | Start & drive | Your Tesla can shift directions for you | `@tesla` |
-| The touchscreen | Driver Controls \| Model 3 Essentials | `@tesla_tutorials` |
 | Full Self-Driving | Full Self-Driving (Supervised) | `@tesla` |
-| How charging works / Charging this rental | Supercharging | `@tesla_tutorials` |
 
 To add or change one, verify it's official first, then set `youtubeId`:
 
 ```bash
-# Confirm author_url is youtube.com/@tesla or @tesla_tutorials before trusting an id:
+# Confirm author_name is "Tesla" before trusting an id:
 curl -s "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=<ID>" | jq '.author_name, .author_url'
 ```
 ```ts

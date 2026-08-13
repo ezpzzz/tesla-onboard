@@ -15,6 +15,35 @@ export type TripStatus = "upcoming" | "active" | "completed";
 
 export type DriverStatus = "not-started" | "in-progress" | "ready" | "stalled";
 
+export type VehicleStatus = "active" | "archived";
+
+export interface Vehicle {
+  id: string; // "veh-01", "veh-02", ... zero-padded sequential
+  displayName: string;
+  model: string;
+  trim: string;
+  year: number;
+  color: string;
+  shifter: "stalk" | "screen";
+  licensePlate: string | null;
+  vin: string | null;
+  returnChargeLevelPct: number | null; // null = fall back to global policy
+  notes: string;
+  status: VehicleStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type VehicleInput = Omit<Vehicle, "id" | "status" | "createdAt" | "updatedAt">;
+
+export interface VehicleStats {
+  vehicleId: string;
+  tripCount: number;
+  milesRented: number;
+  energyCostUsd: number;
+  avgReturnChargePct: number | null;
+}
+
 export interface Driver {
   id: string; // mock rows "drv-01".."drv-08"; the real browser-local guest is ALWAYS "guest-local"
   name: string;
@@ -37,6 +66,7 @@ export interface ChargingSession {
 export interface Trip {
   id: string; // "trip-01".."trip-11"
   driverId: string | null; // null = unassigned; trip-11 MUST be seeded unassigned + upcoming (reserved for the ?trip= demo link)
+  vehicleId: string; // "veh-01".. — which vehicle this trip was/is on
   status: TripStatus;
   startAt: number;
   endAt: number; // absolute epoch ms literals in mock data
@@ -77,6 +107,7 @@ export interface OwnerSnapshot {
   drivers: Driver[];
   trips: Trip[];
   chargingSessions: ChargingSession[];
+  vehicles: Vehicle[];
 }
 
 export interface OwnerDataSource {

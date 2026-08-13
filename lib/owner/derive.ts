@@ -14,6 +14,8 @@ import type {
   OwnerSnapshot,
   Trip,
   TripStatus,
+  Vehicle,
+  VehicleStats,
 } from "./types";
 import type { OwnerState } from "./owner-state";
 
@@ -59,6 +61,15 @@ export function parseReturnPolicyPct(text: string): number {
   return match ? parseInt(match[0], 10) : 80;
 }
 
+/** A vehicle's own return-charge override, falling back to the fleet-wide
+ * policy when it has none set. */
+export function resolveVehiclePolicyPct(
+  vehicle: Vehicle | null | undefined,
+  globalPolicyPct: number
+): number {
+  return vehicle?.returnChargeLevelPct ?? globalPolicyPct;
+}
+
 export function fleetStats(snapshot: OwnerSnapshot, policyPct: number): FleetStats {
   const tripCounts: Record<TripStatus, number> = { upcoming: 0, active: 0, completed: 0 };
   let totalMilesRented = 0;
@@ -82,7 +93,9 @@ export function fleetStats(snapshot: OwnerSnapshot, policyPct: number): FleetSta
     if (trip.status === "completed" && trip.batteryEndPct !== null) {
       returnChargeSum += trip.batteryEndPct;
       returnChargeCount += 1;
-      if (trip.batteryEndPct < policyPct) tripsBelowPolicy += 1;
+      const vehicle = snapshot.vehicles.find((v) => v.id === trip.vehicleId);
+      const effectivePolicyPct = resolveVehiclePolicyPct(vehicle, policyPct);
+      if (trip.batteryEndPct < effectivePolicyPct) tripsBelowPolicy += 1;
     }
   }
 
@@ -93,6 +106,40 @@ export function fleetStats(snapshot: OwnerSnapshot, policyPct: number): FleetSta
     avgReturnChargePct: returnChargeCount > 0 ? returnChargeSum / returnChargeCount : null,
     tripsBelowPolicy,
     tripCounts,
+  };
+}
+
+/** Per-vehicle rollup — same building blocks as fleetStats (tripMiles,
+ * sessionsForTrip, tripEnergy), scoped to one vehicle's trips. */
+export function vehicleStats(
+  vehicleId: string,
+  trips: Trip[],
+  sessions: ChargingSession[]
+): VehicleStats {
+  const vehicleTrips = trips.filter((t) => t.vehicleId === vehicleId);
+  let milesRented = 0;
+  let energyCostUsd = 0;
+  let returnChargeSum = 0;
+  let returnChargeCount = 0;
+
+  for (const trip of vehicleTrips) {
+    const miles = tripMiles(trip);
+    if (miles !== null) milesRented += miles;
+
+    energyCostUsd += tripEnergy(sessionsForTrip(sessions, trip.id)).costUsd;
+
+    if (trip.status === "completed" && trip.batteryEndPct !== null) {
+      returnChargeSum += trip.batteryEndPct;
+      returnChargeCount += 1;
+    }
+  }
+
+  return {
+    vehicleId,
+    tripCount: vehicleTrips.length,
+    milesRented,
+    energyCostUsd,
+    avgReturnChargePct: returnChargeCount > 0 ? returnChargeSum / returnChargeCount : null,
   };
 }
 

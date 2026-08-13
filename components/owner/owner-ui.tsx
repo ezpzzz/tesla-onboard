@@ -18,6 +18,7 @@ import type {
   OwnerAlert,
   Trip,
   TripStatus,
+  Vehicle,
 } from "@/lib/owner/types";
 import {
   emptyTripChecklist,
@@ -30,6 +31,7 @@ import {
   formatPct,
   formatUsd,
   ownerChecklistScore,
+  resolveVehiclePolicyPct,
   sessionsForTrip,
   tripEnergy,
   tripMiles,
@@ -49,7 +51,7 @@ const MONTHS = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-function formatDate(ms: number): string {
+export function formatDate(ms: number): string {
   const d = new Date(ms);
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
@@ -120,6 +122,27 @@ const tripStatusMeta: Record<
 export function TripStatusBadge({ status }: { status: TripStatus }) {
   const meta = tripStatusMeta[status];
   return <Badge tone={meta.tone}>{meta.label}</Badge>;
+}
+
+/* ── Vehicle chip ──────────────────────────────────────────────────────────
+ * A small linked label used anywhere a row needs to name its vehicle (trip
+ * rows, trip detail headers). Renders plain text — no link — when the
+ * vehicle can't be resolved, and flags archived vehicles inline so a host
+ * scanning a trip list isn't surprised by a vehicle that's no longer active. */
+
+export function VehicleChip({ vehicle }: { vehicle: Vehicle | null }) {
+  if (!vehicle) {
+    return <span className="text-muted">Unknown vehicle</span>;
+  }
+  return (
+    <Link
+      href={`/owner/vehicles/${vehicle.id}`}
+      className="inline-flex min-h-[28px] items-center gap-1.5 text-ink-soft hover:text-brand"
+    >
+      <span className="truncate">{vehicle.displayName}</span>
+      {vehicle.status === "archived" && <Badge tone="neutral">Archived</Badge>}
+    </Link>
+  );
 }
 
 /* ── Empty state ───────────────────────────────────────────────────────── */
@@ -363,6 +386,7 @@ export function DriverTable({
 interface TripRowModel {
   trip: Trip;
   driver: Driver | null;
+  vehicle: Vehicle | null;
   miles: number | null;
   energyCostUsd: number;
   batteryEndPct: number | null;
@@ -373,17 +397,21 @@ interface TripRowModel {
 function buildTripRows(
   trips: Trip[],
   drivers: Driver[],
+  vehicles: Vehicle[],
   sessions: ChargingSession[],
   ownerState: OwnerState,
   policyPct: number,
 ): TripRowModel[] {
   return trips.map((trip) => {
     const driver = drivers.find((d) => d.id === trip.driverId) ?? null;
+    const vehicle = vehicles.find((v) => v.id === trip.vehicleId) ?? null;
     const energy = tripEnergy(sessionsForTrip(sessions, trip.id));
-    const belowPolicy = trip.batteryEndPct !== null && trip.batteryEndPct < policyPct;
+    const effectivePolicyPct = resolveVehiclePolicyPct(vehicle, policyPct);
+    const belowPolicy = trip.batteryEndPct !== null && trip.batteryEndPct < effectivePolicyPct;
     return {
       trip,
       driver,
+      vehicle,
       miles: tripMiles(trip),
       energyCostUsd: energy.costUsd,
       batteryEndPct: trip.batteryEndPct,
@@ -406,17 +434,19 @@ function BatteryChip({ row }: { row: TripRowModel }) {
 export function TripTable({
   trips,
   drivers,
+  vehicles,
   chargingSessions,
   ownerState,
   policyPct,
 }: {
   trips: Trip[];
   drivers: Driver[];
+  vehicles: Vehicle[];
   chargingSessions: ChargingSession[];
   ownerState: OwnerState;
   policyPct: number;
 }) {
-  const rows = buildTripRows(trips, drivers, chargingSessions, ownerState, policyPct);
+  const rows = buildTripRows(trips, drivers, vehicles, chargingSessions, ownerState, policyPct);
 
   if (rows.length === 0) {
     return <EmptyState title="No trips yet." />;
@@ -425,11 +455,12 @@ export function TripTable({
   return (
     <>
       <div className="hidden overflow-x-auto rounded-2xl border border-line bg-white md:block">
-        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[860px] border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
               <th scope="col" className="px-4 py-3 font-medium">Dates</th>
               <th scope="col" className="px-4 py-3 font-medium">Driver</th>
+              <th scope="col" className="px-4 py-3 font-medium">Vehicle</th>
               <th scope="col" className="px-4 py-3 font-medium">Status</th>
               <th scope="col" className="px-4 py-3 font-medium">Miles</th>
               <th scope="col" className="px-4 py-3 font-medium">Energy cost</th>
@@ -464,6 +495,9 @@ export function TripTable({
                   )}
                 </td>
                 <td className="px-4 py-3">
+                  <VehicleChip vehicle={row.vehicle} />
+                </td>
+                <td className="px-4 py-3">
                   <TripStatusBadge status={row.trip.status} />
                 </td>
                 <td className="px-4 py-3 text-ink-soft">
@@ -494,6 +528,15 @@ export function TripTable({
               </div>
               <div className="mt-1.5 text-sm text-muted">
                 {row.driver ? row.driver.name || "Unnamed guest" : "Unassigned"}
+              </div>
+              {/* Plain text, not <VehicleChip> — this card is already one big
+                  <Link> to the trip, and nesting an anchor inside an anchor
+                  is invalid HTML (see DriverTable's linkedTrip chip above). */}
+              <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted">
+                <span className="truncate">
+                  {row.vehicle ? row.vehicle.displayName : "Unknown vehicle"}
+                </span>
+                {row.vehicle?.status === "archived" && <Badge tone="neutral">Archived</Badge>}
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted">
                 <span>{row.miles === null ? "—" : `${Math.round(row.miles)} mi`}</span>

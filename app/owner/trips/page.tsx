@@ -24,14 +24,31 @@ const FILTERS: { value: Filter; label: string }[] = [
 ];
 
 export default function TripsPage() {
-  const { trips, drivers, chargingSessions, policyPct, hydrated } = useOwnerData();
+  const { trips, drivers, vehicles, chargingSessions, policyPct, hydrated } = useOwnerData();
   const { state: ownerState } = useOwnerState();
   const [filter, setFilter] = useState<Filter>("all");
+  const [vehicleFilter, setVehicleFilter] = useState<string>("all");
 
-  const filtered = useMemo(
-    () => (filter === "all" ? trips : trips.filter((t) => t.status === filter)),
-    [trips, filter],
+  const activeVehicles = useMemo(
+    () => vehicles.filter((v) => v.status === "active"),
+    [vehicles],
   );
+
+  const vehicleFilterOptions = useMemo(
+    () => [
+      { value: "all", label: "All vehicles" },
+      ...activeVehicles.map((v) => ({ value: v.id, label: v.displayName })),
+    ],
+    [activeVehicles],
+  );
+
+  const filtered = useMemo(() => {
+    let list = filter === "all" ? trips : trips.filter((t) => t.status === filter);
+    if (vehicleFilter !== "all") {
+      list = list.filter((t) => t.vehicleId === vehicleFilter);
+    }
+    return list;
+  }, [trips, filter, vehicleFilter]);
 
   return (
     <div className="space-y-5">
@@ -44,12 +61,21 @@ export default function TripsPage() {
 
       <Segmented options={FILTERS} value={filter} onChange={setFilter} />
 
+      {activeVehicles.length > 1 && (
+        <Segmented
+          options={vehicleFilterOptions}
+          value={vehicleFilter}
+          onChange={setVehicleFilter}
+        />
+      )}
+
       {!hydrated ? (
         <Card className="p-6 text-center text-sm text-muted">Loading trips…</Card>
       ) : (
         <TripTable
           trips={filtered}
           drivers={drivers}
+          vehicles={vehicles}
           chargingSessions={chargingSessions}
           ownerState={ownerState}
           policyPct={policyPct}

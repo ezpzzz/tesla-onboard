@@ -24,10 +24,11 @@ export interface ModuleVideo {
   title: string;
   /**
    * Official Tesla YouTube video id — VERIFIED OFFICIAL ONLY.
-   * Every id here was checked via YouTube oEmbed to confirm the uploader is an
-   * official Tesla channel: author_url is youtube.com/@tesla OR
-   * youtube.com/@tesla_tutorials (Tesla's dedicated tutorial channel, the source
-   * Tesla embeds on its own support pages). No other third-party / aggregator videos.
+   * Every id here was checked via YouTube oEmbed to confirm the uploader is
+   * Tesla's own channel: author_name "Tesla", author_url youtube.com/@tesla.
+   * No other channel qualifies — "Tesla Tutorials" (@tesla_tutorials) is a
+   * third-party fan channel, not Tesla, despite the name. No third-party /
+   * aggregator videos of any kind.
    */
   youtubeId: string;
 }
@@ -82,7 +83,6 @@ export const MODULES: Module[] = [
       },
     ],
     rentalNote: rental.keyAccess,
-    video: { title: "Model 3 Essentials: Access", youtubeId: "ya5iYfWqMN0" },
   },
   {
     id: "driving-basics",
@@ -145,7 +145,6 @@ export const MODULES: Module[] = [
           'Press the right scroll button on the wheel and just say it: "Set temperature to 70", "Navigate home", "Take me to a Supercharger".',
       },
     ],
-    video: { title: "Model 3 Essentials: Driver Controls", youtubeId: "HfeXzeA0s3Q" },
   },
   {
     id: "autopilot",
@@ -213,7 +212,6 @@ export const MODULES: Module[] = [
           "For day-to-day driving, keeping the battery roughly between 20% and 80% is healthiest and fastest. No need to charge to 100% unless you're heading on a long trip.",
       },
     ],
-    video: { title: "Supercharging Your Tesla", youtubeId: "WL6UWX26NaE" },
   },
   {
     id: "charging-this-car",
@@ -233,7 +231,6 @@ export const MODULES: Module[] = [
       },
     ],
     rentalNote: rental.chargeAccess,
-    video: { title: "Supercharging Your Tesla", youtubeId: "WL6UWX26NaE" },
   },
   {
     id: "house-rules",

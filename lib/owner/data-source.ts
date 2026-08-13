@@ -36,7 +36,12 @@
  *     dashboard from that cache — never poll Tesla per page view.
  */
 
-import { MOCK_CHARGING_SESSIONS, MOCK_DRIVERS, MOCK_TRIPS } from "./mock-data";
+import {
+  MOCK_CHARGING_SESSIONS,
+  MOCK_DRIVERS,
+  MOCK_TRIPS,
+  MOCK_VEHICLE_SEED,
+} from "./mock-data";
 import type { OwnerDataSource, OwnerSnapshot } from "./types";
 
 export class MockOwnerDataSource implements OwnerDataSource {
@@ -45,6 +50,7 @@ export class MockOwnerDataSource implements OwnerDataSource {
       drivers: MOCK_DRIVERS,
       trips: MOCK_TRIPS,
       chargingSessions: MOCK_CHARGING_SESSIONS,
+      vehicles: [MOCK_VEHICLE_SEED],
     };
   }
 }

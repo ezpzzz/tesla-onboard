@@ -71,6 +71,7 @@ A separate, host-facing surface living alongside the guest flow, not inside it �
   - `lib/supabase/{client,server,middleware}.ts` — the cookie plumbing (`updateSession` etc.) is copy-the-docs Supabase SSR boilerplate; don't hand-roll it. `middleware.ts`'s `redirectWithSession()` exists because a redirect built from scratch drops the refreshed-session cookies `updateSession()` queued, causing spurious logouts — every redirect after `updateSession()` must go through it.
   - Sign-out **must** call Supabase auth with `scope: 'local'`. This Supabase project is shared with the owner's other products (sophosic-platform) — `scope: 'global'` would revoke the user's sessions across those apps too.
   - **Never touch, on the shared project**: email templates, Site URL, or existing users. The only allowed dashboard action is adding this app's origin + `/login` under Authentication → URL Configuration → Redirect URLs. First-account provisioning is `scripts/owner-admin-create-user.mjs` (operator-only, shell-env `SUPABASE_SERVICE_ROLE_KEY`, never imported by app code, never in `.env.example`).
+- **Vehicles**: `rtr:vehicles:v1` localStorage store, seeded once from `hostConfig.car` on first load. `Vehicle` is a field on `OwnerSnapshot`. `resolveVehiclePolicyPct` is the single source of truth for policy percentage — nothing else computes it independently. Removal is archive-not-delete (vehicles are hidden, never destroyed, so trip/driver history stays intact). The guest-facing flow still reads `hostConfig.car` directly and does not consult the vehicle store — that drift between guest and owner sides is intentional, not a bug to fix.
 
 ### Host configuration & content are data, not code
 
@@ -79,10 +80,10 @@ A separate, host-facing surface living alongside the guest flow, not inside it �
 
 ### Official Tesla videos only (project rule)
 
-Module videos must come **exclusively from Tesla's official YouTube channels** — [`@tesla`](https://www.youtube.com/@tesla) and [`@tesla_tutorials`](https://www.youtube.com/@tesla_tutorials) (Tesla's own tutorial channel, the one tesla.com's support hub embeds). Every `youtubeId` must be verified via YouTube's oEmbed endpoint, accepting only `author_url` exactly `https://www.youtube.com/@tesla` or `https://www.youtube.com/@tesla_tutorials` — `author_name` alone is unreliable: the tutorial channel returns `"Tesla Tutorials"`, not `"Tesla"`. Prefer Highland-era (2024+ Model 3) footage; avoid the legacy 2017–2023 series. A module with no verified official video shows none (no link-card fallback, so no dead links).
+Module videos must come **exclusively from Tesla's official YouTube channel (@tesla)**. Every `youtubeId` must be verified via YouTube's oEmbed endpoint (`author_name == "Tesla"`, `author_url == "https://www.youtube.com/@tesla"`) before being added — no third-party/aggregator channels. Note: the channel `@tesla_tutorials` ("Tesla Tutorials") is **not** Tesla despite the name — it is a third-party fan channel and does not qualify. A module with no verified official video shows none (no link-card fallback, so no dead links).
 
 ```bash
-curl -s "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=<ID>" | jq .author_url
+curl -s "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=<ID>" | jq .author_name
 ```
 
 ## Conventions

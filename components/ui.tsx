@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import { hostConfig } from "@/lib/config";
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
@@ -12,6 +12,10 @@ type Variant = "primary" | "brand" | "secondary" | "ghost";
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   fullWidth?: boolean;
+  // React 19: function components accept `ref` as a plain prop, no
+  // forwardRef needed — declared here so callers (e.g. the vehicle archive
+  // confirm flow) can move focus programmatically after a swap.
+  ref?: Ref<HTMLButtonElement>;
 }
 
 const variants: Record<Variant, string> = {
@@ -147,6 +151,7 @@ export function Segmented<T extends string>({
       {options.map((o) => (
         <button
           key={o.value}
+          type="button"
           onClick={() => onChange(o.value)}
           className={cn(
             "flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors",

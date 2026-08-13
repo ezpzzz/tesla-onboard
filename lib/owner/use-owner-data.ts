@@ -10,8 +10,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getOwnerDataSource } from "./data-source";
-import { MOCK_CHARGING_SESSIONS, MOCK_DRIVERS, MOCK_TRIPS } from "./mock-data";
+import { MOCK_CHARGING_SESSIONS, MOCK_DRIVERS, MOCK_TRIPS, MOCK_VEHICLE_SEED } from "./mock-data";
 import { fleetStats, parseReturnPolicyPct } from "./derive";
+import { useVehicleState } from "./vehicle-state";
 import { hostConfig } from "@/lib/config";
 import { useGuestProgress } from "@/lib/progress-bridge";
 import type { Driver, OwnerSnapshot, Trip } from "./types";
@@ -25,12 +26,14 @@ const INITIAL_SNAPSHOT: OwnerSnapshot = {
   drivers: MOCK_DRIVERS,
   trips: MOCK_TRIPS,
   chargingSessions: MOCK_CHARGING_SESSIONS,
+  vehicles: [MOCK_VEHICLE_SEED],
 };
 
 export function useOwnerData() {
   const [snapshot, setSnapshot] = useState<OwnerSnapshot>(INITIAL_SNAPSHOT);
-  const [hydrated, setHydrated] = useState(false);
+  const [dataHydrated, setDataHydrated] = useState(false);
   const guestProgress = useGuestProgress();
+  const { vehicles: vehicleStateVehicles, hydrated: vehicleHydrated } = useVehicleState();
 
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +42,7 @@ export function useOwnerData() {
       .then((snap) => {
         if (!cancelled) {
           setSnapshot(snap);
-          setHydrated(true);
+          setDataHydrated(true);
         }
       });
     return () => {
@@ -53,36 +56,50 @@ export function useOwnerData() {
   );
 
   const merged = useMemo<OwnerSnapshot>(() => {
-    if (!hydrated || !guestProgress) return snapshot;
+    let next = snapshot;
 
-    const guestDriver: Driver = {
-      id: "guest-local",
-      name: guestProgress.guestName ?? "Guest (this browser)",
-      email: "",
-      source: "guest-local",
-      progress: guestProgress,
-    };
+    if (dataHydrated && guestProgress) {
+      const guestDriver: Driver = {
+        id: "guest-local",
+        name: guestProgress.guestName ?? "Guest (this browser)",
+        email: "",
+        source: "guest-local",
+        progress: guestProgress,
+      };
 
-    const drivers: Driver[] = [
-      ...snapshot.drivers.filter((d) => d.id !== "guest-local"),
-      guestDriver,
-    ];
+      const drivers: Driver[] = [
+        ...next.drivers.filter((d) => d.id !== "guest-local"),
+        guestDriver,
+      ];
 
-    const trips: Trip[] = snapshot.trips.map((trip) => {
-      if (trip.id !== guestProgress.tripId) return trip;
-      if (trip.driverId !== null && trip.driverId !== "guest-local") return trip; // never clobber an assigned mock trip
-      return { ...trip, driverId: "guest-local" };
-    });
+      const trips: Trip[] = next.trips.map((trip) => {
+        if (trip.id !== guestProgress.tripId) return trip;
+        if (trip.driverId !== null && trip.driverId !== "guest-local") return trip; // never clobber an assigned mock trip
+        return { ...trip, driverId: "guest-local" };
+      });
 
-    return { ...snapshot, drivers, trips };
-  }, [snapshot, hydrated, guestProgress]);
+      next = { ...next, drivers, trips };
+    }
+
+    // Independent of guest-progress hydration: swap in the host's own
+    // vehicle roster as soon as vehicle-state has hydrated, whether or not
+    // there's a browser-local guest at all.
+    if (vehicleHydrated) {
+      next = { ...next, vehicles: vehicleStateVehicles };
+    }
+
+    return next;
+  }, [snapshot, dataHydrated, guestProgress, vehicleHydrated, vehicleStateVehicles]);
 
   const stats = useMemo(() => fleetStats(merged, policyPct), [merged, policyPct]);
+
+  const hydrated = dataHydrated && vehicleHydrated;
 
   return {
     drivers: merged.drivers,
     trips: merged.trips,
     chargingSessions: merged.chargingSessions,
+    vehicles: merged.vehicles,
     stats,
     policyPct,
     hydrated,

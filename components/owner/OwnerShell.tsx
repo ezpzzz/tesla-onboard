@@ -20,13 +20,14 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { hostConfig } from "@/lib/config";
 import { Badge, cn } from "../ui";
-import { IconBolt, IconCar, IconUser } from "../icons";
+import { IconBattery, IconBolt, IconCar, IconUser } from "../icons";
 import { OwnerIdentity } from "./OwnerIdentity";
 
 const NAV_ITEMS = [
   { href: "/owner", label: "Overview", icon: IconBolt },
   { href: "/owner/drivers", label: "Drivers", icon: IconUser },
   { href: "/owner/trips", label: "Trips", icon: IconCar },
+  { href: "/owner/vehicles", label: "Vehicles", icon: IconBattery },
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {

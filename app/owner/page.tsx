@@ -54,7 +54,7 @@ const NEEDS_ATTENTION_RANK: Record<DriverStatus, number> = {
 };
 
 export default function OwnerOverviewPage() {
-  const { drivers, trips, chargingSessions, stats, policyPct } = useOwnerData();
+  const { drivers, trips, vehicles, chargingSessions, stats, policyPct } = useOwnerData();
   const { state: ownerState, hydrated: ownerHydrated } = useOwnerState();
   const [now, setNow] = useState(SSR_FALLBACK_NOW);
 
@@ -65,7 +65,7 @@ export default function OwnerOverviewPage() {
   const hydrated = ownerHydrated && now !== SSR_FALLBACK_NOW;
 
   const alerts = hydrated
-    ? deriveAlerts({ drivers, trips, chargingSessions, ownerState, policyPct, now })
+    ? deriveAlerts({ drivers, trips, vehicles, chargingSessions, ownerState, policyPct, now })
     : [];
 
   const needsAttention = drivers

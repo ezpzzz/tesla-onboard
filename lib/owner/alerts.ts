@@ -6,8 +6,14 @@
  */
 
 import { CHECKLIST } from "@/lib/content";
-import { driverStatus, formatUsd, sessionsForTrip, tripEnergy } from "./derive";
-import type { ChargingSession, Driver, OwnerAlert, Trip } from "./types";
+import {
+  driverStatus,
+  formatUsd,
+  resolveVehiclePolicyPct,
+  sessionsForTrip,
+  tripEnergy,
+} from "./derive";
+import type { ChargingSession, Driver, OwnerAlert, Trip, Vehicle } from "./types";
 import type { OwnerState } from "./owner-state";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -22,11 +28,12 @@ export function deriveAlerts(args: {
   drivers: Driver[];
   trips: Trip[];
   chargingSessions: ChargingSession[];
+  vehicles: Vehicle[];
   ownerState: OwnerState;
   policyPct: number;
   now: number;
 }): OwnerAlert[] {
-  const { drivers, trips, chargingSessions, ownerState, policyPct, now } = args;
+  const { drivers, trips, chargingSessions, vehicles, ownerState, policyPct, now } = args;
   const alerts: OwnerAlert[] = [];
 
   // guest-not-started (danger): upcoming trip within 48h, progress null/pct 0
@@ -88,16 +95,23 @@ export function deriveAlerts(args: {
     });
   }
 
-  // return-below-policy (warn): completed trip, batteryEndPct < policy, not resolved by owner
+  // return-below-policy (warn): completed trip, batteryEndPct < the vehicle's
+  // effective policy (its own override, or the global fallback), not resolved by owner
   for (const trip of trips) {
     if (trip.status !== "completed" || trip.batteryEndPct === null) continue;
-    if (trip.batteryEndPct >= policyPct) continue;
+    const vehicle = vehicles.find((v) => v.id === trip.vehicleId);
+    const effectivePolicyPct = resolveVehiclePolicyPct(vehicle, policyPct);
+    if (trip.batteryEndPct >= effectivePolicyPct) continue;
     if (ownerState.tripChecklists[trip.id]?.chargedToPolicy) continue;
+    const hasOverride = vehicle?.returnChargeLevelPct != null;
+    const policyClause = hasOverride
+      ? `below ${vehicle!.displayName}'s ${effectivePolicyPct}% return policy`
+      : `below the ${effectivePolicyPct}% return policy`;
     alerts.push({
       id: `return-below-policy:${trip.id}`,
       kind: "return-below-policy",
       severity: "warn",
-      message: `${trip.id} was returned by ${driverName(drivers, trip.driverId)} at ${trip.batteryEndPct}%, below the ${policyPct}% return policy.`,
+      message: `${trip.id} was returned by ${driverName(drivers, trip.driverId)} at ${trip.batteryEndPct}%, ${policyClause}.`,
       href: `/owner/trips/${trip.id}`,
       driverId: trip.driverId ?? undefined,
       tripId: trip.id,

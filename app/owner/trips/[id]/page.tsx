@@ -17,6 +17,7 @@ import {
   formatMiles,
   formatUsd,
   parseReturnPolicyPct,
+  resolveVehiclePolicyPct,
   sessionsForTrip,
   tripEnergy,
   tripMiles,
@@ -27,6 +28,7 @@ import {
   ReturnChecklistCard,
   StatTile,
   TripStatusBadge,
+  VehicleChip,
 } from "@/components/owner/owner-ui";
 import { BatteryReturnGauge, TripTimeline } from "@/components/owner/charts";
 import { Button, Card } from "@/components/ui";
@@ -55,19 +57,21 @@ function formatDateRange(startMs: number, endMs: number): string {
 export default function TripDetailPage() {
   const params = useParams<{ id: string }>();
   const tripId = params.id;
-  const { trips, drivers, chargingSessions, hydrated } = useOwnerData();
+  const { trips, drivers, vehicles, chargingSessions, hydrated } = useOwnerData();
   const { state: ownerState } = useOwnerState();
   const [copied, setCopied] = useState(false);
 
   const trip = trips.find((t) => t.id === tripId) ?? null;
   const driver = trip ? drivers.find((d) => d.id === trip.driverId) ?? null : null;
+  const vehicle = trip ? vehicles.find((v) => v.id === trip.vehicleId) ?? null : null;
   const sessions = trip ? sessionsForTrip(chargingSessions, trip.id) : [];
   const energy = useMemo(() => tripEnergy(sessions), [sessions]);
   const miles = trip ? tripMiles(trip) : null;
-  const policyPct = useMemo(
+  const globalPolicyPct = useMemo(
     () => parseReturnPolicyPct(hostConfig.rental.returnChargeLevel),
     [],
   );
+  const policyPct = resolveVehiclePolicyPct(vehicle, globalPolicyPct);
 
   if (!hydrated) {
     return <Card className="p-6 text-center text-sm text-muted">Loading trip…</Card>;
@@ -119,13 +123,18 @@ export default function TripDetailPage() {
               <span className="text-lg font-semibold tracking-tight text-ink">Unassigned</span>
             )}
             <div className="mt-0.5 text-sm text-muted">
-              {hostConfig.car.year} {hostConfig.car.model} {hostConfig.car.trim} · {hostConfig.car.color}
+              {vehicle
+                ? `${vehicle.displayName} ${vehicle.trim} · ${vehicle.color}`
+                : `${hostConfig.car.year} ${hostConfig.car.model} ${hostConfig.car.trim} · ${hostConfig.car.color}`}
             </div>
           </div>
           <TripStatusBadge status={trip.status} />
         </div>
         <div className="mt-3 text-sm text-ink-soft">
           {formatDateRange(trip.startAt, trip.endAt)}
+        </div>
+        <div className="mt-2">
+          <VehicleChip vehicle={vehicle} />
         </div>
 
         {trip.status === "upcoming" && trip.driverId === null && (
