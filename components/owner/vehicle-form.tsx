@@ -14,10 +14,15 @@
  * walkthrough. See the hint copy below.
  */
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { VehicleInput } from "@/lib/owner/types";
 import { validateVehicleInput } from "@/lib/owner/vehicle-state";
 import { Button, Segmented } from "../ui";
+
+// Fixed SSR-safe fallback for "current year" — reading Date.now() during
+// render risks server/client clock skew producing a hydration mismatch.
+// The real year is patched in via a mount effect below, after hydration.
+const SSR_FALLBACK_YEAR = 2026;
 
 interface VehicleFormProps {
   mode: "create" | "edit";
@@ -46,7 +51,7 @@ function initialFormValues(initial: Partial<VehicleInput> | undefined): FormValu
     displayName: initial?.displayName ?? "",
     model: initial?.model ?? "",
     trim: initial?.trim ?? "",
-    year: initial?.year !== undefined ? String(initial.year) : String(new Date().getFullYear()),
+    year: initial?.year !== undefined ? String(initial.year) : String(SSR_FALLBACK_YEAR),
     color: initial?.color ?? "",
     shifter: initial?.shifter ?? "stalk",
     licensePlate: initial?.licensePlate ?? "",
@@ -114,6 +119,21 @@ export function VehicleForm({
 }: VehicleFormProps) {
   const [values, setValues] = useState<FormValues>(() => initialFormValues(initialValues));
   const [errors, setErrors] = useState<Partial<Record<keyof VehicleInput, string>>>({});
+  const [currentYear, setCurrentYear] = useState(SSR_FALLBACK_YEAR);
+
+  useEffect(() => {
+    const year = new Date().getFullYear();
+    setCurrentYear(year);
+    // A brand-new vehicle's default Year still shows the SSR fallback at
+    // this point — sync it to the real year now that we're past hydration.
+    if (initialValues?.year === undefined) {
+      setValues((prev) =>
+        prev.year === String(SSR_FALLBACK_YEAR) ? { ...prev, year: String(year) } : prev,
+      );
+    }
+    // Intentionally run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function set<K extends keyof FormValues>(key: K, v: FormValues[K]) {
     setValues((prev) => {
@@ -122,7 +142,7 @@ export function VehicleForm({
       // its message immediately instead of staying stuck until resubmit.
       setErrors((prevErrors) =>
         Object.keys(prevErrors).length > 0
-          ? validateVehicleInput(toVehicleInput(next), new Date().getFullYear())
+          ? validateVehicleInput(toVehicleInput(next), currentYear)
           : prevErrors,
       );
       return next;
@@ -132,7 +152,7 @@ export function VehicleForm({
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const input = toVehicleInput(values);
-    const fieldErrors = validateVehicleInput(input, new Date().getFullYear());
+    const fieldErrors = validateVehicleInput(input, currentYear);
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors);
       return;

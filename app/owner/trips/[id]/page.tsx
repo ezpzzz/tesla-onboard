@@ -28,10 +28,9 @@ import {
   ReturnChecklistCard,
   StatTile,
   TripStatusBadge,
-  VehicleChip,
 } from "@/components/owner/owner-ui";
 import { BatteryReturnGauge, TripTimeline } from "@/components/owner/charts";
-import { Button, Card } from "@/components/ui";
+import { Badge, Button, Card } from "@/components/ui";
 import { IconAlert } from "@/components/icons";
 
 /* UTC-only formatting so server and first client paint always agree — see
@@ -123,18 +122,25 @@ export default function TripDetailPage() {
               <span className="text-lg font-semibold tracking-tight text-ink">Unassigned</span>
             )}
             <div className="mt-0.5 text-sm text-muted">
-              {vehicle
-                ? `${vehicle.displayName} ${vehicle.trim} · ${vehicle.color}`
-                : `${hostConfig.car.year} ${hostConfig.car.model} ${hostConfig.car.trim} · ${hostConfig.car.color}`}
+              {vehicle ? (
+                <Link
+                  href={`/owner/vehicles/${vehicle.id}`}
+                  className="inline-flex items-center gap-1.5 hover:text-brand"
+                >
+                  <span>
+                    {vehicle.displayName} {vehicle.trim} · {vehicle.color}
+                  </span>
+                  {vehicle.status === "archived" && <Badge tone="neutral">Archived</Badge>}
+                </Link>
+              ) : (
+                `${hostConfig.car.year} ${hostConfig.car.model} ${hostConfig.car.trim} · ${hostConfig.car.color}`
+              )}
             </div>
           </div>
           <TripStatusBadge status={trip.status} />
         </div>
         <div className="mt-3 text-sm text-ink-soft">
           {formatDateRange(trip.startAt, trip.endAt)}
-        </div>
-        <div className="mt-2">
-          <VehicleChip vehicle={vehicle} />
         </div>
 
         {trip.status === "upcoming" && trip.driverId === null && (

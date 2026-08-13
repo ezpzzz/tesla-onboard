@@ -15,8 +15,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { hostConfig } from "@/lib/config";
 import type { Vehicle, VehicleInput } from "./types";
+import { buildSeedVehicle } from "./vehicle-seed";
 
 export const VEHICLE_KEY = "rtr:vehicles:v1";
 
@@ -25,34 +25,21 @@ export interface VehicleState {
   vehicles: Record<string, Vehicle>;
 }
 
-// Fixed literal, not Date.now() — keeps the seed deterministic across every
-// fresh load (server, first client paint, any browser that never wrote the
-// key yet), matching mock-data.ts's "no relative-time math" rule.
-export const SEED_EPOCH = Date.UTC(2026, 0, 1);
-
-export function seedVehicle(): Vehicle {
-  return {
-    id: "veh-01",
-    displayName: `${hostConfig.car.year} ${hostConfig.car.model}`,
-    model: hostConfig.car.model,
-    trim: hostConfig.car.trim,
-    year: hostConfig.car.year,
-    color: hostConfig.car.color,
-    shifter: hostConfig.car.shifter,
-    licensePlate: null,
-    vin: null,
-    returnChargeLevelPct: null,
-    notes: "",
-    status: "active",
-    createdAt: SEED_EPOCH,
-    updatedAt: SEED_EPOCH,
-  };
-}
-
 export const initialVehicleState: VehicleState = { version: 1, vehicles: {} };
 
+/* Same-tab cross-instance sync: multiple useVehicleState() call sites (owner
+ * pages, use-owner-data) each hold their own copy of VehicleState. Without
+ * this, a mutation from one instance leaves every other mounted instance
+ * stale until it happens to re-render for an unrelated reason (storage
+ * events only fire cross-tab, never same-tab). */
+const listeners = new Set<() => void>();
+
+function notifyVehicleStateChange(): void {
+  listeners.forEach((listener) => listener());
+}
+
 function seedState(): VehicleState {
-  const veh = seedVehicle();
+  const veh = buildSeedVehicle();
   return { version: 1, vehicles: { [veh.id]: veh } };
 }
 
@@ -71,6 +58,7 @@ export function saveVehicleState(state: VehicleState): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(VEHICLE_KEY, JSON.stringify(state));
+    notifyVehicleStateChange();
   } catch {
     /* storage unavailable (private mode / full disk) — degrade gracefully */
   }
@@ -128,6 +116,13 @@ export function useVehicleState() {
   useEffect(() => {
     setState(loadVehicleState());
     setHydrated(true);
+    // Re-read whenever any useVehicleState() instance (this one included)
+    // saves — keeps every mounted instance in sync within the same tab.
+    const onChange = () => setState(loadVehicleState());
+    listeners.add(onChange);
+    return () => {
+      listeners.delete(onChange);
+    };
   }, []);
 
   const addVehicle = useCallback((input: VehicleInput): string => {

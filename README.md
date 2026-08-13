@@ -278,6 +278,8 @@ app/
   auth/tesla/page.tsx     Simulated "Sign in with Tesla" consent screen (mock)
   auth/tesla/callback/    Live OAuth callback (server-side token exchange)
   api/tesla/             login · callback-helpers · me · logout · public-key
+  owner/                  Host dashboard: page, drivers/, drivers/[id]/, trips/, trips/[id]/,
+                           vehicles/, vehicles/new/, vehicles/[id]/
 lib/
   config.ts               ← Host edits this (car, rules, contacts)
   content.ts              Tutorial modules + readiness checklist
@@ -287,12 +289,15 @@ lib/
   flow.ts                 Adaptive step machine (which steps, in what order)
   history-nav.ts          Mirrors steps into the browser History API (Back/Forward)
   store.ts                localStorage-backed onboarding state
+  owner/                  Owner-side data: types, mock-data, data-source, derive, alerts,
+                           owner-state.ts (rtr:owner:v1), vehicle-state.ts (rtr:vehicles:v1)
 components/
   OnboardingApp.tsx       Controller: flow + navigation
   ui.tsx                  Button, Card, ProgressBar, Segmented, AppShell…
   VideoEmbed.tsx          Official-Tesla video embed (no link-card fallback)
   icons.tsx               Inline SVG icons (no dependency)
   steps/                  Welcome, Connect, Tesla account, Plan, Module, Checklist, Done
+  owner/                  OwnerShell, vehicle-form.tsx, owner-ui.tsx (VehicleChip, TripTable…)
 scripts/
   tesla-setup.mjs         genkeys / register / verify for partner registration
 ```

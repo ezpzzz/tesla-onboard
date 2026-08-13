@@ -15,12 +15,12 @@
  */
 
 import type { ChargingSession, Driver, Trip, Vehicle } from "./types";
-import { seedVehicle } from "./vehicle-state";
+import { buildSeedVehicle } from "./vehicle-seed";
 
 /** Identical field values to vehicle-state.ts's store-seeded veh-01 (same
  * hostConfig.car source, same SEED_EPOCH) so the mock snapshot and a freshly
  * seeded VehicleState never disagree about vehicle-01's identity. */
-export const MOCK_VEHICLE_SEED: Vehicle = seedVehicle();
+export const MOCK_VEHICLE_SEED: Vehicle = buildSeedVehicle();
 
 const ts = (y: number, m: number, d: number, h = 0, min = 0) => Date.UTC(y, m - 1, d, h, min);
 

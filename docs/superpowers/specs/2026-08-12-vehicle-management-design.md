@@ -31,8 +31,10 @@ Goals for this iteration:
   smaller pack that the host wants back at 90% instead of the fleet default), and have that
   override apply consistently to every place a policy percentage is computed, displayed, or
   compared against a battery reading.
-- Preserve the existing single-car deployment's behavior and appearance with zero visible change:
-  a host who never opens `/owner/vehicles` should not notice this feature exists.
+- Preserve the existing single-car deployment's behavior: no filter clutter and no policy-threshold
+  change on pages a single-car host already used — trip rows and trip detail do gain a vehicle
+  identity line, but nothing about filtering or policy math changes underneath a host who never
+  opens `/owner/vehicles`.
 - Establish `Vehicle` as the entity `Trip` references, laying the multi-car groundwork the owner
   dashboard spec's §11 "v2 seams" already called out as a deliberate future extension point,
   without pulling in a real backend, Tesla vehicle import, or trip-creation UI to do it.
@@ -118,12 +120,14 @@ wizard with Tesla vehicle import") is where that identity and import flow belong
 that future wizard can populate them without a schema change, but nothing in this iteration writes
 to them except a host typing into a text field.
 
-**(6) A single-car deployment sees zero visual change: the vehicle Segmented filter on
-`/owner/trips` is gated on "more than one **active** vehicle," and every other page (trip detail,
-overview, alerts) already degrades to today's exact behavior when there's only one vehicle to
-resolve against.** *Rejected alternative:* always show the vehicle filter/chips once this feature
-ships, even for single-car hosts. Rejected because the entire owner dashboard spec's premise is
-that today's single-car host — the only host this app has ever actually been used by — should not
+**(6) A single-car deployment gets no filter clutter and no policy-threshold change: the vehicle
+Segmented filter on `/owner/trips` is gated on "more than one **active** vehicle," and policy
+resolution (alerts, gauge, cost-recovery) already degrades to today's exact flat-`policyPct`
+behavior when there's only one vehicle to resolve against.** Trip rows and trip detail do gain a
+vehicle identity line (`VehicleChip` / header text) regardless of fleet size — that is new, visible
+UI, not a zero-diff claim. *Rejected alternative:* always show the vehicle filter/chips once this
+feature ships, even for single-car hosts. Rejected because the entire owner dashboard spec's premise
+is that today's single-car host — the only host this app has ever actually been used by — should not
 experience a feature they have no use for as clutter; a filter control with one meaningless option
 is worse than no filter control. Gating on `>1` *active* vehicle (not `>1` vehicle total) means an
 archived second car doesn't leave a dead one-option filter behind either.
@@ -405,10 +409,12 @@ build` is the type-checking gate):
 2. Fresh browser profile (`rtr:vehicles:v1` unset): load `/owner/vehicles` — confirm exactly one
    active vehicle appears, seeded from `hostConfig.car`'s current values, with stats matching
    `MOCK_TRIPS`' single vehicle's worth of trips.
-3. `/owner/trips` and `/owner/trips/[id]` render identically to their pre-feature appearance when
-   only one active vehicle exists — no filter control, no visible policy-override chip, gauge
-   thresholds unchanged from today's flat `policyPct`. This is the zero-diff claim in §2 Decision 6
-   and must be checked visually, not just by signature compatibility.
+3. `/owner/trips` and `/owner/trips/[id]` show no filter control and no visible policy-override
+   chip when only one active vehicle exists, and every gauge/alert threshold is unchanged from
+   today's flat `policyPct` — this is the no-clutter, no-policy-change claim in §2 Decision 6 and
+   must be checked visually, not just by signature compatibility. Trip rows and trip detail *do*
+   now show a vehicle identity line (`VehicleChip` / header text) even in this single-vehicle case;
+   confirm that line renders correctly rather than expecting it to be absent.
 4. Add a second vehicle via `/owner/vehicles/new` with a `returnChargeLevelPct` override (e.g.
    90%) different from the global policy. Confirm: (a) the trip vehicle filter now appears on
    `/owner/trips`; (b) a trip assigned to the new vehicle shows the overridden percentage — not the
@@ -476,12 +482,13 @@ Checked this spec for placeholders, internal contradictions, and ambiguity befor
   `avgReturnChargePct` — an implementer reading only the one-line contract comment could plausibly
   average across all trips passed in rather than filtering first; this spec's §3 and §6 make clear
   every per-vehicle number is scoped to that vehicle's own trips.
-- **Ambiguity resolved — "zero visual change" scope.** §2 Decision 6 and §8 QA step 3 both now
-  explicit that the zero-diff claim covers `/owner/trips` (filter) and `/owner/trips/[id]` (chip/
-  gauge threshold) specifically, not "every owner page" vaguely — `/owner/vehicles` itself is
-  necessarily new UI a single-car host will see if they navigate to it via the new nav item; the
-  claim is that nothing *changes underneath them* on pages they already used, not that no new page
-  exists.
+- **Ambiguity resolved — "no filter clutter / no policy-threshold change" scope.** §2 Decision 6 and
+  §8 QA step 3 both now spell out precisely what stays unchanged for a single-car deployment: no
+  filter control on `/owner/trips`, and no policy-threshold change anywhere a percentage is computed
+  or compared (gauge, cost-recovery, alert). Trip rows and trip detail *do* gain a vehicle identity
+  line — that is new, visible UI on pages a single-car host already used, not a zero-diff claim, and
+  the earlier "zero visual change" phrasing overstated it. `/owner/vehicles` itself is separately
+  new UI a single-car host will see only if they navigate to it via the new nav item.
 - **Placeholder check.** No TBD/TODO/"fill in later" markers remain; every CONTRACTS signature in
   §4 has a corresponding File plan row (§5), edge case coverage where relevant (§7), and a QA step
   that exercises it (§8). `SEED_EPOCH`'s literal (`Date.UTC(2026, 0, 1)`) is fixed and matches the
@@ -494,3 +501,46 @@ Checked this spec for placeholders, internal contradictions, and ambiguity befor
   varied phrasing; flagged here for the implementer's awareness rather than rewritten, since the
   variation reads naturally in context and CONTRACTS' own code comments use "global" and "policy"
   interchangeably too.
+
+## 11. Post-audit remediation
+
+Recorded after implementation, during the docs/spec accuracy pass on branch `owner-dashboard`:
+
+- **`lib/content.ts` contamination.** During the review phase of this feature, an out-of-lane edit
+  landed in `lib/content.ts` (guest-facing tutorial module content, entirely outside this spec's
+  scope) — it altered the "official Tesla video" verification-comment wording to admit
+  `@tesla_tutorials` as a qualifying channel, and added three `video` entries not covered by this
+  spec's file plan. That edit is present in the committed history at `3fdeb79` (`feat: vehicle
+  management in the owner dashboard`) as a diff against `master` (`984225e`). The working tree has
+  since been restored to `master`'s `lib/content.ts` byte-for-byte via `git checkout master --
+  lib/content.ts`; as of this writing that restore is staged as an uncommitted change relative to
+  `3fdeb79` — the contaminated version remains in that commit's history until a follow-up commit
+  lands the restore. No further edits to `lib/content.ts` were made as part of this docs pass.
+- **Duplicate trip-detail vehicle chip.** An earlier pass of `app/owner/trips/[id]/page.tsx` briefly
+  carried two separate renderings of the trip's vehicle identity (a header text line and a
+  standalone `VehicleChip`, out of sync with each other). This was merged into a single
+  presentation: the header subtitle links to `/owner/vehicles/[id]` and shows the vehicle's
+  `displayName`/trim/color plus an inline "Archived" badge when applicable (falling back to plain,
+  unlinked `hostConfig.car` text when the trip has no resolvable vehicle) — there is exactly one
+  visual representation of "which vehicle," not two competing ones. Note this is a hand-rolled
+  `Link`+`Badge` in the page itself, not a reuse of the shared `VehicleChip` component from
+  `owner-ui.tsx` (which is used elsewhere, e.g. in `TripTable`) — functionally equivalent, but not
+  the same component the earlier wording of this note implied.
+- **Seed dependency inversion.** `lib/owner/vehicle-state.ts`'s seed-once logic used to build its
+  `veh-01` record inline from `hostConfig.car`, duplicating the field-by-field construction that also
+  lived in `lib/owner/mock-data.ts`'s `MOCK_VEHICLE_SEED` — two independent places computing what is
+  supposed to be one deterministic value (§4 CONTRACTS' `SEED_EPOCH` note already assumes these
+  byte-match). The fix inverted the dependency through a new `lib/owner/vehicle-seed.ts` exporting the
+  single `buildSeedVehicle()` construction function (and `SEED_EPOCH`), imported by both
+  `vehicle-state.ts`'s store fallback and `mock-data.ts`'s `MOCK_VEHICLE_SEED`, so there is exactly
+  one implementation to keep in sync. That file has since landed; `CLAUDE.md`'s `lib/owner/*`
+  inventory now lists `vehicle-seed.ts` alongside `vehicle-state.ts`.
+- **QA evidence hygiene.** Screenshot evidence from the manual QA pass (§8) lives in-repo at
+  `.qa-shots/` (gitignored via `/.qa-shots/` in `.gitignore`, never committed) — covering the
+  vehicles list, two-vehicle policy override, archive-blocked-on-sole-active-vehicle, validation
+  errors, and mobile layouts. That QA run's notes were truncated before landing and did not enumerate
+  the 3 minor issues it found (the three items above: the `lib/content.ts` contamination, the
+  duplicate trip-detail chip, and the seed dependency inversion) — none were blocking, but none were
+  written down either. Recorded here as an evidence-hygiene miss in the QA process itself: a QA pass
+  that finds issues and fixes or defers them must say so in its own notes, not rely on a later audit
+  to reconstruct what was found.
