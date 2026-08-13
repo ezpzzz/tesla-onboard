@@ -74,6 +74,54 @@ check that trip's page under `/owner/trips/trip-11` in another tab. This only
 works within the same browser (there's no server sync yet); see
 [`lib/progress-bridge.ts`](lib/progress-bridge.ts) for how it works.
 
+### Owner login (Supabase Auth)
+
+`/owner` is **open by default** (demo mode) — nothing to configure. Setting
+three env vars turns on a real sign-in gate in front of it:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+OWNER_ALLOWED_EMAILS=          # comma-separated; unset defaults to alex@sophosic.ai
+```
+
+Leave all three unset and `/owner` behaves exactly as it does today. Set
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and the
+gate is live — signing in only proves you have an account in the Supabase
+project; `OWNER_ALLOWED_EMAILS` is the separate allowlist that actually grants
+`/owner` access. Setting it explicitly to an empty string locks everyone out
+(fail closed).
+
+**One-time Supabase dashboard step:** this app shares a Supabase project with
+other products, so the only thing to add is a redirect URL — go to
+**Authentication → URL Configuration → Redirect URLs** and add this app's
+origin plus `/login` (e.g. `https://your-app.example.com/login`, and
+`http://localhost:3000/login` for local dev). Nothing else in that project is
+touched: the email **template** is not modified, the Site URL is not changed,
+and no existing user is edited.
+
+**First account:** if you already have an account in the shared Supabase
+project, just add its email to `OWNER_ALLOWED_EMAILS` — no new user needed. To
+create a fresh one, use the operator-only script (never run by the app):
+
+```bash
+SUPABASE_SERVICE_ROLE_KEY=... node --env-file=.env.local scripts/owner-admin-create-user.mjs you@example.com
+```
+
+The service-role key is shell-env-only — it must never go in `.env.example`
+or any file the app reads. The script prints the password once; save it, then
+add the email to `OWNER_ALLOWED_EMAILS`.
+
+Signing out from `/owner` is **this-device-only** (`scope: 'local'`) — it
+never revokes your sessions in the project's other apps, since the user pool
+is shared.
+
+Sign-in is **password-first**, not magic-link-first: a password round-trip
+needs no email deliverability setup and doesn't depend on the shared
+project's email template (which this app is not allowed to touch). The
+redirect URL above exists to support a magic-link fallback if you choose to
+enable one later, without requiring template changes now.
+
 ---
 
 ## Screenshots

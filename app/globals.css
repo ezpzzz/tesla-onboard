@@ -76,3 +76,11 @@ button,
 a {
   -webkit-tap-highlight-color: transparent;
 }
+
+/* ── Form field ─────────────────────────────────────────────────────────
+   Text input styling for the owner auth forms (login, account/password).
+   Vertical padding matches Button's py-3.5 scale; focus ring comes from the
+   global *:focus-visible rule above, so no focus styles here. */
+.field {
+  @apply w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-[15px] text-ink placeholder:text-muted;
+}

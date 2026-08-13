@@ -6,12 +6,12 @@
  * AppShell but for a host who is usually at a desk, sometimes on a phone at
  * the curb during a handoff.
  *
- * SECURITY: /owner has NO AUTH in v1 — this is a mock-first demo shell, and
- * anyone with the URL can open it. A live deployment MUST put a real gate in
- * front of these routes before hosting real driver/trip data here — e.g. a
- * Next.js middleware checking a host session cookie, the same shape as the
- * `rtr_tesla` guest cookie sealed in lib/tesla-server.ts, but for the host's
- * own login. Do not treat this shell as access control.
+ * AUTH: gating for /owner lives in middleware.ts (edge, cookie-based
+ * session check) and lib/owner-auth.ts (allowlist + config helpers), with a
+ * second defense-in-depth check in app/owner/layout.tsx. When Supabase auth
+ * env vars are unset, the app runs in demo mode — /owner stays open exactly
+ * as before, `ownerEmail` is left undefined, and this shell renders
+ * byte-identically to the no-auth original.
  */
 
 import Link from "next/link";
@@ -20,6 +20,7 @@ import type { ReactNode } from "react";
 import { hostConfig } from "@/lib/config";
 import { Badge, cn } from "../ui";
 import { IconBolt, IconCar, IconUser } from "../icons";
+import { OwnerIdentity } from "./OwnerIdentity";
 
 const NAV_ITEMS = [
   { href: "/owner", label: "Overview", icon: IconBolt },
@@ -32,7 +33,13 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function OwnerShell({ children }: { children: ReactNode }) {
+export function OwnerShell({
+  children,
+  ownerEmail,
+}: {
+  children: ReactNode;
+  ownerEmail?: string | null;
+}) {
   const pathname = usePathname() ?? "/owner";
 
   return (
@@ -47,6 +54,11 @@ export function OwnerShell({ children }: { children: ReactNode }) {
             <div className="mt-2">
               <Badge>Host view</Badge>
             </div>
+            {ownerEmail ? (
+              <div className="mt-3">
+                <OwnerIdentity email={ownerEmail} />
+              </div>
+            ) : null}
           </div>
           <nav className="flex-1 space-y-1 px-3">
             {NAV_ITEMS.map((item) => {
@@ -89,12 +101,15 @@ export function OwnerShell({ children }: { children: ReactNode }) {
               </span>
               <Badge>Host view</Badge>
             </div>
-            <Link
-              href="/"
-              className="mt-1 inline-block text-xs font-medium text-muted transition-colors hover:text-ink"
-            >
-              Guest walkthrough →
-            </Link>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+              <Link
+                href="/"
+                className="inline-block shrink-0 text-xs font-medium text-muted transition-colors hover:text-ink"
+              >
+                Guest walkthrough →
+              </Link>
+              {ownerEmail ? <OwnerIdentity email={ownerEmail} align="end" /> : null}
+            </div>
           </header>
 
           <main className="mx-auto w-full max-w-[1100px] flex-1 px-4 pb-20 pt-6 md:px-8 md:py-6 md:pb-6">
