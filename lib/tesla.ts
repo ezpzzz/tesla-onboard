@@ -22,6 +22,8 @@ export interface TeslaVehicle {
   vin?: string;
   trim?: string;
   color?: string;
+  /** Exact Design Studio paint option when Tesla includes option_codes. */
+  paintCode?: string;
   wheelType?: string;
   interior?: string;
   /** Exact Design Studio option code when Tesla includes option_codes. */

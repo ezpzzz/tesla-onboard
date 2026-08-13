@@ -15,9 +15,8 @@
  */
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import type { VehicleInput } from "@/lib/owner/types";
+import type { VehicleInput, VehicleShifter } from "@/lib/owner/types";
 import { validateVehicleInput } from "@/lib/owner/vehicle-state";
-import { resolveTeslaVehicleMedia } from "@/lib/vehicle-media";
 import { Button, Segmented } from "../ui";
 
 // Fixed SSR-safe fallback for "current year" — reading Date.now() during
@@ -41,7 +40,8 @@ interface FormValues {
   year: string;
   color: string;
   interior: string;
-  shifter: "stalk" | "screen";
+  wheelType: string;
+  shifter: VehicleShifter;
   licensePlate: string;
   vin: string;
   returnChargeLevelPct: string;
@@ -56,6 +56,7 @@ function initialFormValues(initial: Partial<VehicleInput> | undefined): FormValu
     year: initial?.year !== undefined ? String(initial.year) : String(SSR_FALLBACK_YEAR),
     color: initial?.color ?? "",
     interior: initial?.interior ?? "",
+    wheelType: initial?.wheelType ?? "",
     shifter: initial?.shifter ?? "stalk",
     licensePlate: initial?.licensePlate ?? "",
     vin: initial?.vin ?? "",
@@ -75,7 +76,9 @@ function toVehicleInput(
   const trimmedVin = values.vin.trim();
   const trimmedPct = values.returnChargeLevelPct.trim();
   const trimmedInterior = values.interior.trim();
+  const trimmedWheelType = values.wheelType.trim();
   const interiorChanged = trimmedInterior !== (preserved?.interior ?? "");
+  const colorChanged = values.color.trim() !== (preserved?.color ?? "");
   const interiorCode = interiorChanged ? null : preserved?.teslaInteriorCode ?? null;
   return {
     displayName: values.displayName.trim(),
@@ -88,21 +91,12 @@ function toVehicleInput(
     vin: trimmedVin === "" ? null : trimmedVin,
     returnChargeLevelPct: trimmedPct === "" ? null : Number(trimmedPct),
     notes: values.notes,
-    wheelType: preserved?.wheelType ?? null,
+    wheelType: trimmedWheelType === "" ? null : trimmedWheelType,
     interior: trimmedInterior === "" ? null : trimmedInterior,
     teslaInteriorCode: interiorCode,
+    teslaPaintCode: colorChanged ? null : preserved?.teslaPaintCode ?? null,
     teslaSpecSource: preserved?.teslaSpecSource ?? null,
-    // Recompute from the edited tuple. Retaining an older URL here could show
-    // the wrong paint or wheels after an owner correction.
-    media: resolveTeslaVehicleMedia(
-      values.model.trim(),
-      values.color.trim(),
-      values.trim.trim(),
-      preserved?.wheelType,
-      Number(values.year),
-      trimmedInterior,
-      interiorCode,
-    ),
+    teslaImportedSpec: preserved?.teslaImportedSpec ?? null,
     teslaImportKey: preserved?.teslaImportKey ?? null,
   };
 }
@@ -290,6 +284,19 @@ export function VehicleForm({
         />
       </Field>
 
+      <Field id="vehicle-wheelType" label="Wheels">
+        <input
+          id="vehicle-wheelType"
+          name="wheelType"
+          type="text"
+          autoComplete="off"
+          value={values.wheelType}
+          onChange={(e) => set("wheelType", e.target.value)}
+          className="field"
+          placeholder={'e.g. 20" Warp Wheels'}
+        />
+      </Field>
+
       <div>
         <span id="vehicle-shifter-label" className="mb-1.5 block text-xs font-medium text-muted">
           Shifter
@@ -299,6 +306,7 @@ export function VehicleForm({
             options={[
               { value: "stalk", label: "Column stalk" },
               { value: "screen", label: "Touchscreen" },
+              { value: "console", label: "Center console" },
             ]}
             value={values.shifter}
             onChange={(v) => set("shifter", v)}

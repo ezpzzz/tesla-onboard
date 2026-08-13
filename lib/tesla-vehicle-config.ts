@@ -1,4 +1,4 @@
-import { canonicalTeslaModel } from "@/lib/vehicle-media";
+import { canonicalTeslaModel } from "./tesla-model";
 
 export interface RawTeslaVehicleConfig {
   car_type?: unknown;
@@ -16,6 +16,7 @@ export interface TeslaVehicleConfig {
   model?: string;
   trim?: string;
   color?: string;
+  paintCode?: string;
   wheelType?: string;
   interior?: string;
   interiorCode?: string;
@@ -39,7 +40,7 @@ function words(value: string): string {
 export function displayTeslaTrim(value: unknown, model: string): string | undefined {
   const raw = nonEmptyString(value);
   if (!raw) return undefined;
-  const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const key = raw.toLowerCase().replace(/\+/g, "plus").replace(/[^a-z0-9]/g, "");
   const modelKey = canonicalTeslaModel(model).toLowerCase().replace(/[^a-z0-9]/g, "");
   if (key === modelKey || key === "base") return undefined;
 
@@ -98,8 +99,10 @@ export function displayTeslaColor(value: unknown): string | undefined {
     stealthgray: "Stealth Grey",
     quicksilver: "Quicksilver",
     lunarsilver: "Lunar Silver",
+    cosmicsilver: "Cosmic Silver",
     diamondblack: "Diamond Black",
     frostblue: "Frost Blue Metallic",
+    glacierblue: "Glacier Blue",
     marineblue: "Marine Blue",
     garnetred: "Garnet Red",
     basewhite: "Solid White",
@@ -131,9 +134,13 @@ export function displayTeslaColor(value: unknown): string | undefined {
     pr01: "Ultra Red",
     pn01: "Stealth Grey",
     pn00: "Quicksilver",
+    pn02: "Lunar Silver",
+    pn03: "Cosmic Silver",
     px02: "Diamond Black",
     pb00: "Frost Blue Metallic",
+    pb01: "Glacier Blue",
     pb02: "Marine Blue",
+    pr02: "Garnet Red",
   };
   return known[key] ?? words(raw);
 }
@@ -278,12 +285,30 @@ export function displayTeslaInterior(value: unknown): string | undefined {
   return words(raw).replace(/\bInterior\b.*\bInterior\b/, "Interior");
 }
 
+function interiorFamily(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const key = value.toLowerCase();
+  if (key.includes("white")) return "white";
+  if (key.includes("black")) return "black";
+  if (key.includes("cream")) return "cream";
+  if (key.includes("tan")) return "tan";
+  if (key.includes("grey") || key.includes("gray")) return "grey";
+  return undefined;
+}
+
 function optionCodeList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.flatMap((entry) => optionCodeList(entry));
   }
   const raw = nonEmptyString(value);
   return raw ? raw.split(/[\s,]+/).map((part) => part.trim()).filter(Boolean) : [];
+}
+
+/** Preserve Tesla's explicit paint option when present; names alone can be ambiguous. */
+export function teslaPaintOptionCode(value: unknown): string | undefined {
+  return optionCodeList(value)
+    .map((code) => code.toUpperCase().replace(/^\$/, ""))
+    .find((code) => /^(?:PBSB|PPSW|PPSB|PR0[12]|PN0[0-3]|PX02|PB0[0-2])$/.test(code));
 }
 
 /** Return only an explicit Tesla interior option code; never infer one here. */
@@ -300,17 +325,29 @@ export function parseTeslaVehicleConfig(
   if (!value) return {};
   const rawModel = nonEmptyString(value.car_type);
   const model = rawModel ? canonicalTeslaModel(rawModel) : fallbackModel;
-  const interiorCode = teslaInteriorOptionCode(value.option_codes)
+  const paintCode = teslaPaintOptionCode(value.option_codes)
+    ?? teslaPaintOptionCode(value.exterior_color);
+  const candidateInteriorCode = teslaInteriorOptionCode(value.option_codes)
     ?? teslaInteriorOptionCode(value.interior_trim_type)
     ?? teslaInteriorOptionCode(value.interior_color);
-  const interior = displayTeslaInterior(value.interior_trim_type)
+  const descriptiveInterior = displayTeslaInterior(value.interior_trim_type)
     ?? displayTeslaInterior(value.interior_color)
-    ?? displayTeslaInterior(value.seat_type)
-    ?? displayTeslaInterior(interiorCode);
+    ?? displayTeslaInterior(value.seat_type);
+  const codedInterior = displayTeslaInterior(candidateInteriorCode);
+  const interior = descriptiveInterior ?? codedInterior;
+  // Some generations return historical option codes alongside an explicit
+  // current interior field. Treat the descriptive vehicle_config field as
+  // authoritative and discard a conflicting code so media derives from the
+  // visible cabin color instead of silently rendering the opposite one.
+  const interiorCode = descriptiveInterior && codedInterior
+    && interiorFamily(descriptiveInterior) !== interiorFamily(codedInterior)
+      ? undefined
+      : candidateInteriorCode;
   return {
     model: model !== fallbackModel ? model : undefined,
     trim: displayTeslaTrim(value.trim_badging, model),
-    color: displayTeslaColor(value.exterior_color),
+    color: displayTeslaColor(value.exterior_color) ?? displayTeslaColor(paintCode),
+    paintCode,
     wheelType: displayTeslaWheel(value.wheel_type),
     interior,
     interiorCode,

@@ -9,9 +9,9 @@
    documented `vehicle_device_data` scope; the partner-only `vehicle_specs` scope is not
    available to a third-party owner token.
 2. Fleet API's `vehicle_data` endpoint is a live, billable read. Tesla advises against polling
-   it. Owner import therefore makes at most one best-effort request per vehicle, requests only
-   the `vehicle_config` group, never calls `wake_up`, and discards the OAuth token immediately
-   afterward as before.
+   it. Owner import therefore makes at most one best-effort request for each of the first 10
+   vehicles, requests only the `vehicle_config` group, never calls `wake_up`, and discards the
+   OAuth token immediately afterward as before.
 3. Tesla documents these vehicle configuration fields and their vehicle-data equivalents:
    `CarType` (`vehicle_config.car_type`), `Trim` (`trim_badging`), `ExteriorColor`
    (`exterior_color`) and `WheelType` (`wheel_type`). Failed, sleeping, or timed-out cars still
@@ -54,9 +54,9 @@ Primary sources:
 Tesla owner OAuth
   -> /api/1/products (vehicle identity + VIN)
   -> /vehicle_data?endpoints=vehicle_config (one optional read, no wake)
-  -> normalized TeslaVehicle (model/year/trim/exterior/interior/wheels + exact option code)
-  -> local owner Vehicle record + matched Tesla configurator-media reference
-  -> shared VehicleArtwork component
+  -> normalized TeslaVehicle (model/year/trim/exterior/interior/wheels + exact option codes)
+  -> local owner Vehicle record with Tesla import provenance
+  -> shared VehicleArtwork component derives matched Tesla configurator media
        - owner overview
        - owner vehicle list/detail
        - owner import review
@@ -82,3 +82,6 @@ separate data-platform change.
   a compatible Tesla option set. Missing interior data never silently substitutes a black cabin;
   owners can fill the optional interior field and re-resolve the exact first-party image.
 - Tesla OAuth tokens remain server-only and are discarded after the one-shot import.
+- The normalized profile is compressed before authenticated encryption so the short-lived
+  httpOnly cookie stays below the browser cookie limit; oversize profiles fail explicitly and
+  are never silently truncated.

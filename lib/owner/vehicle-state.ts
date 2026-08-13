@@ -54,7 +54,8 @@ function migrateSeedPresentation(state: VehicleState): VehicleState {
     && existing.trim === seed.trim
     && existing.year === seed.year
     && existing.color === seed.color;
-  if (!isOriginalSeed || existing.interior) return state;
+  if (!isOriginalSeed || !existing) return state;
+  if (Object.prototype.hasOwnProperty.call(existing, "interior")) return state;
   return {
     ...state,
     vehicles: {
@@ -63,7 +64,7 @@ function migrateSeedPresentation(state: VehicleState): VehicleState {
         ...existing,
         interior: seed.interior,
         teslaInteriorCode: seed.teslaInteriorCode,
-        media: seed.media,
+        teslaPaintCode: seed.teslaPaintCode,
       },
     },
   };

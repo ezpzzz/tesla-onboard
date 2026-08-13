@@ -57,8 +57,10 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
   }
 
   function isChecked(tv: TeslaVehicle): boolean {
-    if (existingVehicleFor(tv)) return true;
-    return selected[teslaKeyOf(tv)] ?? true;
+    const key = teslaKeyOf(tv);
+    if (selected[key] !== undefined) return selected[key];
+    const existing = existingVehicleFor(tv);
+    return !existing || existing.status === "archived";
   }
 
   function toggle(key: string, checked: boolean) {
@@ -81,6 +83,8 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
         ledgerPatch[key] = existing ? existing.id : null;
       }
 
+      if (!isChecked(tv)) continue;
+
       if (existing) {
         // Already on the fleet — refresh the Tesla-derived fields but keep
         // whatever the host has since edited by hand. A re-import of an
@@ -92,7 +96,6 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
         continue;
       }
 
-      if (!isChecked(tv)) continue;
       const input = vehicleInputFromTesla(tv, fallbackYear);
       const id = addVehicle(input);
       ledgerPatch[key] = id;
@@ -142,9 +145,10 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                   wheelType={v.wheelType}
                   interior={v.interior}
                   interiorCode={v.teslaInteriorCode}
+                  paintCode={v.teslaPaintCode}
                   year={v.year}
-                  media={v.media}
                   compact
+                  decorative
                   className="hidden sm:block"
                 />
                 <span className="min-w-0 flex-1">
@@ -245,22 +249,15 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
     );
   }
 
-  // "Import selected" should be actionable both for genuinely new vehicles
-  // and for archived matches (clicking it is what restores them), even
-  // though an archived match is technically an existingVehicleFor() hit.
-  const hasNewSelections = profile.vehicles.some((tv) => {
-    const existing = existingVehicleFor(tv);
-    if (!existing) return isChecked(tv);
-    return existing.status === "archived";
-  });
+  const hasSelections = profile.vehicles.some(isChecked);
 
   return (
     <StepFrame
       inlineFooter
       footer={
         <div className="space-y-2.5">
-          <Button fullWidth onClick={handleImport} disabled={!hasNewSelections}>
-            Import selected
+          <Button fullWidth onClick={handleImport} disabled={!hasSelections}>
+            Import or refresh selected
           </Button>
           <Button variant="secondary" fullWidth onClick={nav.next}>
             Continue <IconArrowRight className="h-4 w-4" />
@@ -275,7 +272,7 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
         Import your vehicles.
       </h1>
       <p className="mt-3 text-[15px] leading-relaxed text-muted">
-        Everything&apos;s pre-selected. Uncheck anything you don&apos;t want in this fleet.
+        New vehicles are pre-selected. Select an imported vehicle to refresh its Tesla specs.
       </p>
 
       <div className="mt-5 space-y-2">
@@ -290,13 +287,12 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
               key={key}
               className={cn(
                 "flex min-h-[44px] items-center gap-3 rounded-2xl border p-3.5",
-                alreadyImported ? "border-line bg-surface opacity-70" : "border-line bg-white",
+                alreadyImported ? "border-black/10 bg-white" : "border-line bg-white",
               )}
             >
               <input
                 type="checkbox"
                 checked={checked}
-                disabled={alreadyImported}
                 onChange={(e) => toggle(key, e.target.checked)}
                 className="h-5 w-5 shrink-0 rounded border-line accent-brand"
               />
@@ -307,8 +303,10 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                 wheelType={tv.wheelType}
                 interior={tv.interior}
                 interiorCode={tv.interiorCode}
+                paintCode={tv.paintCode}
                 year={tv.year}
                 compact
+                decorative
                 className="hidden sm:block"
               />
               <span className="min-w-0 flex-1">
@@ -320,7 +318,7 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                     || tv.model}
                 </span>
               </span>
-              {alreadyImported && <Badge tone="good">Already imported</Badge>}
+              {alreadyImported && <Badge tone="good">Imported — select to refresh</Badge>}
               {isArchived && <Badge tone="warn">Archived — re-importing will restore it</Badge>}
             </label>
           );

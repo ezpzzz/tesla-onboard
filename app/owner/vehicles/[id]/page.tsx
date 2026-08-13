@@ -131,8 +131,9 @@ export default function VehicleDetailPage() {
     wheelType: vehicle.wheelType,
     interior: vehicle.interior,
     teslaInteriorCode: vehicle.teslaInteriorCode,
+    teslaPaintCode: vehicle.teslaPaintCode,
     teslaSpecSource: vehicle.teslaSpecSource,
-    media: vehicle.media,
+    teslaImportedSpec: vehicle.teslaImportedSpec,
     teslaImportKey: vehicle.teslaImportKey,
   };
 
@@ -169,8 +170,8 @@ export default function VehicleDetailPage() {
         wheelType={vehicle.wheelType}
         interior={vehicle.interior}
         interiorCode={vehicle.teslaInteriorCode}
+        paintCode={vehicle.teslaPaintCode}
         year={vehicle.year}
-        media={vehicle.media}
         className="h-64 md:h-72"
       />
 

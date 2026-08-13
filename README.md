@@ -67,7 +67,8 @@ onboarding progress in one place, separate from the guest flow. It shows:
   a single policy-percentage calculation shared everywhere it's shown. Archived
   vehicles are hidden, not deleted, so past trips and drivers stay intact.
 - **Richer Tesla imports** — the owner connect performs one optional, no-wake
-  `vehicle_config` read per car to fill trim, exterior color, and wheel type.
+  `vehicle_config` read for each of the first 10 cars to fill trim, exterior
+  and interior color, and wheel type.
   Owner and renter cards share first-party Tesla Design Studio renders when
   model generation, trim, paint, and wheels can all be matched. Unknown or
   legacy configurations use a neutral fallback instead of a mismatched car.
@@ -256,8 +257,9 @@ Token exchange uses `fleet-auth.prd.vn.cloud.tesla.com` (separate host from
 authorize, as Tesla requires); region is auto-discovered via `/api/1/users/region`;
 identity is read tolerantly from `/api/1/users/me` and the `id_token`; vehicle
 `model`/`year` are derived from the VIN. The owner callback additionally makes
-one best-effort, no-wake `vehicle_data?endpoints=vehicle_config` read per car to
-import trim, exterior color, and wheels. The guest sign-in remains list-only.
+one best-effort, no-wake `vehicle_data?endpoints=vehicle_config` read for each
+of the first 10 cars to import trim, exterior/interior color, and wheels. The
+guest sign-in remains list-only.
 
 **Setup**
 

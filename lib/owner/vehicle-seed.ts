@@ -11,10 +11,10 @@
 
 import { hostConfig } from "@/lib/config";
 import {
-  DEFAULT_TESLA_INTERIOR,
-  DEFAULT_TESLA_INTERIOR_CODE,
-  resolveTeslaVehicleMedia,
-} from "@/lib/vehicle-media";
+  LISTING_TESLA_INTERIOR,
+  LISTING_TESLA_INTERIOR_CODE,
+  LISTING_TESLA_PAINT_CODE,
+} from "@/lib/listing-vehicle-media";
 import type { Vehicle } from "./types";
 
 // Fixed literal, not Date.now() — keeps the seed deterministic across every
@@ -35,17 +35,9 @@ export function buildSeedVehicle(): Vehicle {
     vin: null,
     returnChargeLevelPct: null,
     notes: "",
-    interior: DEFAULT_TESLA_INTERIOR,
-    teslaInteriorCode: DEFAULT_TESLA_INTERIOR_CODE,
-    media: resolveTeslaVehicleMedia(
-      hostConfig.car.model,
-      hostConfig.car.color,
-      hostConfig.car.trim,
-      undefined,
-      hostConfig.car.year,
-      DEFAULT_TESLA_INTERIOR,
-      DEFAULT_TESLA_INTERIOR_CODE,
-    ),
+    interior: LISTING_TESLA_INTERIOR,
+    teslaInteriorCode: LISTING_TESLA_INTERIOR_CODE,
+    teslaPaintCode: LISTING_TESLA_PAINT_CODE,
     status: "active",
     createdAt: SEED_EPOCH,
     updatedAt: SEED_EPOCH,

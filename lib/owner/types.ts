@@ -10,13 +10,28 @@
 
 import type { ExperienceLevel } from "@/lib/tesla";
 import type { ProgressSummary } from "@/lib/flow";
-import type { VehicleMedia } from "@/lib/vehicle-media";
 
 export type TripStatus = "upcoming" | "active" | "completed";
 
 export type DriverStatus = "not-started" | "in-progress" | "ready" | "stalled";
 
 export type VehicleStatus = "active" | "archived";
+export type VehicleShifter = "stalk" | "screen" | "console";
+
+/** Last Tesla-owned values, used to distinguish refreshable data from edits. */
+export interface TeslaImportedSpec {
+  displayName: string;
+  model: string;
+  trim: string;
+  year: number;
+  color: string;
+  shifter: VehicleShifter;
+  vin: string | null;
+  wheelType: string | null;
+  interior: string | null;
+  teslaInteriorCode: string | null;
+  teslaPaintCode: string | null;
+}
 
 export interface Vehicle {
   id: string; // "veh-01", "veh-02", ... zero-padded sequential
@@ -25,7 +40,7 @@ export interface Vehicle {
   trim: string;
   year: number;
   color: string;
-  shifter: "stalk" | "screen";
+  shifter: VehicleShifter;
   licensePlate: string | null;
   vin: string | null;
   returnChargeLevelPct: number | null; // null = fall back to global policy
@@ -34,9 +49,10 @@ export interface Vehicle {
   wheelType?: string | null;
   interior?: string | null;
   teslaInteriorCode?: string | null;
+  teslaPaintCode?: string | null;
   teslaSpecSource?: "fleet-api" | null;
-  /** First-party artwork; recomputed from imported configuration when possible. */
-  media?: VehicleMedia | null;
+  /** Snapshot of Tesla-owned fields from the most recent import. */
+  teslaImportedSpec?: TeslaImportedSpec | null;
   // Dedupe key from the Tesla side (vin, or the Tesla vehicle id when no vin
   // is available) for the vehicle this record was imported from. Optional/
   // nullable so pre-existing vehicles (manually added, or seeded) round-trip

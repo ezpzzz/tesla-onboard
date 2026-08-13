@@ -5,9 +5,10 @@ import { Button, StepFrame } from "../ui";
 import { IconArrowRight, IconBolt, IconCheck, IconSparkle } from "../icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import {
-  DEFAULT_TESLA_INTERIOR,
-  DEFAULT_TESLA_INTERIOR_CODE,
-} from "@/lib/vehicle-media";
+  LISTING_TESLA_INTERIOR,
+  LISTING_TESLA_INTERIOR_CODE,
+  LISTING_TESLA_PAINT_CODE,
+} from "@/lib/listing-vehicle-media";
 import type { StepProps } from "../step-types";
 
 const highlights = [
@@ -54,18 +55,19 @@ export function WelcomeStep({ nav, update, state }: StepProps) {
           model={car.model}
           color={car.color}
           trim={car.trim}
-          interior={DEFAULT_TESLA_INTERIOR}
-          interiorCode={DEFAULT_TESLA_INTERIOR_CODE}
+          interior={LISTING_TESLA_INTERIOR}
+          interiorCode={LISTING_TESLA_INTERIOR_CODE}
+          paintCode={LISTING_TESLA_PAINT_CODE}
           year={car.year}
           eager
-          className="mt-2 h-72"
+          className="mt-2 h-48 sm:h-72"
         />
         <div className="mt-1">
           <div className="text-2xl font-semibold tracking-tight text-ink">
             {car.model} {car.trim}
           </div>
           <div className="text-sm text-muted">
-            {car.year} · {car.color} · {DEFAULT_TESLA_INTERIOR}
+            {car.year} · {car.color} · {LISTING_TESLA_INTERIOR}
           </div>
         </div>
       </div>

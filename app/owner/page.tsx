@@ -176,8 +176,9 @@ export default function OwnerOverviewPage() {
                     wheelType={vehicle.wheelType}
                     interior={vehicle.interior}
                     interiorCode={vehicle.teslaInteriorCode}
+                    paintCode={vehicle.teslaPaintCode}
                     year={vehicle.year}
-                    media={vehicle.media}
+                    decorative
                     className="h-44 rounded-none border-0 md:h-48"
                   />
                   <div className="flex items-center justify-between gap-3 p-3.5">

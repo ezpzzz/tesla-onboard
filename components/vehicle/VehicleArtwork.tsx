@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { VehicleMedia } from "@/lib/vehicle-media";
 import {
   canonicalTeslaModel,
   resolveTeslaVehicleMedia,
+  vehicleMediaImageUrl,
   vehiclePaintHex,
 } from "@/lib/vehicle-media";
 import { cn } from "@/components/ui";
@@ -16,11 +16,12 @@ interface VehicleArtworkProps {
   wheelType?: string | null;
   interior?: string | null;
   interiorCode?: string | null;
+  paintCode?: string | null;
   year?: number | null;
-  media?: VehicleMedia | null;
   className?: string;
   compact?: boolean;
   eager?: boolean;
+  decorative?: boolean;
 }
 
 export function VehicleArtwork({
@@ -30,13 +31,14 @@ export function VehicleArtwork({
   wheelType,
   interior,
   interiorCode,
+  paintCode,
   year,
-  media,
   className,
   compact = false,
   eager = false,
+  decorative = false,
 }: VehicleArtworkProps) {
-  const exactMedia = resolveTeslaVehicleMedia(
+  const resolved = resolveTeslaVehicleMedia(
     model,
     color,
     trim,
@@ -44,48 +46,65 @@ export function VehicleArtwork({
     year,
     interior,
     interiorCode,
+    paintCode,
   );
-  const hasImportedConfiguration = !!(
-    color || trim || wheelType || year || interior || interiorCode
-  );
-  const resolved = exactMedia ?? (!hasImportedConfiguration ? media : null);
+  const displayUrl = resolved
+    ? vehicleMediaImageUrl(resolved, compact ? 512 : 1200)
+    : null;
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const imageFailed = !!resolved && failedUrl === resolved.imageUrl;
+  const imageFailed = !!displayUrl && failedUrl === displayUrl;
   const canonicalModel = canonicalTeslaModel(model);
   const paint = vehiclePaintHex(color);
 
   useEffect(() => {
-    if (resolved?.imageUrl !== failedUrl) setFailedUrl(null);
-  }, [resolved?.imageUrl, failedUrl]);
+    if (displayUrl !== failedUrl) setFailedUrl(null);
+  }, [displayUrl, failedUrl]);
 
   return (
     <div
       className={cn(
-        "relative isolate overflow-hidden",
+        "relative isolate overflow-hidden bg-white",
         compact ? "h-20 w-32 shrink-0" : className ? "w-full" : "h-52 w-full",
         className,
       )}
     >
-      {!imageFailed && resolved ? (
+      {!imageFailed && resolved && displayUrl ? (
         <img
-          src={resolved.imageUrl}
-          alt={`${color ? `${color} ` : ""}${canonicalModel} — official Tesla artwork`}
+          src={displayUrl}
+          srcSet={
+            resolved.kind === "vehicle-configurator" && !compact
+              ? [512, 800, 1200]
+                  .map((size) => `${vehicleMediaImageUrl(resolved, size)} ${size}w`)
+                  .join(", ")
+              : undefined
+          }
+          sizes={!compact ? "(max-width: 640px) 100vw, 640px" : undefined}
+          alt={decorative ? "" : `${color ? `${color} ` : ""}${canonicalModel}`}
           loading={eager ? "eager" : "lazy"}
           decoding="async"
           referrerPolicy="no-referrer"
-          onError={() => setFailedUrl(resolved.imageUrl)}
+          onError={() => setFailedUrl(displayUrl)}
           className={cn(
             "h-full w-full transform-gpu object-contain",
             compact ? "scale-[1.45]" : "scale-[1.42]",
           )}
         />
       ) : (
-        <div className="flex h-full items-center justify-center px-4 text-center">
+        <div
+          className="flex h-full items-center justify-center bg-gradient-to-br from-white via-white to-black/[0.035] px-4 text-center"
+        >
           <div>
-            <div className="mx-auto h-1.5 w-16 rounded-full bg-black/10 blur-[1px]" />
-            <div className="mt-2 text-lg font-semibold tracking-tight text-ink">
+            <div
+              aria-hidden="true"
+              className="mx-auto h-12 w-24 rounded-[50%] border border-black/10 opacity-80 shadow-[0_12px_18px_-12px_rgba(0,0,0,0.55)]"
+              style={{ background: `linear-gradient(145deg, ${paint}, #171a20)` }}
+            />
+            <div className="mt-3 text-lg font-semibold tracking-tight text-ink">
               {canonicalModel}
             </div>
+            {!compact && (
+              <div className="mt-0.5 text-xs text-muted">Exact Tesla image unavailable</div>
+            )}
           </div>
         </div>
       )}

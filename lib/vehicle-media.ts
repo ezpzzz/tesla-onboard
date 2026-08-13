@@ -8,6 +8,9 @@
  * verified. Unknown and legacy tuples never inherit a look-alike current car.
  */
 
+import { canonicalTeslaModel } from "./tesla-model";
+export { canonicalTeslaModel } from "./tesla-model";
+
 export interface VehicleMedia {
   imageUrl: string;
   provider: "tesla";
@@ -22,10 +25,6 @@ export interface VehicleMedia {
 
 const TESLA_IMAGE_BASE =
   "https://digitalassets.tesla.com/tesla-contents/image/upload/f_png,q_auto,w_800,c_scale";
-
-/** Canonical OnlyEVs demo/listing configuration; live owner imports replace it. */
-export const DEFAULT_TESLA_INTERIOR = "White Interior";
-export const DEFAULT_TESLA_INTERIOR_CODE = "IPW4";
 
 const MODEL_MEDIA: Record<string, VehicleMedia> = {
   "Model 3": {
@@ -88,14 +87,17 @@ const MODEL_MEDIA: Record<string, VehicleMedia> = {
 const TESLA_PAINT_CODES: Array<[RegExp, string]> = [
   [/(diamondblack|px02)/, "PX02"],
   [/(solidblack|pbsb)/, "PBSB"],
-  [/(black)/, "PX02"],
-  [/(pearlwhitemulticoat|pearlwhite|white|ppsw)/, "PPSW"],
-  [/(stealthgrey|stealthgray|midnightsilver|grey|gray|pn01)/, "PN01"],
-  [/(quicksilver|lunarsilver|silver|pn00)/, "PN00"],
-  [/(deepbluemetallic|deepblue|blue|ppsb)/, "PPSB"],
   [/(frostbluemetallic|frostblue|pb00)/, "PB00"],
+  [/(glacierblue|pb01)/, "PB01"],
   [/(marineblue|pb02)/, "PB02"],
-  [/(ultrared|redmulticoat|red|pr01)/, "PR01"],
+  [/(pearlwhitemulticoat|pearlwhite|ppsw)/, "PPSW"],
+  [/(stealthgrey|stealthgray|pn01)/, "PN01"],
+  [/(quicksilver|pn00)/, "PN00"],
+  [/(lunarsilver|pn02)/, "PN02"],
+  [/(cosmicsilver|pn03)/, "PN03"],
+  [/(deepbluemetallic|deepblue|ppsb)/, "PPSB"],
+  [/(ultrared|pr01)/, "PR01"],
+  [/(garnetred|pr02)/, "PR02"],
 ];
 
 function normalizedPaint(color: string | null | undefined): string {
@@ -108,11 +110,36 @@ function normalizedSpec(value: string | null | undefined): string {
 
 export function teslaPaintCode(
   color: string | null | undefined,
-  legacyBlack = false,
 ): string | null {
   const normalized = normalizedPaint(color);
-  if (normalized === "black" && legacyBlack) return "PBSB";
   return TESLA_PAINT_CODES.find(([pattern]) => pattern.test(normalized))?.[1] ?? null;
+}
+
+const SUPPORTED_PAINT_CODES = new Set(TESLA_PAINT_CODES.map(([, code]) => code));
+
+function paintFamily(value: string | null | undefined): string | null {
+  const normalized = normalizedPaint(value);
+  if (/(black|pbsb|px02)/.test(normalized)) return "black";
+  if (/(white|ppsw)/.test(normalized)) return "white";
+  if (/(blue|ppsb|pb00|pb01|pb02)/.test(normalized)) return "blue";
+  if (/(red|pr01|pr02)/.test(normalized)) return "red";
+  if (/(grey|gray|silver|pn00|pn01|pn02|pn03)/.test(normalized)) return "grey";
+  return null;
+}
+
+/** Resolve paint only when the descriptive label and option code agree. */
+function exactPaintCode(
+  color: string | null | undefined,
+  importedCode: string | null | undefined,
+): string | null {
+  const explicit = normalizedPaint(importedCode).toUpperCase();
+  const explicitCode = SUPPORTED_PAINT_CODES.has(explicit) ? explicit : null;
+  const labelCode = teslaPaintCode(color);
+  if (!explicitCode) return labelCode;
+  if (labelCode && labelCode !== explicitCode) return null;
+  const labelFamily = paintFamily(color);
+  if (labelFamily && labelFamily !== paintFamily(explicitCode)) return null;
+  return explicitCode;
 }
 
 interface ConfiguratorMediaInput {
@@ -163,11 +190,17 @@ function exactInteriorCode(
 ): string | null {
   const whiteCode = blackCode.replace(/B(?=\d+$)/, "W");
   const explicit = (importedCode ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (explicit === blackCode || explicit === whiteCode) return explicit;
-
   const value = normalizedSpec(interior);
-  if (/(white|blackandwhite|ultrawhite)/.test(value)) return whiteCode;
-  if (/(black|allblack)/.test(value)) return blackCode;
+  const labelCode = /(white|blackandwhite|ultrawhite)/.test(value)
+    ? whiteCode
+    : /(black|allblack)/.test(value)
+      ? blackCode
+      : null;
+  if (value && !labelCode) return null;
+  if (explicit === blackCode || explicit === whiteCode) {
+    return labelCode && labelCode !== explicit ? null : explicit;
+  }
+  if (labelCode) return labelCode;
   // Tesla does not consistently expose an interior field on every vehicle
   // generation. Do not silently substitute black when it is unknown.
   return null;
@@ -211,7 +244,7 @@ function model3TrimConfig(trim: string | null | undefined): Model3TrimConfig | n
       allowedPaintCodes: ["PN01", "PN00", "PX02", "PB02", "PPSW", "PR01"],
     };
   }
-  if (/(rearwheeldrive|standardrange|standardrangeplus|longrange|base|rwd|74r)/.test(value)) {
+  if (/(rearwheeldrive|standardrange|standardrangeplus|base|rwd|74r)/.test(value)) {
     return {
       trimCode: "MT367",
       interiorCode: "IBB4",
@@ -239,10 +272,10 @@ function model3WheelCode(
   }
 
   let candidate: Model3TrimConfig["allowedWheelCodes"][number] | null = null;
-  if (/(warp|uberturbine|w30p|20)/.test(value)) candidate = "W30P";
-  else if (/(nova|w39g|19)/.test(value)) candidate = "W39G";
+  if (/(warp|uberturbine|w30p)/.test(value)) candidate = "W30P";
+  else if (/(nova|w39g)/.test(value)) candidate = "W39G";
   else if (/(prismata|w38c)/.test(value)) candidate = "W38C";
-  else if (/(photon|pinwheel|w38a|18)/.test(value)) candidate = "W38A";
+  else if (/(photon|pinwheel|w38a)/.test(value)) candidate = "W38A";
 
   if (!candidate || !trim.allowedWheelCodes.includes(candidate)) return null;
   return { code: candidate, matched: true };
@@ -254,9 +287,10 @@ function model3ConfiguratorMedia(
   wheelType: string | null | undefined,
   interior: string | null | undefined,
   importedInteriorCode: string | null | undefined,
+  importedPaintCode: string | null | undefined,
   year: number | null | undefined,
 ): VehicleMedia | null {
-  const paintCode = teslaPaintCode(color);
+  const paintCode = exactPaintCode(color, importedPaintCode);
   const trimConfig = model3TrimConfig(trim);
   if (!paintCode || !trimConfig || !year || year < 2024) return null;
   if (!trimConfig.allowedPaintCodes.includes(paintCode)) return null;
@@ -315,7 +349,7 @@ function modelYTrimConfig(
         allowedPaintCodes: ["PBSB", "PPSB", "PPSW", "PN01", "PR01", "PN00"],
       };
     }
-    if (/(longrangerwd|rearwheeldrive|standardrange|rwd|longrange)/.test(value)) {
+    if (/(longrangerwd|rearwheeldrive|standardrange|rwd)/.test(value)) {
       return {
         trimCode: "MTY35",
         interiorCode: "INPB0",
@@ -339,7 +373,7 @@ function modelYTrimConfig(
       trimCode: "MTY83",
       interiorCode: "IPB17",
       allowedWheelCodes: ["WY19L", "WY20L"],
-      allowedPaintCodes: ["PPSW", "PN01", "PN03", "PB02", "PR01", "PX02"],
+      allowedPaintCodes: ["PN03", "PX02", "PB01"],
     };
   }
   if (/(premium|longrange)/.test(value) && /(awd|allwheeldrive|dualmotor)/.test(value)) {
@@ -366,7 +400,7 @@ function modelYTrimConfig(
       allowedPaintCodes: ["PN01", "PPSW", "PX02"],
     };
   }
-  if (/(rearwheeldrive|standardrange|rwd|longrange)/.test(value)) {
+  if (/(rearwheeldrive|standardrange|rwd)/.test(value)) {
     return {
       trimCode: "MTY61",
       interiorCode: "IBB6",
@@ -379,16 +413,16 @@ function modelYTrimConfig(
 
 function modelYWheelCode(wheelType: string | null | undefined): string | null {
   const value = normalizedSpec(wheelType);
-  if (/(aperture|wy18p|18)/.test(value)) return "WY18P";
+  if (/(aperture|wy18p)/.test(value)) return "WY18P";
   if (/(geminidark|wy19c)/.test(value)) return "WY19C";
   if (/(gemini|wy19b)/.test(value)) return "WY19B";
   if (/(crossflow|wy19p)/.test(value)) return "WY19P";
   if (/(machina|wy19l)/.test(value)) return "WY19L";
   if (/(helix20|wy20b|wy20a)/.test(value)) return "WY20B";
   if (/(uberhelix|wy20l)/.test(value)) return "WY20L";
-  if (/(induction|wy20p|20)/.test(value)) return "WY20P";
+  if (/(induction|wy20p)/.test(value)) return "WY20P";
   if (/(arachnid|wy21a)/.test(value)) return "WY21A";
-  if (/(uberturbine|wy21p|21)/.test(value)) return "WY21P";
+  if (/(uberturbine|wy21p)/.test(value)) return "WY21P";
   return null;
 }
 
@@ -398,11 +432,12 @@ function modelYConfiguratorMedia(
   wheelType: string | null | undefined,
   interior: string | null | undefined,
   importedInteriorCode: string | null | undefined,
+  importedPaintCode: string | null | undefined,
   year: number | null | undefined,
 ): VehicleMedia | null {
   if (!year || year < 2020) return null;
   const trimConfig = modelYTrimConfig(trim, year);
-  const paintCode = teslaPaintCode(color, year <= 2024);
+  const paintCode = exactPaintCode(color, importedPaintCode);
   const wheelCode = modelYWheelCode(wheelType);
   if (!trimConfig || !paintCode || !wheelCode) return null;
   if (!trimConfig.allowedPaintCodes.includes(paintCode)) return null;
@@ -454,9 +489,9 @@ function cybertruckTrimConfig(trim: string | null | undefined): CybertruckTrimCo
 
 function cybertruckWheelCode(wheelType: string | null | undefined): string | null {
   const value = normalizedSpec(wheelType);
-  if (/(molten|wh8a|18)/.test(value)) return "WH8A";
+  if (/(molten|wh8a)/.test(value)) return "WH8A";
   if (/(mantle|wh0b)/.test(value)) return "WH0B";
-  if (/(core|cyberstream|wh0a|20)/.test(value)) return "WH0A";
+  if (/(core|cyberstream|wh0a)/.test(value)) return "WH0A";
   return null;
 }
 
@@ -483,22 +518,6 @@ function cybertruckConfiguratorMedia(
   });
 }
 
-export function canonicalTeslaModel(raw: string): string {
-  const model = raw.trim().toLowerCase().replace(/[_-]+/g, " ");
-  const compact = model.replace(/[^a-z0-9]/g, "");
-  if (/^(cybertruck|cybertruck\d+)$/.test(compact)) return "Cybertruck";
-  if (/^model3\d*$/.test(compact)) return "Model 3";
-  if (/^modely\d*$/.test(compact)) return "Model Y";
-  // Fleet API has historically returned generation-suffixed car_type values
-  // such as models2 and modelx2. Keep the generation in the raw payload, but
-  // normalize the customer-facing model without losing those vehicles.
-  if (/^models\d*$/.test(compact)) return "Model S";
-  if (/^modelx\d*$/.test(compact)) return "Model X";
-  if (compact.includes("roadster")) return "Roadster";
-  if (compact.includes("semi")) return "Semi";
-  return raw.trim() || "Tesla";
-}
-
 export function resolveTeslaVehicleMedia(
   model: string,
   color?: string | null,
@@ -507,13 +526,30 @@ export function resolveTeslaVehicleMedia(
   year?: number | null,
   interior?: string | null,
   interiorCode?: string | null,
+  paintCode?: string | null,
 ): VehicleMedia | null {
   const canonicalModel = canonicalTeslaModel(model);
   if (canonicalModel === "Model 3") {
-    return model3ConfiguratorMedia(color, trim, wheelType, interior, interiorCode, year);
+    return model3ConfiguratorMedia(
+      color,
+      trim,
+      wheelType,
+      interior,
+      interiorCode,
+      paintCode,
+      year,
+    );
   }
   if (canonicalModel === "Model Y") {
-    return modelYConfiguratorMedia(color, trim, wheelType, interior, interiorCode, year);
+    return modelYConfiguratorMedia(
+      color,
+      trim,
+      wheelType,
+      interior,
+      interiorCode,
+      paintCode,
+      year,
+    );
   }
   if (canonicalModel === "Cybertruck") {
     return cybertruckConfiguratorMedia(color, trim, wheelType, year);
@@ -522,18 +558,26 @@ export function resolveTeslaVehicleMedia(
   // supported configurator surface. A current marketing photo would falsely
   // imply matching paint/trim/wheels, so only use it when we have no imported
   // configuration to represent.
-  if (!color && !trim && !wheelType && !year && !interior && !interiorCode) {
+  if (!color && !trim && !wheelType && !year && !interior && !interiorCode && !paintCode) {
     return MODEL_MEDIA[canonicalModel] ?? null;
   }
   return null;
+}
+
+/** Request an appropriately sized variant of a Tesla compositor asset. */
+export function vehicleMediaImageUrl(media: VehicleMedia, size: number): string {
+  if (media.kind !== "vehicle-configurator") return media.imageUrl;
+  const url = new URL(media.imageUrl);
+  url.searchParams.set("size", String(size));
+  return url.toString();
 }
 
 /** A compact visual accent for the imported paint name; not a claim of exact color matching. */
 export function vehiclePaintHex(color: string | null | undefined): string {
   const value = normalizedPaint(color);
   if (/(ultrared|redmulticoat|red)/.test(value)) return "#b11f2e";
-  if (/(deepblue|blue)/.test(value)) return "#24517b";
-  if (/(quicksilver|lunarsilver|silver)/.test(value)) return "#aeb4bb";
+  if (/(deepblue|glacierblue|marineblue|blue)/.test(value)) return "#24517b";
+  if (/(quicksilver|lunarsilver|cosmicsilver|silver)/.test(value)) return "#aeb4bb";
   if (/(stealthgrey|stealthgray|midnightsilver|grey|gray)/.test(value)) return "#596069";
   if (/(pearlwhite|white)/.test(value)) return "#f3f4f6";
   if (/(black|pbsb)/.test(value)) return "#171a20";

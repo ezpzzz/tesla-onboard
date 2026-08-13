@@ -27,11 +27,14 @@ import "server-only";
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type { TeslaProfile, TeslaVehicle } from "./tesla";
 import {
+  displayTeslaColor,
   displayTeslaInterior,
   parseTeslaVehicleConfig,
   teslaInteriorOptionCode,
+  teslaPaintOptionCode,
   type RawTeslaVehicleConfig,
 } from "./tesla-vehicle-config";
 
@@ -234,6 +237,7 @@ async function fetchIdentity(
 }
 
 const VIN_YEARS: Record<string, number> = {
+  "8": 2008, "9": 2009,
   A: 2010, B: 2011, C: 2012, D: 2013, E: 2014, F: 2015, G: 2016, H: 2017,
   J: 2018, K: 2019, L: 2020, M: 2021, N: 2022, P: 2023, R: 2024, S: 2025,
   T: 2026, V: 2027, W: 2028, X: 2029, Y: 2030,
@@ -299,15 +303,20 @@ async function fetchVehicles(
         const interior = displayTeslaInterior(p.interior_trim_type)
           ?? displayTeslaInterior(p.interior_color)
           ?? displayTeslaInterior(interiorCode);
+        const paintCode = teslaPaintOptionCode(p.option_codes);
         return {
           id,
           displayName: p.display_name || model,
           model,
           year,
           vin,
+          color: displayTeslaColor(paintCode),
+          paintCode,
           interior,
           interiorCode,
-          ...(interior || interiorCode ? { specSource: "fleet-api" as const } : {}),
+          ...(interior || interiorCode || paintCode
+            ? { specSource: "fleet-api" as const }
+            : {}),
         } satisfies TeslaVehicle;
       });
     return { ok: true, status: 200, vehicles };
@@ -355,6 +364,7 @@ async function fetchVehicleConfig(
       config.model
       || config.trim
       || config.color
+      || config.paintCode
       || config.wheelType
       || config.interior
       || config.interiorCode
@@ -365,6 +375,7 @@ async function fetchVehicleConfig(
           model: config.model ?? vehicle.model,
           trim: config.trim ?? vehicle.trim,
           color: config.color ?? vehicle.color,
+          paintCode: config.paintCode ?? vehicle.paintCode,
           wheelType: config.wheelType ?? vehicle.wheelType,
           interior: config.interior ?? vehicle.interior,
           interiorCode: config.interiorCode ?? vehicle.interiorCode,
@@ -452,12 +463,24 @@ export function seal(value: unknown, secret: string, context: string): string {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", keyFrom(secret), iv);
   cipher.setAAD(Buffer.from(context, "utf8"));
+  // Version 1 compresses the profile before encryption. Owner imports can
+  // include ten enriched vehicles, which otherwise exceeds browsers' ~4 KiB
+  // per-cookie limit. The version byte keeps unseal backward-compatible with
+  // the pre-compression JSON format already present in production.
+  const encoded = Buffer.concat([
+    Buffer.from([1]),
+    deflateRawSync(Buffer.from(JSON.stringify(value), "utf8")),
+  ]);
   const data = Buffer.concat([
-    cipher.update(JSON.stringify(value), "utf8"),
+    cipher.update(encoded),
     cipher.final(),
   ]);
   const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, data]).toString("base64url");
+  const sealed = Buffer.concat([iv, tag, data]).toString("base64url");
+  // Leave room for the cookie name and attributes rather than relying on a
+  // browser-specific rejection threshold. Never truncate or omit vehicles.
+  if (sealed.length > 3_800) throw new Error("sealed_session_too_large");
+  return sealed;
 }
 
 export function unseal<T>(sealed: string, secret: string, context: string): T | null {
@@ -469,8 +492,11 @@ export function unseal<T>(sealed: string, secret: string, context: string): T | 
     const d = crypto.createDecipheriv("aes-256-gcm", keyFrom(secret), iv);
     d.setAAD(Buffer.from(context, "utf8"));
     d.setAuthTag(tag);
-    const out = Buffer.concat([d.update(data), d.final()]).toString("utf8");
-    return JSON.parse(out) as T;
+    const out = Buffer.concat([d.update(data), d.final()]);
+    const json = out[0] === 1
+      ? inflateRawSync(out.subarray(1)).toString("utf8")
+      : out.toString("utf8");
+    return JSON.parse(json) as T;
   } catch {
     return null;
   }
