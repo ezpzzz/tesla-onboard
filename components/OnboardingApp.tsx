@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { hostConfig } from "@/lib/config";
 import { buildFlow, indexOfStep, type Step } from "@/lib/flow";
 import { useOnboarding } from "@/lib/store";
+import { usePublishProgress } from "@/lib/progress-bridge";
 import { useStepHistory } from "@/lib/history-nav";
 import { AppShell } from "./ui";
 import { WelcomeStep } from "./steps/WelcomeStep";
@@ -17,6 +18,7 @@ import type { StepNav, StepProps } from "./step-types";
 
 export default function OnboardingApp() {
   const { state, hydrated, update, reset } = useOnboarding();
+  usePublishProgress(state, hydrated);
   const flow = useMemo(
     () => buildFlow(state.pathMode, { newToTesla: state.newToTesla }),
     [state.pathMode, state.newToTesla],

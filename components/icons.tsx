@@ -74,3 +74,48 @@ export const IconDownload = (p: P) => (
     <path d="M5 21h14" />
   </svg>
 );
+
+export const IconAlert = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+    <path d="M12 9v4" />
+    <path d="M12 17h.01" />
+  </svg>
+);
+
+export const IconUser = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M20 21a8 8 0 0 0-16 0" />
+    <circle cx="12" cy="7" r="4" />
+  </svg>
+);
+
+export const IconCar = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M5 17h14" />
+    <path d="M5 17a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 .32-1.09L5.5 8.4A3 3 0 0 1 8 7h8a3 3 0 0 1 2.5 1.4l2.18 3.01A2 2 0 0 1 21 12.5V15a2 2 0 0 1-2 2" />
+    <circle cx="7.5" cy="17" r="2" />
+    <circle cx="16.5" cy="17" r="2" />
+  </svg>
+);
+
+export const IconBattery = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="2" y="7" width="17" height="10" rx="2" />
+    <path d="M22 10.5v3" />
+    <rect x="5" y="10" width="4" height="4" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+export const IconClock = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+);
+
+export const IconChevronRight = (p: P) => (
+  <svg {...base(p)}>
+    <path d="m9 6 6 6-6 6" />
+  </svg>
+);

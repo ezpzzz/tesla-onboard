@@ -51,6 +51,29 @@ Welcome → Connect with Tesla → Your plan → [tutorial modules] → Readines
 Progress is saved to `localStorage`, so a guest can close the tab at the
 Supercharger and pick up exactly where they left off.
 
+### Owner dashboard
+
+A host-facing companion at **`/owner`** — drivers, trips, and live guest
+onboarding progress in one place, separate from the guest flow. It shows:
+
+- **Drivers & trips** — who's renting, which car, trip dates, and a per-trip
+  return checklist (charged to policy, keys returned, cleaned, no damage).
+- **Live onboarding progress** — if a guest opened their onboarding link in the
+  same browser, the matching trip shows their real-time progress (path chosen,
+  modules completed, readiness score) as they move through the flow.
+- **Charging sessions**, driver history, and alerts, all derived from the same
+  mock snapshot.
+
+It ships **mock-first**: `lib/owner/mock-data.ts` has literal fixture data, so
+the dashboard works with zero setup. Open <http://localhost:3000/owner> after
+`pnpm dev`.
+
+To see the live-progress feature, open the guest flow with a trip id attached —
+e.g. <http://localhost:3000/?trip=trip-11> — walk through a few steps, then
+check that trip's page under `/owner/trips/trip-11` in another tab. This only
+works within the same browser (there's no server sync yet); see
+[`lib/progress-bridge.ts`](lib/progress-bridge.ts) for how it works.
+
 ---
 
 ## Screenshots
