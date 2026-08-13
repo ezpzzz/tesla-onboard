@@ -365,7 +365,7 @@ No existing file outside the three listed as "Edited" (`lib/flow.ts`, `component
 `app/globals.css`, `components/ui.tsx`, `components/icons.tsx` — five edits total) is touched.
 `lib/store.ts`, `lib/tesla.ts`, `lib/tesla-server.ts`, `lib/content.ts`, `lib/config.ts`, and every
 `app/api/tesla/**` route are untouched.
-Addendum: a follow-up QA-fix commit (93e03b4) edited `lib/content.ts` to replace three module `youtubeId`s that violated the repo's "Official Tesla videos only" rule (oEmbed author was "Tesla Tutorials", not "Tesla") — an out-of-scope pre-existing defect caught during browser QA, unrelated to the owner dashboard.
+Addendum: a follow-up QA-fix commit (93e03b4) temporarily swapped three `lib/content.ts` module `youtubeId`s away from the `@tesla_tutorials` channel, after CLAUDE.md's stale single-channel phrasing ("author_name == 'Tesla'") made those ids look like a defect during browser QA. That swap was reversed once the owner's already-recorded acceptance of `@tesla_tutorials` (2026-06-16) surfaced — `lib/content.ts` on this branch ships identical to master, and the stale rule text in CLAUDE.md and README was corrected instead, out-of-scope pre-existing documentation drift unrelated to the owner dashboard itself.
 
 ## 6. Alert rules
 

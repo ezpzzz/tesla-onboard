@@ -71,10 +71,10 @@ A separate, host-facing surface living alongside the guest flow, not inside it �
 
 ### Official Tesla videos only (project rule)
 
-Module videos must come **exclusively from Tesla's official YouTube channel (@tesla)**. Every `youtubeId` must be verified via YouTube's oEmbed endpoint (`author_name == "Tesla"`) before being added — no third-party/aggregator channels. A module with no verified official video shows none (no link-card fallback, so no dead links).
+Module videos must come **exclusively from Tesla's official YouTube channels** — [`@tesla`](https://www.youtube.com/@tesla) and [`@tesla_tutorials`](https://www.youtube.com/@tesla_tutorials) (Tesla's own tutorial channel, the one tesla.com's support hub embeds). Every `youtubeId` must be verified via YouTube's oEmbed endpoint, accepting only `author_url` exactly `https://www.youtube.com/@tesla` or `https://www.youtube.com/@tesla_tutorials` — `author_name` alone is unreliable: the tutorial channel returns `"Tesla Tutorials"`, not `"Tesla"`. Prefer Highland-era (2024+ Model 3) footage; avoid the legacy 2017–2023 series. A module with no verified official video shows none (no link-card fallback, so no dead links).
 
 ```bash
-curl -s "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=<ID>" | jq .author_name
+curl -s "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=<ID>" | jq .author_url
 ```
 
 ## Conventions
