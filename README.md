@@ -127,29 +127,28 @@ Tutorial copy and the readiness checklist live in
 
 ### Official Tesla videos only
 
-Modules embed videos **exclusively from Tesla's own YouTube channels** —
-[`@tesla`](https://www.youtube.com/@tesla) and
-[`@tesla_tutorials`](https://www.youtube.com/@tesla_tutorials) (Tesla's dedicated
-tutorial channel, the same source Tesla embeds on its support pages). Every id was
-verified via YouTube's oEmbed endpoint to confirm the uploader is one of those two
-channels before being added — no third-party or aggregator videos. A module either
-has a verified official video or shows none (there is no link-card fallback, so no
-dead links).
+Modules embed videos **exclusively from Tesla's own YouTube channel**,
+[`@tesla`](https://www.youtube.com/@tesla). Every id was verified via YouTube's
+oEmbed endpoint to confirm `author_name` is exactly `"Tesla"` before being added —
+no third-party or aggregator videos (including similarly-named channels such as
+`@tesla_tutorials`, whose oEmbed `author_name` is `"Tesla Tutorials"`, not
+`"Tesla"`, and so does not qualify). A module either has a verified official video
+or shows none (there is no link-card fallback, so no dead links).
 
 Currently embedded:
 
 | Module | Official video | Channel |
 | --- | --- | --- |
-| Getting in | Access \| Model 3 Essentials | `@tesla_tutorials` |
+| Getting in | Model 3 Guide \| Phone Key | `@tesla` |
 | Start & drive | Your Tesla can shift directions for you | `@tesla` |
-| The touchscreen | Driver Controls \| Model 3 Essentials | `@tesla_tutorials` |
+| The touchscreen | Tesla Touchscreen \| Controls | `@tesla` |
 | Full Self-Driving | Full Self-Driving (Supervised) | `@tesla` |
-| How charging works / Charging this rental | Supercharging | `@tesla_tutorials` |
+| How charging works / Charging this rental | Model 3 Guide \| Charging | `@tesla` |
 
 To add or change one, verify it's official first, then set `youtubeId`:
 
 ```bash
-# Confirm author_url is youtube.com/@tesla or @tesla_tutorials before trusting an id:
+# Confirm author_name is exactly "Tesla" before trusting an id:
 curl -s "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=<ID>" | jq '.author_name, .author_url'
 ```
 ```ts

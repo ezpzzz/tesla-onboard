@@ -365,6 +365,7 @@ No existing file outside the three listed as "Edited" (`lib/flow.ts`, `component
 `app/globals.css`, `components/ui.tsx`, `components/icons.tsx` — five edits total) is touched.
 `lib/store.ts`, `lib/tesla.ts`, `lib/tesla-server.ts`, `lib/content.ts`, `lib/config.ts`, and every
 `app/api/tesla/**` route are untouched.
+Addendum: a follow-up QA-fix commit (93e03b4) edited `lib/content.ts` to replace three module `youtubeId`s that violated the repo's "Official Tesla videos only" rule (oEmbed author was "Tesla Tutorials", not "Tesla") — an out-of-scope pre-existing defect caught during browser QA, unrelated to the owner dashboard.
 
 ## 6. Alert rules
 

@@ -8,6 +8,7 @@
  */
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { driverStatus } from "@/lib/owner/derive";
@@ -71,10 +72,20 @@ function formatShortDate(ms: number): string {
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
 
+// Stable pre-hydration fallback so SSR markup matches the first client paint —
+// same pattern as app/owner/page.tsx and app/owner/drivers/page.tsx. `now`
+// only becomes the real clock after mount.
+const SSR_FALLBACK_NOW = 0;
+
 export default function DriverDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const { drivers, trips, hydrated } = useOwnerData();
+  const [now, setNow] = useState(SSR_FALLBACK_NOW);
+
+  useEffect(() => {
+    setNow(Date.now());
+  }, []);
 
   if (!hydrated) {
     return <EmptyState title="Loading…" />;
@@ -98,7 +109,6 @@ export default function DriverDetailPage() {
     );
   }
 
-  const now = Date.now();
   const status = driverStatus(driver, now);
   const progress = driver.progress;
   const pathMode = progress?.pathMode ?? "essentials";
