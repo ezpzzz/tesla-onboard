@@ -43,12 +43,39 @@ function seedState(): VehicleState {
   return { version: 1, vehicles: { [veh.id]: veh } };
 }
 
+function migrateSeedPresentation(state: VehicleState): VehicleState {
+  const seed = buildSeedVehicle();
+  const existing = state.vehicles[seed.id];
+  const isOriginalSeed = !!existing
+    && existing.createdAt === seed.createdAt
+    && existing.vin === null
+    && !existing.teslaImportKey
+    && existing.model === seed.model
+    && existing.trim === seed.trim
+    && existing.year === seed.year
+    && existing.color === seed.color;
+  if (!isOriginalSeed || !existing) return state;
+  if (Object.prototype.hasOwnProperty.call(existing, "interior")) return state;
+  return {
+    ...state,
+    vehicles: {
+      ...state.vehicles,
+      [seed.id]: {
+        ...existing,
+        interior: seed.interior,
+        teslaInteriorCode: seed.teslaInteriorCode,
+        teslaPaintCode: seed.teslaPaintCode,
+      },
+    },
+  };
+}
+
 export function loadVehicleState(): VehicleState {
   if (typeof window === "undefined") return initialVehicleState;
   try {
     const raw = window.localStorage.getItem(VEHICLE_KEY);
     if (!raw) return seedState();
-    return { ...initialVehicleState, ...JSON.parse(raw) };
+    return migrateSeedPresentation({ ...initialVehicleState, ...JSON.parse(raw) });
   } catch {
     return initialVehicleState;
   }

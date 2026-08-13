@@ -20,6 +20,16 @@ export interface TeslaVehicle {
   model: string; // "Model 3", "Model Y", …
   year?: number;
   vin?: string;
+  trim?: string;
+  color?: string;
+  /** Exact Design Studio paint option when Tesla includes option_codes. */
+  paintCode?: string;
+  wheelType?: string;
+  interior?: string;
+  /** Exact Design Studio option code when Tesla includes option_codes. */
+  interiorCode?: string;
+  /** Present only when the owner-side OAuth callback reached vehicle_config. */
+  specSource?: "fleet-api";
 }
 
 export interface TeslaProfile {
@@ -57,7 +67,18 @@ export const TESLA_PERSONAS: TeslaPersona[] = [
       email: "alex@example.com",
       source: "mock",
       vehicles: [
-        { id: "v1", displayName: "Alex's Model Y", model: "Model Y", year: 2023 },
+        {
+          id: "v1",
+          displayName: "Alex's Model Y",
+          model: "Model Y",
+          year: 2023,
+          trim: "Long Range AWD",
+          color: "Deep Blue Metallic",
+          wheelType: '19" Gemini Wheels',
+          interior: "Black Interior",
+          interiorCode: "INPB0",
+          specSource: "fleet-api",
+        },
       ],
     },
   },

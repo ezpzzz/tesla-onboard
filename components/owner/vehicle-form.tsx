@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import type { VehicleInput } from "@/lib/owner/types";
+import type { VehicleInput, VehicleShifter } from "@/lib/owner/types";
 import { validateVehicleInput } from "@/lib/owner/vehicle-state";
 import { Button, Segmented } from "../ui";
 
@@ -39,7 +39,9 @@ interface FormValues {
   trim: string;
   year: string;
   color: string;
-  shifter: "stalk" | "screen";
+  interior: string;
+  wheelType: string;
+  shifter: VehicleShifter;
   licensePlate: string;
   vin: string;
   returnChargeLevelPct: string;
@@ -53,6 +55,8 @@ function initialFormValues(initial: Partial<VehicleInput> | undefined): FormValu
     trim: initial?.trim ?? "",
     year: initial?.year !== undefined ? String(initial.year) : String(SSR_FALLBACK_YEAR),
     color: initial?.color ?? "",
+    interior: initial?.interior ?? "",
+    wheelType: initial?.wheelType ?? "",
     shifter: initial?.shifter ?? "stalk",
     licensePlate: initial?.licensePlate ?? "",
     vin: initial?.vin ?? "",
@@ -64,10 +68,18 @@ function initialFormValues(initial: Partial<VehicleInput> | undefined): FormValu
   };
 }
 
-function toVehicleInput(values: FormValues): VehicleInput {
+function toVehicleInput(
+  values: FormValues,
+  preserved?: Partial<VehicleInput>,
+): VehicleInput {
   const trimmedPlate = values.licensePlate.trim();
   const trimmedVin = values.vin.trim();
   const trimmedPct = values.returnChargeLevelPct.trim();
+  const trimmedInterior = values.interior.trim();
+  const trimmedWheelType = values.wheelType.trim();
+  const interiorChanged = trimmedInterior !== (preserved?.interior ?? "");
+  const colorChanged = values.color.trim() !== (preserved?.color ?? "");
+  const interiorCode = interiorChanged ? null : preserved?.teslaInteriorCode ?? null;
   return {
     displayName: values.displayName.trim(),
     model: values.model.trim(),
@@ -79,6 +91,13 @@ function toVehicleInput(values: FormValues): VehicleInput {
     vin: trimmedVin === "" ? null : trimmedVin,
     returnChargeLevelPct: trimmedPct === "" ? null : Number(trimmedPct),
     notes: values.notes,
+    wheelType: trimmedWheelType === "" ? null : trimmedWheelType,
+    interior: trimmedInterior === "" ? null : trimmedInterior,
+    teslaInteriorCode: interiorCode,
+    teslaPaintCode: colorChanged ? null : preserved?.teslaPaintCode ?? null,
+    teslaSpecSource: preserved?.teslaSpecSource ?? null,
+    teslaImportedSpec: preserved?.teslaImportedSpec ?? null,
+    teslaImportKey: preserved?.teslaImportKey ?? null,
   };
 }
 
@@ -142,7 +161,7 @@ export function VehicleForm({
       // its message immediately instead of staying stuck until resubmit.
       setErrors((prevErrors) =>
         Object.keys(prevErrors).length > 0
-          ? validateVehicleInput(toVehicleInput(next), currentYear)
+          ? validateVehicleInput(toVehicleInput(next, initialValues), currentYear)
           : prevErrors,
       );
       return next;
@@ -151,7 +170,7 @@ export function VehicleForm({
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const input = toVehicleInput(values);
+    const input = toVehicleInput(values, initialValues);
     const fieldErrors = validateVehicleInput(input, currentYear);
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors);
@@ -252,6 +271,32 @@ export function VehicleForm({
         </Field>
       </div>
 
+      <Field id="vehicle-interior" label="Interior color">
+        <input
+          id="vehicle-interior"
+          name="interior"
+          type="text"
+          autoComplete="off"
+          value={values.interior}
+          onChange={(e) => set("interior", e.target.value)}
+          className="field"
+          placeholder="e.g. White Interior"
+        />
+      </Field>
+
+      <Field id="vehicle-wheelType" label="Wheels">
+        <input
+          id="vehicle-wheelType"
+          name="wheelType"
+          type="text"
+          autoComplete="off"
+          value={values.wheelType}
+          onChange={(e) => set("wheelType", e.target.value)}
+          className="field"
+          placeholder={'e.g. 20" Warp Wheels'}
+        />
+      </Field>
+
       <div>
         <span id="vehicle-shifter-label" className="mb-1.5 block text-xs font-medium text-muted">
           Shifter
@@ -261,6 +306,7 @@ export function VehicleForm({
             options={[
               { value: "stalk", label: "Column stalk" },
               { value: "screen", label: "Touchscreen" },
+              { value: "console", label: "Center console" },
             ]}
             value={values.shifter}
             onChange={(v) => set("shifter", v)}

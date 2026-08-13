@@ -31,6 +31,7 @@ import { VehicleForm } from "@/components/owner/vehicle-form";
 import { EmptyState, formatDate, StatTile, TripStatusBadge } from "@/components/owner/owner-ui";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconChevronRight } from "@/components/icons";
+import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { VehicleInput } from "@/lib/owner/types";
 
 export default function VehicleDetailPage() {
@@ -127,6 +128,13 @@ export default function VehicleDetailPage() {
     vin: vehicle.vin,
     returnChargeLevelPct: vehicle.returnChargeLevelPct,
     notes: vehicle.notes,
+    wheelType: vehicle.wheelType,
+    interior: vehicle.interior,
+    teslaInteriorCode: vehicle.teslaInteriorCode,
+    teslaPaintCode: vehicle.teslaPaintCode,
+    teslaSpecSource: vehicle.teslaSpecSource,
+    teslaImportedSpec: vehicle.teslaImportedSpec,
+    teslaImportKey: vehicle.teslaImportKey,
   };
 
   function handleSubmit(input: VehicleInput) {
@@ -154,6 +162,18 @@ export default function VehicleDetailPage() {
         </Link>
         {vehicle.status === "archived" && <Badge>Archived</Badge>}
       </div>
+
+      <VehicleArtwork
+        model={vehicle.model}
+        color={vehicle.color}
+        trim={vehicle.trim}
+        wheelType={vehicle.wheelType}
+        interior={vehicle.interior}
+        interiorCode={vehicle.teslaInteriorCode}
+        paintCode={vehicle.teslaPaintCode}
+        year={vehicle.year}
+        className="h-64 md:h-72"
+      />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatTile label="Trips" value={stats.tripCount} />

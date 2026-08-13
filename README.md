@@ -66,6 +66,12 @@ onboarding progress in one place, separate from the guest flow. It shows:
 - **Vehicle management** — add, edit, and archive the cars on the account, with
   a single policy-percentage calculation shared everywhere it's shown. Archived
   vehicles are hidden, not deleted, so past trips and drivers stay intact.
+- **Richer Tesla imports** — the owner connect performs one optional, no-wake
+  `vehicle_config` read for each of the first 10 cars to fill trim, exterior
+  and interior color, and wheel type.
+  Owner and renter cards share first-party Tesla Design Studio renders when
+  model generation, trim, paint, and wheels can all be matched. Unknown or
+  legacy configurations use a neutral fallback instead of a mismatched car.
 - **First-run setup wizard** — `/owner/setup` walks a new host through
   connecting their own Tesla account, importing their vehicles (deduped so
   re-running it never creates duplicates), and confirming rental settings.
@@ -250,7 +256,10 @@ only the profile is sealed into an httpOnly cookie.
 Token exchange uses `fleet-auth.prd.vn.cloud.tesla.com` (separate host from
 authorize, as Tesla requires); region is auto-discovered via `/api/1/users/region`;
 identity is read tolerantly from `/api/1/users/me` and the `id_token`; vehicle
-`model`/`year` are derived from the VIN (they aren't fields on the vehicle object).
+`model`/`year` are derived from the VIN. The owner callback additionally makes
+one best-effort, no-wake `vehicle_data?endpoints=vehicle_config` read for each
+of the first 10 cars to import trim, exterior/interior color, and wheels. The
+guest sign-in remains list-only.
 
 **Setup**
 
@@ -326,11 +335,12 @@ scripts/
 ## Notes
 
 - **Privacy posture is real, not decorative.** The integration is read-only and
-  scoped to identity + vehicle list. The consent screen says so plainly.
+  scoped to identity + vehicle data. Owner import reads vehicle configuration
+  once, never wakes or controls the car, and then discards the token.
 - **Accessible & mobile-first.** Phone-width app shell, large tap targets, visible
   focus rings, keyboard-operable controls — guests will use this on a phone, at the car.
-- Official Tesla videos and the Tesla name belong to Tesla; this app links to /
-  embeds first-party material rather than rehosting it.
+- Official Tesla videos, vehicle artwork, and the Tesla name belong to Tesla;
+  this app links to / embeds first-party material rather than rehosting it.
 
 ---
 

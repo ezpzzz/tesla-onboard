@@ -4,6 +4,12 @@ import { useRouter } from "next/navigation";
 import { hostConfig } from "@/lib/config";
 import { Button, StepFrame } from "@/components/ui";
 import { IconArrowRight, IconBolt, IconCar, IconSparkle } from "@/components/icons";
+import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
+import {
+  LISTING_TESLA_INTERIOR,
+  LISTING_TESLA_INTERIOR_CODE,
+  LISTING_TESLA_PAINT_CODE,
+} from "@/lib/listing-vehicle-media";
 import type { SetupStepProps } from "./types";
 
 const highlights = [
@@ -44,20 +50,27 @@ export function WelcomeStep({ nav, update }: SetupStepProps) {
         </div>
       }
     >
-      <div
-        className="relative mb-6 overflow-hidden rounded-3xl p-6 text-white"
-        style={{ backgroundImage: "linear-gradient(135deg, #171a20, #393c41)" }}
-      >
+      <div className="relative mb-7">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/60">
+          <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
             {hostConfig.companyName}
           </span>
           <span className="h-3 w-3 rounded-full bg-brand shadow-[0_0_12px_2px] shadow-brand/50" />
         </div>
-        <div className="mt-10">
-          <div className="text-5xl leading-none">🚗⚡</div>
-          <div className="mt-3 text-2xl font-semibold tracking-tight">Set up your fleet</div>
-          <div className="text-sm text-white/60">A quick pass before your first guest arrives</div>
+        <VehicleArtwork
+          model={hostConfig.car.model}
+          color={hostConfig.car.color}
+          trim={hostConfig.car.trim}
+          interior={LISTING_TESLA_INTERIOR}
+          interiorCode={LISTING_TESLA_INTERIOR_CODE}
+          paintCode={LISTING_TESLA_PAINT_CODE}
+          year={hostConfig.car.year}
+          eager
+          className="mt-2 h-48 sm:h-64"
+        />
+        <div className="mt-1">
+          <div className="text-2xl font-semibold tracking-tight text-ink">Set up your fleet</div>
+          <div className="text-sm text-muted">A quick pass before your first guest arrives</div>
         </div>
       </div>
 
