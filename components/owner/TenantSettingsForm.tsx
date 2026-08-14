@@ -352,6 +352,28 @@ export function TenantSettingsForm({
       </SettingsSection>
 
       <SettingsSection title="Rental policy">
+        <div className="rounded-xl border border-line bg-surface px-3.5 py-3 text-sm leading-relaxed text-muted">
+          Starter wording is based on Turo&apos;s current US guest responsibilities and EV-charging
+          guidance. Review and edit it for this listing; the live Turo trip agreement and policies
+          always control. See Turo&apos;s{" "}
+          <a
+            href="https://turo.com/us/en/policies/terms"
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-brand underline underline-offset-2"
+          >
+            Terms of service
+          </a>{" "}
+          and{" "}
+          <a
+            href="https://help.turo.com/en_us/paying-for-fuel-rJkqN4eV9"
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-brand underline underline-offset-2"
+          >
+            EV charging policy
+          </a>.
+        </div>
         <Field multiline label="Key access" value={draft.rental.keyAccess} onChange={(keyAccess) => patchRoot({ rental: { ...draft.rental, keyAccess } })} />
         <Field multiline label="Charge access" value={draft.rental.chargeAccess} onChange={(chargeAccess) => patchRoot({ rental: { ...draft.rental, chargeAccess } })} />
         <Field multiline label="Charging policy" value={draft.rental.chargingPolicy} onChange={(chargingPolicy) => patchRoot({ rental: { ...draft.rental, chargingPolicy } })} />

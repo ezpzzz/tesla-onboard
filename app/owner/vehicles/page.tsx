@@ -2,7 +2,7 @@
 
 /**
  * Vehicle list — every car in the fleet, active first with lifetime stats,
- * archived below de-emphasized. Vehicle CRUD state comes from
+ * removed vehicles below de-emphasized. Vehicle CRUD state comes from
  * useVehicleState() directly (not the merged snapshot in useOwnerData())
  * so mutations here render immediately in this same tree; trips/charging
  * data for the stat tiles still comes from useOwnerData().
@@ -139,7 +139,7 @@ export default function VehiclesPage() {
   }
 
   const active = vehicles.filter((v) => v.status === "active");
-  const archived = vehicles.filter((v) => v.status === "archived");
+  const removed = vehicles.filter((v) => v.status === "archived");
   const guestVehicle = config.car.sourceVehicleId
     ? vehicles.find((vehicle) => vehicle.guestSourceId === config.car.sourceVehicleId)
     : null;
@@ -208,13 +208,13 @@ export default function VehiclesPage() {
         </div>
       )}
 
-      {archived.length > 0 && (
+      {removed.length > 0 && (
         <div>
           <div className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-muted">
-            Archived
+            Removed vehicles
           </div>
           <div className="space-y-2">
-            {archived.map((vehicle) => (
+            {removed.map((vehicle) => (
               <Card
                 key={vehicle.id}
                 className="flex flex-wrap items-center justify-between gap-3 p-3.5 opacity-70"
@@ -226,7 +226,7 @@ export default function VehiclesPage() {
                   >
                     {vehicle.displayName}
                   </Link>
-                  <Badge>Archived</Badge>
+                  <Badge>Removed</Badge>
                 </div>
                 <Button
                   variant="secondary"
@@ -237,7 +237,7 @@ export default function VehiclesPage() {
                     });
                   }}
                 >
-                  Unarchive
+                  Restore
                 </Button>
               </Card>
             ))}

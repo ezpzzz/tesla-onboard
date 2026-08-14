@@ -70,9 +70,9 @@ onboarding progress in one place, separate from the guest flow. It shows:
 - **Charging sessions**, driver history, and alerts, ready for a persistent
   bookings/charging adapter; until one is connected these surfaces render
   explicit empty states rather than sample activity.
-- **Vehicle management** — add, edit, and archive the cars on the account, with
-  a single policy-percentage calculation shared everywhere it's shown. Archived
-  vehicles are hidden, not deleted, so past trips and drivers stay intact.
+- **Vehicle management** — add, edit, remove, and restore cars on the account, with
+  a single policy-percentage calculation shared everywhere it's shown. Removed
+  vehicles are hidden with a reversible archive, so past trips and drivers stay intact.
 - **Richer Tesla imports** — the owner connect performs one optional, no-wake
   `vehicle_config` read for each of the first 10 cars to fill trim, exterior
   and interior color, and wheel type.
@@ -238,8 +238,8 @@ The guest vehicle can be linked to an active fleet record so Tesla trim, paint,
 interior, and wheel option codes remain attached to the published configuration.
 Only guest-safe presentation fields are materialized in workspace branding; VIN,
 plate, notes, and operational data stay in the private owner store. When that
-linked record changes, an owner session refreshes the public snapshot. Removing,
-archiving, or manually unlinking that record unpublishes guest onboarding rather
+linked record changes, an owner session refreshes the public snapshot. Removing
+or manually unlinking that record unpublishes guest onboarding rather
 than silently allowing drift.
 Guest links carry an unambiguous `?tenant=<workspace-id>~<shop-slug>` reference
 so the public walkthrough resolves the correct branded shop at runtime—even

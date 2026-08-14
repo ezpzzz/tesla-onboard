@@ -127,7 +127,7 @@ export function TripStatusBadge({ status }: { status: TripStatus }) {
 /* ── Vehicle chip ──────────────────────────────────────────────────────────
  * A small linked label used anywhere a row needs to name its vehicle (trip
  * rows, trip detail headers). Renders plain text — no link — when the
- * vehicle can't be resolved, and flags archived vehicles inline so a host
+ * vehicle can't be resolved, and flags removed vehicles inline so a host
  * scanning a trip list isn't surprised by a vehicle that's no longer active. */
 
 export function VehicleChip({ vehicle }: { vehicle: Vehicle | null }) {
@@ -140,7 +140,7 @@ export function VehicleChip({ vehicle }: { vehicle: Vehicle | null }) {
       className="inline-flex min-h-[28px] items-center gap-1.5 text-ink-soft hover:text-brand"
     >
       <span className="truncate">{vehicle.displayName}</span>
-      {vehicle.status === "archived" && <Badge tone="neutral">Archived</Badge>}
+      {vehicle.status === "archived" && <Badge tone="neutral">Removed</Badge>}
     </Link>
   );
 }
@@ -536,7 +536,7 @@ export function TripTable({
                 <span className="truncate">
                   {row.vehicle ? row.vehicle.displayName : "Unknown vehicle"}
                 </span>
-                {row.vehicle?.status === "archived" && <Badge tone="neutral">Archived</Badge>}
+                {row.vehicle?.status === "archived" && <Badge tone="neutral">Removed</Badge>}
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted">
                 <span>{row.miles === null ? "—" : `${Math.round(row.miles)} mi`}</span>
