@@ -77,7 +77,7 @@ const DEMO_OWNER_TENANT: OwnerTenantContextValue = {
 };
 
 /**
- * Keep the public guest snapshot synchronized with its private browser-local
+ * Keep the public guest snapshot synchronized with its private workspace fleet
  * source whenever this owner session can see that vehicle. This publishes
  * presentation fields only; VIN, plate, notes, and telemetry never leave the
  * owner store.
@@ -85,12 +85,12 @@ const DEMO_OWNER_TENANT: OwnerTenantContextValue = {
 function GuestVehicleSync() {
   const { config } = useTenantConfig();
   const { workspace, saveConfig } = useOwnerTenant();
-  const { vehicles, hydrated } = useVehicleState();
+  const { vehicles, hydrated, error } = useVehicleState();
   const attemptedKey = useRef<string | null>(null);
 
   useEffect(() => {
     const sourceId = config.car.sourceVehicleId;
-    if (!workspace || !hydrated || !sourceId) return;
+    if (!workspace || !hydrated || error || !sourceId) return;
     const source = vehicles.find((vehicle) =>
       vehicle.guestSourceId === sourceId && vehicle.status === "active"
     );
@@ -107,7 +107,7 @@ function GuestVehicleSync() {
       // TenantSettingsForm exposes the stale state and lets the owner retry.
       // Avoid an effect retry loop when the workspace optimistic lock rejects.
     });
-  }, [config, hydrated, saveConfig, vehicles, workspace]);
+  }, [config, error, hydrated, saveConfig, vehicles, workspace]);
 
   return null;
 }
@@ -300,7 +300,7 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
       if (current.brandingUpdatedAt) {
         const { data, error: updateError } = await supabase
           .from("workspace_branding")
-          .update({ features })
+          .update({ features, display_name: config.companyName })
           .eq("workspace_id", current.id)
           .eq("shop_slug", current.shopSlug)
           .eq("updated_at", current.brandingUpdatedAt)
@@ -334,6 +334,9 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
                 config,
                 features: saved?.features ?? features,
                 shopSlug: saved?.shop_slug ?? item.shopSlug,
+                name: workspaces.filter((candidate) => candidate.id === item.id).length > 1
+                  ? `${item.name.replace(/ — .+$/, "")} — ${saved?.display_name ?? config.companyName}`
+                  : item.name,
                 brandingUpdatedAt: saved?.updated_at ?? item.brandingUpdatedAt,
               }
             : item,

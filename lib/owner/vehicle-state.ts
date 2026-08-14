@@ -1,39 +1,55 @@
 "use client";
 
 /**
- * Owner-side vehicle fleet state: the host's editable roster of cars this
- * listing has ever used. Mirrors lib/owner/owner-state.ts's load/save/hook
- * pattern exactly (localStorage, spread-merge on load, try/catch around every
- * access), but keyed separately so it never collides with `rtr:owner:v1` or
- * the guest's `rtr:state:v1`.
+ * Workspace fleet state.
  *
- * Fresh stores start empty. Vehicles enter the roster only through a real
- * Tesla import or an explicit manual add. The load migration removes the old
- * deterministic listing seed and the former mock-Tesla persona import while
- * preserving every real, imported, or owner-edited vehicle.
+ * Authenticated workspace tenants use `public.onlyevs_vehicles` as the source
+ * of truth. The historical localStorage roster is read exactly once, migrated
+ * without overwriting database rows, then removed. The no-Supabase demo keeps
+ * the original tenant-scoped browser store so local preview still works.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
+import {
+  fetchWorkspaceVehicles,
+  insertWorkspaceVehicle,
+  migrateBrowserVehicles,
+  replaceWorkspaceVehicle,
+  setWorkspaceVehicleStatus,
+  vehicleWorkspaceScope,
+  type VehicleWorkspaceScope,
+} from "./vehicle-repository";
 import type { Vehicle, VehicleInput } from "./types";
 
+/** Historical browser source. Kept only for demo mode and one-time migration. */
 export const VEHICLE_KEY = "rtr:vehicles:v1";
+export const VEHICLE_MIGRATION_KEY = "rtr:vehicles:migrated:v2";
 
 export interface VehicleState {
-  version: 1;
+  version: 2;
   vehicles: Record<string, Vehicle>;
 }
 
-export const initialVehicleState: VehicleState = { version: 1, vehicles: {} };
+export const initialVehicleState: VehicleState = { version: 2, vehicles: {} };
+
+interface RemoteSnapshot {
+  state: VehicleState;
+  hydrated: boolean;
+  error: string | null;
+}
+
+const remoteSnapshots = new Map<string, RemoteSnapshot>();
+const remoteListeners = new Map<string, Set<() => void>>();
+const remoteLoads = new Map<string, Promise<VehicleState>>();
+const browserListeners = new Set<() => void>();
 
 function newGuestSourceId(): string {
   if (typeof window === "undefined") {
     throw new Error("Guest vehicle source IDs can only be created in a browser.");
   }
-  if (typeof window.crypto?.randomUUID === "function") {
-    return window.crypto.randomUUID();
-  }
+  if (typeof window.crypto?.randomUUID === "function") return window.crypto.randomUUID();
   const bytes = window.crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
@@ -41,33 +57,45 @@ function newGuestSourceId(): string {
   return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
 }
 
-/* Same-tab cross-instance sync: multiple useVehicleState() call sites (owner
- * pages, use-owner-data) each hold their own copy of VehicleState. Without
- * this, a mutation from one instance leaves every other mounted instance
- * stale until it happens to re-render for an unrelated reason (storage
- * events only fire cross-tab, never same-tab). */
-const listeners = new Set<() => void>();
+function stateFromVehicles(vehicles: Vehicle[]): VehicleState {
+  return {
+    version: 2,
+    vehicles: Object.fromEntries(vehicles.map((vehicle) => [vehicle.id, vehicle])),
+  };
+}
 
-function notifyVehicleStateChange(): void {
-  listeners.forEach((listener) => listener());
+function remoteSnapshot(scope: VehicleWorkspaceScope): RemoteSnapshot {
+  return remoteSnapshots.get(scope.key) ?? {
+    state: initialVehicleState,
+    hydrated: false,
+    error: null,
+  };
+}
+
+function publishRemoteSnapshot(scope: VehicleWorkspaceScope, snapshot: RemoteSnapshot): void {
+  remoteSnapshots.set(scope.key, snapshot);
+  remoteListeners.get(scope.key)?.forEach((listener) => listener());
+}
+
+function subscribeRemote(scope: VehicleWorkspaceScope, listener: () => void): () => void {
+  const listeners = remoteListeners.get(scope.key) ?? new Set<() => void>();
+  listeners.add(listener);
+  remoteListeners.set(scope.key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) remoteListeners.delete(scope.key);
+  };
 }
 
 const LEGACY_MOCK_SEED_EPOCH = Date.UTC(2026, 0, 1);
 
 function isLegacyMockVehicle(vehicle: Vehicle): boolean {
-  // The former listing seed was the only record created with this fixed pair
-  // of timestamps. Any owner edit updates `updatedAt`, so edited records stay.
   const isUntouchedListingSeed = vehicle.id === "veh-01"
     && vehicle.createdAt === LEGACY_MOCK_SEED_EPOCH
     && vehicle.updatedAt === LEGACY_MOCK_SEED_EPOCH
     && vehicle.vin === null
     && !vehicle.teslaImportKey;
-
-  // The former Tesla owner persona used the non-numeric synthetic id `v1`.
-  // Real Fleet API vehicle ids are not this fixture key, so removing it does
-  // not touch a genuine Tesla import even if other presentation fields changed.
   const isMockTeslaPersonaImport = vehicle.teslaImportKey === "v1";
-
   return isUntouchedListingSeed || isMockTeslaPersonaImport;
 }
 
@@ -101,31 +129,104 @@ export function ensureGuestSourceIds(state: VehicleState): VehicleState {
   return changed ? { ...state, vehicles } : state;
 }
 
-export function loadVehicleState(tenantSlug?: string | null): VehicleState {
-  if (typeof window === "undefined") return initialVehicleState;
+function parseStoredVehicleState(key: string): VehicleState {
   try {
-    const key = migrateLegacyStorage(VEHICLE_KEY, tenantSlug);
     const raw = window.localStorage.getItem(key);
     if (!raw) return initialVehicleState;
-    const parsed = { ...initialVehicleState, ...JSON.parse(raw) } as VehicleState;
-    const migrated = ensureGuestSourceIds(removeLegacyMockVehicles(parsed));
-    if (migrated !== parsed) {
-      window.localStorage.setItem(key, JSON.stringify(migrated));
-    }
+    const parsed = JSON.parse(raw) as { vehicles?: Record<string, Vehicle> };
+    const loaded: VehicleState = {
+      version: 2,
+      vehicles: parsed.vehicles && typeof parsed.vehicles === "object" ? parsed.vehicles : {},
+    };
+    const migrated = ensureGuestSourceIds(removeLegacyMockVehicles(loaded));
+    if (migrated !== loaded) window.localStorage.setItem(key, JSON.stringify(migrated));
     return migrated;
   } catch {
     return initialVehicleState;
   }
 }
 
+export function loadVehicleState(tenantSlug?: string | null): VehicleState {
+  if (typeof window === "undefined") return initialVehicleState;
+  return parseStoredVehicleState(migrateLegacyStorage(VEHICLE_KEY, tenantSlug));
+}
+
+/** Never assign the former unscoped store to an arbitrary workspace. */
+function loadScopedBrowserMigrationState(tenantSlug: string): VehicleState {
+  return parseStoredVehicleState(scopedStorageKey(VEHICLE_KEY, tenantSlug));
+}
+
 export function saveVehicleState(state: VehicleState, tenantSlug?: string | null): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(scopedStorageKey(VEHICLE_KEY, tenantSlug), JSON.stringify(state));
-    notifyVehicleStateChange();
+    browserListeners.forEach((listener) => listener());
   } catch {
-    /* storage unavailable (private mode / full disk) — degrade gracefully */
+    // Browser-only demo mode remains usable in-memory when storage is blocked.
   }
+}
+
+function browserMigrationComplete(tenantSlug: string): boolean {
+  try {
+    return window.localStorage.getItem(scopedStorageKey(VEHICLE_MIGRATION_KEY, tenantSlug)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function completeBrowserMigration(tenantSlug: string): void {
+  try {
+    window.localStorage.removeItem(scopedStorageKey(VEHICLE_KEY, tenantSlug));
+    window.localStorage.setItem(scopedStorageKey(VEHICLE_MIGRATION_KEY, tenantSlug), "1");
+  } catch {
+    // The database already owns the migrated records. A future load safely
+    // dedupes again if the browser refuses the marker/removal writes.
+  }
+}
+
+async function loadRemoteState(
+  scope: VehicleWorkspaceScope,
+  tenantSlug: string,
+  force = false,
+): Promise<VehicleState> {
+  const existing = remoteSnapshot(scope);
+  if (!force && existing.hydrated && !existing.error) return existing.state;
+  const inFlight = remoteLoads.get(scope.key);
+  if (inFlight) return inFlight;
+
+  const load = (async () => {
+    try {
+      let remote = await fetchWorkspaceVehicles(scope);
+      if (!browserMigrationComplete(tenantSlug)) {
+        const local = loadScopedBrowserMigrationState(tenantSlug);
+        remote = await migrateBrowserVehicles(scope, Object.values(local.vehicles), remote);
+        completeBrowserMigration(tenantSlug);
+      }
+      const state = stateFromVehicles(remote);
+      publishRemoteSnapshot(scope, { state, hydrated: true, error: null });
+      return state;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Workspace vehicles could not be loaded.";
+      publishRemoteSnapshot(scope, { state: existing.state, hydrated: true, error: message });
+      throw error;
+    } finally {
+      remoteLoads.delete(scope.key);
+    }
+  })();
+  remoteLoads.set(scope.key, load);
+  return load;
+}
+
+function replaceRemoteVehicleInState(scope: VehicleWorkspaceScope, vehicle: Vehicle): void {
+  const current = remoteSnapshot(scope).state;
+  publishRemoteSnapshot(scope, {
+    state: {
+      ...current,
+      vehicles: { ...current.vehicles, [vehicle.id]: vehicle },
+    },
+    hydrated: true,
+    error: null,
+  });
 }
 
 export function nextVehicleId(state: VehicleState): string {
@@ -140,19 +241,16 @@ export function nextVehicleId(state: VehicleState): string {
 
 export function validateVehicleInput(
   input: VehicleInput,
-  currentYear: number
+  currentYear: number,
 ): Partial<Record<keyof VehicleInput, string>> {
   const errors: Partial<Record<keyof VehicleInput, string>> = {};
-
   if (!input.displayName.trim()) errors.displayName = "Display name is required.";
   if (!input.model.trim()) errors.model = "Model is required.";
   if (!input.trim.trim()) errors.trim = "Trim is required.";
   if (!input.color.trim()) errors.color = "Color is required.";
-
   if (!Number.isFinite(input.year) || input.year < 2008 || input.year > currentYear + 1) {
     errors.year = `Year must be between 2008 and ${currentYear + 1}.`;
   }
-
   if (input.returnChargeLevelPct !== null) {
     const pct = input.returnChargeLevelPct;
     if (!Number.isFinite(pct) || pct < 10 || pct > 100) {
@@ -160,41 +258,76 @@ export function validateVehicleInput(
         "Return charge must be between 10% and 100%, or left blank to use the global policy.";
     }
   }
-
   return errors;
 }
 
-/** False only when `id` is the sole active vehicle — every other case (not
- * found, already archived, or one of several active vehicles) is archivable. */
+/** False only when `id` is the sole active vehicle. */
 export function canArchiveVehicle(state: VehicleState, id: string): boolean {
   const target = state.vehicles[id];
   if (!target || target.status !== "active") return true;
-  const activeCount = Object.values(state.vehicles).filter((v) => v.status === "active").length;
-  return activeCount > 1;
+  return Object.values(state.vehicles).filter((vehicle) => vehicle.status === "active").length > 1;
 }
 
 export function useVehicleState() {
   const { tenantSlug } = useTenantConfig();
+  const scope = useMemo(() => vehicleWorkspaceScope(tenantSlug), [tenantSlug]);
   const [state, setState] = useState<VehicleState>(initialVehicleState);
+  const [hydrated, setHydrated] = useState(false);
   const [hydratedScope, setHydratedScope] = useState<string | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  const scopeKey = scope?.key ?? tenantSlug ?? null;
 
   useEffect(() => {
-    setState(loadVehicleState(tenantSlug));
-    setHydratedScope(tenantSlug);
-    // Re-read whenever any useVehicleState() instance (this one included)
-    // saves — keeps every mounted instance in sync within the same tab.
-    const onChange = () => setState(loadVehicleState(tenantSlug));
-    listeners.add(onChange);
-    return () => {
-      listeners.delete(onChange);
+    if (!scope || !tenantSlug) {
+      const syncBrowser = () => {
+        setState(loadVehicleState(tenantSlug));
+        setHydrated(true);
+        setHydratedScope(scopeKey);
+        setError(null);
+      };
+      syncBrowser();
+      browserListeners.add(syncBrowser);
+      return () => {
+        browserListeners.delete(syncBrowser);
+      };
+    }
+
+    const syncRemote = () => {
+      const snapshot = remoteSnapshot(scope);
+      setState(snapshot.state);
+      setHydrated(snapshot.hydrated);
+      setHydratedScope(scopeKey);
+      setError(snapshot.error);
     };
-  }, [tenantSlug]);
+    syncRemote();
+    const unsubscribe = subscribeRemote(scope, syncRemote);
+    void loadRemoteState(scope, tenantSlug).catch(() => undefined);
 
-  const hydrated = hydratedScope !== undefined && hydratedScope === tenantSlug;
+    const refreshOnFocus = () => {
+      void loadRemoteState(scope, tenantSlug, true).catch(() => undefined);
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", refreshOnFocus);
+    };
+  }, [scope, scopeKey, tenantSlug]);
 
-  const addVehicle = useCallback((input: VehicleInput): string => {
-    // Read fresh from storage rather than the closed-over `state` so two
-    // rapid calls (or a call right after mount) never race on a stale id.
+  const refresh = useCallback(async () => {
+    if (scope && tenantSlug) {
+      await loadRemoteState(scope, tenantSlug, true);
+      return;
+    }
+    setState(loadVehicleState(tenantSlug));
+  }, [scope, tenantSlug]);
+
+  const addVehicle = useCallback(async (input: VehicleInput): Promise<string> => {
+    if (scope && tenantSlug) {
+      await loadRemoteState(scope, tenantSlug);
+      const vehicle = await insertWorkspaceVehicle(scope, newGuestSourceId(), input);
+      replaceRemoteVehicleInState(scope, vehicle);
+      return vehicle.id;
+    }
     const fresh = loadVehicleState(tenantSlug);
     const id = nextVehicleId(fresh);
     const now = Date.now();
@@ -206,61 +339,86 @@ export function useVehicleState() {
       createdAt: now,
       updatedAt: now,
     };
-    const next: VehicleState = { ...fresh, vehicles: { ...fresh.vehicles, [id]: vehicle } };
+    const next = { ...fresh, vehicles: { ...fresh.vehicles, [id]: vehicle } };
     saveVehicleState(next, tenantSlug);
     setState(next);
     return id;
-  }, [tenantSlug]);
+  }, [scope, tenantSlug]);
 
-  // Persist from a fresh snapshot before setting this hook's local copy. The
-  // save notifies other mounted useVehicleState() instances synchronously, so
-  // it must never run inside a React state-updater function (render phase).
-  const updateVehicle = useCallback((id: string, input: VehicleInput): void => {
+  const updateVehicle = useCallback(async (id: string, input: VehicleInput): Promise<void> => {
+    if (scope && tenantSlug) {
+      const fresh = await loadRemoteState(scope, tenantSlug);
+      const existing = fresh.vehicles[id];
+      if (!existing) throw new Error("This vehicle no longer exists in the workspace fleet.");
+      try {
+        replaceRemoteVehicleInState(scope, await replaceWorkspaceVehicle(scope, existing, input));
+      } catch (mutationError) {
+        await loadRemoteState(scope, tenantSlug, true).catch(() => undefined);
+        throw mutationError;
+      }
+      return;
+    }
     const fresh = loadVehicleState(tenantSlug);
     const existing = fresh.vehicles[id];
-    if (!existing) return;
+    if (!existing) throw new Error("This vehicle no longer exists.");
+    const next: VehicleState = {
+      ...fresh,
+      vehicles: { ...fresh.vehicles, [id]: { ...existing, ...input, updatedAt: Date.now() } },
+    };
+    saveVehicleState(next, tenantSlug);
+    setState(next);
+  }, [scope, tenantSlug]);
+
+  const changeStatus = useCallback(async (id: string, status: Vehicle["status"]): Promise<void> => {
+    if (scope && tenantSlug) {
+      const fresh = await loadRemoteState(scope, tenantSlug);
+      const existing = fresh.vehicles[id];
+      if (!existing) throw new Error("This vehicle no longer exists in the workspace fleet.");
+      try {
+        replaceRemoteVehicleInState(scope, await setWorkspaceVehicleStatus(scope, existing, status));
+      } catch (mutationError) {
+        await loadRemoteState(scope, tenantSlug, true).catch(() => undefined);
+        throw mutationError;
+      }
+      return;
+    }
+    const fresh = loadVehicleState(tenantSlug);
+    const existing = fresh.vehicles[id];
+    if (!existing) throw new Error("This vehicle no longer exists.");
     const next: VehicleState = {
       ...fresh,
       vehicles: {
         ...fresh.vehicles,
-        [id]: { ...existing, ...input, updatedAt: Date.now() },
+        [id]: { ...existing, status, updatedAt: Date.now() },
       },
     };
     saveVehicleState(next, tenantSlug);
     setState(next);
-  }, [tenantSlug]);
+  }, [scope, tenantSlug]);
 
-  const archiveVehicle = useCallback((id: string): void => {
-    const fresh = loadVehicleState(tenantSlug);
-    const existing = fresh.vehicles[id];
-    if (!existing) return;
-    const next: VehicleState = {
-      ...fresh,
-      vehicles: {
-        ...fresh.vehicles,
-        [id]: { ...existing, status: "archived", updatedAt: Date.now() },
-      },
-    };
-    saveVehicleState(next, tenantSlug);
-    setState(next);
-  }, [tenantSlug]);
+  const archiveVehicle = useCallback(
+    (id: string) => changeStatus(id, "archived"),
+    [changeStatus],
+  );
+  const unarchiveVehicle = useCallback(
+    (id: string) => changeStatus(id, "active"),
+    [changeStatus],
+  );
 
-  const unarchiveVehicle = useCallback((id: string): void => {
-    const fresh = loadVehicleState(tenantSlug);
-    const existing = fresh.vehicles[id];
-    if (!existing) return;
-    const next: VehicleState = {
-      ...fresh,
-      vehicles: {
-        ...fresh.vehicles,
-        [id]: { ...existing, status: "active", updatedAt: Date.now() },
-      },
-    };
-    saveVehicleState(next, tenantSlug);
-    setState(next);
-  }, [tenantSlug]);
+  const vehicles = Object.values(state.vehicles).sort(
+    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+  );
+  const scopeHydrated = hydrated && hydratedScope === scopeKey;
 
-  const vehicles = Object.values(state.vehicles).sort((a, b) => a.id.localeCompare(b.id));
-
-  return { vehicles, hydrated, addVehicle, updateVehicle, archiveVehicle, unarchiveVehicle };
+  return {
+    vehicles,
+    hydrated: scopeHydrated,
+    error: hydratedScope === scopeKey ? error : null,
+    persistence: scope ? "workspace" as const : "browser" as const,
+    refresh,
+    addVehicle,
+    updateVehicle,
+    archiveVehicle,
+    unarchiveVehicle,
+  };
 }

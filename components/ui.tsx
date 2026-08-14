@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode, Ref } from "react";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
@@ -55,12 +55,10 @@ export function Button({
 export function Card({
   className,
   children,
-}: {
-  className?: string;
-  children: ReactNode;
-}) {
+  ...rest
+}: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("rounded-2xl border border-line bg-white", className)}>
+    <div {...rest} className={cn("rounded-2xl border border-line bg-white", className)}>
       {children}
     </div>
   );

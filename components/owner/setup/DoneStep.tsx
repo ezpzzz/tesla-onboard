@@ -8,7 +8,7 @@ import type { SetupStepProps } from "./types";
 
 export function DoneStep({ update }: SetupStepProps) {
   const router = useRouter();
-  const { vehicles, hydrated } = useVehicleState();
+  const { vehicles, hydrated, error } = useVehicleState();
   const activeCount = vehicles.filter((v) => v.status === "active").length;
 
   // completedAt is set here, on an explicit action — not on mount — so a host
@@ -46,10 +46,12 @@ export function DoneStep({ update }: SetupStepProps) {
         </div>
         <h1 className="text-[26px] font-semibold leading-tight tracking-tight">All set.</h1>
         <p className="mt-3 max-w-[34ch] text-[15px] leading-relaxed text-muted">
-          {hydrated
+          {error
+            ? "Your setup settings are saved, but the workspace fleet could not be verified. Review Vehicles before inviting guests."
+            : hydrated
             ? `${activeCount} vehicle${activeCount === 1 ? "" : "s"} in your fleet.`
             : "Your fleet is ready."}{" "}
-          You can revisit this setup anytime from the Vehicles page.
+          {!error ? "You can revisit this setup anytime from the Vehicles page." : ""}
         </p>
       </div>
     </StepFrame>

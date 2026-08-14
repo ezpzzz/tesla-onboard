@@ -17,15 +17,19 @@ import type { VehicleInput } from "@/lib/owner/types";
 export default function NewVehiclePage() {
   const { config } = useTenantConfig();
   const router = useRouter();
-  const { addVehicle, hydrated } = useVehicleState();
+  const { addVehicle, hydrated, error } = useVehicleState();
   const policyPct = parseReturnPolicyPct(config.rental.returnChargeLevel);
 
   if (!hydrated) {
     return <Card className="p-6 text-center text-sm text-muted">Loading…</Card>;
   }
 
-  function handleSubmit(input: VehicleInput) {
-    const id = addVehicle(input);
+  if (error) {
+    return <Card role="alert" className="border-danger/20 p-6 text-center text-sm text-danger">{error}</Card>;
+  }
+
+  async function handleSubmit(input: VehicleInput) {
+    const id = await addVehicle(input);
     router.push(`/owner/vehicles/${id}`);
   }
 

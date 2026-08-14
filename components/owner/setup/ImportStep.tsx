@@ -23,7 +23,13 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
   const { config } = useTenantConfig();
   const profile = state.teslaProfile;
   const stepNumber = indexOfSetupStep(state.step) + 1;
-  const { vehicles, addVehicle, updateVehicle, unarchiveVehicle } = useVehicleState();
+  const {
+    vehicles,
+    error: vehicleError,
+    addVehicle,
+    updateVehicle,
+    unarchiveVehicle,
+  } = useVehicleState();
   const policyPct = parseReturnPolicyPct(config.rental.returnChargeLevel);
   const fallbackYear = config.car.year;
 
@@ -31,6 +37,8 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
   const [committed, setCommitted] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   const committedVehicles = committed
     .map((id) => vehicles.find((v) => v.id === id))
@@ -40,8 +48,8 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
    * Resolve a Tesla vehicle to a local Vehicle it's already imported as, if
    * any. Matches the fleet itself first — by teslaImportKey, then by VIN —
    * before falling back to the setup-state ledger. The fleet is the durable
-   * source: "Start over" wipes only the ledger (rtr:owner-setup:v1), never
-   * rtr:vehicles:v1, so matching the fleet directly is what makes re-running
+   * source: "Start over" wipes only the browser resume ledger, never the
+   * workspace fleet table, so matching the fleet directly makes re-running
    * Import idempotent after a reset, in both mock mode (VIN-less personas,
    * teslaImportKey is the Tesla-side id) and live mode (VIN present).
    */
@@ -68,58 +76,64 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
     setSelected((prev) => ({ ...prev, [key]: checked }));
   }
 
-  function handleImport() {
+  async function handleImport() {
     if (!profile) return;
     // null in a patch entry means "delete this ledger key" (heals a stale
     // entry whose local vehicle is gone).
     const ledgerPatch: Record<string, string | null> = {};
     const touched: string[] = [];
 
-    for (const tv of profile.vehicles) {
-      const key = teslaKeyOf(tv);
-      const ledgerId = state.importedTeslaIds[key];
-      const existing = existingVehicleFor(tv);
+    setImporting(true);
+    setImportError(null);
+    try {
+      for (const tv of profile.vehicles) {
+        const key = teslaKeyOf(tv);
+        const ledgerId = state.importedTeslaIds[key];
+        const existing = existingVehicleFor(tv);
 
-      if (ledgerId && (!existing || existing.id !== ledgerId)) {
-        ledgerPatch[key] = existing ? existing.id : null;
-      }
-
-      if (!isChecked(tv)) continue;
-
-      if (existing) {
-        // Already on the fleet — refresh the Tesla-derived fields but keep
-        // whatever the host has since edited by hand. A re-import of an
-        // archived vehicle brings it back into the active fleet.
-        const fresh = vehicleInputFromTesla(tv, fallbackYear);
-        updateVehicle(existing.id, mergePreservingOwnerFields(fresh, existing));
-        if (existing.status === "archived") unarchiveVehicle(existing.id);
-        touched.push(existing.id);
-        continue;
-      }
-
-      const input = vehicleInputFromTesla(tv, fallbackYear);
-      const id = addVehicle(input);
-      ledgerPatch[key] = id;
-      touched.push(id);
-    }
-
-    if (Object.keys(ledgerPatch).length > 0) {
-      update((s) => {
-        const nextLedger = { ...s.importedTeslaIds };
-        for (const [key, id] of Object.entries(ledgerPatch)) {
-          if (id === null) delete nextLedger[key];
-          else nextLedger[key] = id;
+        if (ledgerId && (!existing || existing.id !== ledgerId)) {
+          ledgerPatch[key] = existing ? existing.id : null;
         }
-        return { importedTeslaIds: nextLedger };
-      });
-    }
-    if (touched.length > 0) {
-      setCommitted((prev) => Array.from(new Set([...prev, ...touched])));
+
+        if (!isChecked(tv)) continue;
+
+        if (existing) {
+          const fresh = vehicleInputFromTesla(tv, fallbackYear);
+          await updateVehicle(existing.id, mergePreservingOwnerFields(fresh, existing));
+          if (existing.status === "archived") await unarchiveVehicle(existing.id);
+          touched.push(existing.id);
+          continue;
+        }
+
+        const input = vehicleInputFromTesla(tv, fallbackYear);
+        const id = await addVehicle(input);
+        ledgerPatch[key] = id;
+        touched.push(id);
+      }
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Tesla vehicles could not be imported.");
+    } finally {
+      // Successful rows remain discoverable by Tesla key/VIN on retry. Keep
+      // their ledger entries even if a later row failed.
+      if (Object.keys(ledgerPatch).length > 0) {
+        update((s) => {
+          const nextLedger = { ...s.importedTeslaIds };
+          for (const [key, id] of Object.entries(ledgerPatch)) {
+            if (id === null) delete nextLedger[key];
+            else nextLedger[key] = id;
+          }
+          return { importedTeslaIds: nextLedger };
+        });
+      }
+      if (touched.length > 0) {
+        setCommitted((prev) => Array.from(new Set([...prev, ...touched])));
+      }
+      setImporting(false);
     }
   }
 
-  function handleManualAdd(input: Parameters<typeof addVehicle>[0]) {
-    const id = addVehicle(input);
+  async function handleManualAdd(input: Parameters<typeof addVehicle>[0]) {
+    const id = await addVehicle(input);
     setCommitted((prev) => Array.from(new Set([...prev, id])));
     setManualOpen(false);
   }
@@ -175,8 +189,8 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                     mode="edit"
                     initialValues={v}
                     globalPolicyPct={policyPct}
-                    onSubmit={(input) => {
-                      updateVehicle(v.id, input);
+                    onSubmit={async (input) => {
+                      await updateVehicle(v.id, input);
                       setExpandedId(null);
                     }}
                     onCancel={() => setExpandedId(null)}
@@ -257,8 +271,12 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
       inlineFooter
       footer={
         <div className="space-y-2.5">
-          <Button fullWidth onClick={handleImport} disabled={!hasSelections}>
-            Import or refresh selected
+          <Button
+            fullWidth
+            onClick={handleImport}
+            disabled={!hasSelections || importing || !!vehicleError}
+          >
+            {importing ? "Importing…" : "Import or refresh selected"}
           </Button>
           <Button variant="secondary" fullWidth onClick={nav.next}>
             Continue <IconArrowRight className="h-4 w-4" />
@@ -275,6 +293,12 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
       <p className="mt-3 text-[15px] leading-relaxed text-muted">
         New vehicles are pre-selected. Select an imported vehicle to refresh its Tesla specs.
       </p>
+
+      {vehicleError || importError ? (
+        <div role="alert" className="mt-4 rounded-2xl border border-danger/20 bg-danger/[0.04] p-3.5 text-sm text-danger">
+          {vehicleError ?? importError}
+        </div>
+      ) : null}
 
       <div className="mt-5 space-y-2">
         {profile.vehicles.map((tv) => {
