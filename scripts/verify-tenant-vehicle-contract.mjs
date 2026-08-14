@@ -100,7 +100,7 @@ const migrated = normalizeTenantConfig({
     sourceVehicleUpdatedAt: 999,
   },
 });
-assert.equal(migrated.version, 2);
+assert.equal(migrated.version, 3);
 assert.equal(migrated.car.sourceVehicleId, null);
 assert.equal(migrated.car.sourceVehicleUpdatedAt, null);
 
@@ -113,7 +113,7 @@ assert.equal(DEFAULT_TENANT_CONFIG.car.interior, null);
 assert.deepEqual(DEFAULT_TENANT_CONFIG.houseRules, []);
 
 const publishable = normalizeTenantConfig({
-  version: 2,
+  version: 3,
   companyName: "Real Rentals",
   tagline: "A real workspace listing.",
   hostName: "Alex",

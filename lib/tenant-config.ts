@@ -25,7 +25,7 @@ export interface TenantCarConfig {
 }
 
 export interface TenantConfig {
-  version: 2;
+  version: 3;
   companyName: string;
   tagline: string;
   brand: {
@@ -57,7 +57,7 @@ export interface TenantConfig {
 }
 
 export const DEFAULT_TENANT_CONFIG: TenantConfig = {
-  version: 2,
+  version: 3,
   companyName: "",
   tagline: "",
   brand: {
@@ -95,6 +95,58 @@ export const DEFAULT_TENANT_CONFIG: TenantConfig = {
   },
   houseRules: [],
 };
+
+/**
+ * Editable starter copy for a Turo-hosted Tesla trip. These are concise
+ * operational reminders derived from Turo's current US terms and guest help
+ * articles; they are not a substitute for the trip agreement or Turo's live
+ * policies. Keep this separate from DEFAULT_TENANT_CONFIG so an owner can
+ * intentionally edit or clear a version-3 draft without defaults reappearing.
+ *
+ * Sources reviewed 2026-08-14:
+ * - https://turo.com/us/en/policies/terms
+ * - https://help.turo.com/en_us/paying-for-fuel-rJkqN4eV9
+ * - https://help.turo.com/en_us/returning-a-vehicle-and-checking-out-SymM4ExE9
+ * - https://help.turo.com/en_us/checking-in-a-guest-H1gsHEg4c
+ */
+export const TURO_POLICY_STARTER = {
+  rental: {
+    keyAccess:
+      "Vehicle access is released only after Turo check-in and driver-license verification. Use the Tesla app invitation or pickup method in the trip instructions, keep the backup key secure, and do not share access with anyone who is not listed as a Turo-approved driver.",
+    chargeAccess:
+      "Tesla Supercharging bills automatically to the host's Tesla account. Other charging networks may require your own card or app. Move the vehicle promptly when charging finishes to avoid idle or congestion fees.",
+    chargingPolicy:
+      "Guests are responsible for eligible charging and idle fees incurred during the trip. The host may request reimbursement through Turo's trip-invoice process. A Prepaid EV charge Extra, when included in the booking, controls post-trip recharge reimbursement.",
+    returnChargeLevel: "the same percentage recorded at check-in (80% if none was recorded)",
+    skipChargeOption:
+      "If the booking includes Turo's Prepaid EV charge Extra, follow that Extra's terms; otherwise return the vehicle at the required charge level.",
+    pickupNote:
+      "Complete Turo check-in and license verification before accessing the vehicle. Photograph the exterior, interior, odometer, and battery level in Turo before driving.",
+    returnNote:
+      "Return the vehicle on time to the location in the trip details, secure the key or remote access as instructed, and upload checkout photos showing the exterior, interior, odometer, and battery level.",
+    parkingNote:
+      "Use the return location and parking instructions in the Turo trip details or Turo messages. Choose a legal, safe space and send the host the requested location details.",
+  },
+  houseRules: [
+    "Only the primary guest and drivers approved on the Turo trip may drive the vehicle.",
+    "No smoking or vaping. Return the vehicle reasonably clean and in substantially the same condition as received.",
+    "Use the vehicle safely, lawfully, and only for permitted personal or professional travel; never tamper with or misuse the vehicle.",
+    "Return the vehicle on time to the agreed location. Request trip changes through Turo before the scheduled end time.",
+    "Document pickup and return condition, odometer, and battery level with Turo Trip photos.",
+  ],
+} as const;
+
+/** Build a first-run draft without making generic guest rendering look ready. */
+export function newTenantConfigDraft(companyName = ""): TenantConfig {
+  return {
+    ...DEFAULT_TENANT_CONFIG,
+    companyName,
+    brand: { ...DEFAULT_TENANT_CONFIG.brand },
+    car: { ...DEFAULT_TENANT_CONFIG.car },
+    rental: { ...TURO_POLICY_STARTER.rental },
+    houseRules: [...TURO_POLICY_STARTER.houseRules],
+  };
+}
 
 export const ONLYEVS_FEATURE_KEY = "onlyevs";
 
@@ -193,13 +245,19 @@ export function normalizeTenantConfig(value: unknown, scope: TenantConfigScope =
   const rental = record(root.rental);
   const brand = record(root.brand);
   const d = DEFAULT_TENANT_CONFIG;
+  const storedVersion = typeof root.version === "number" ? root.version : 0;
+  // v3 records have already received (or explicitly declined) the starter.
+  // Earlier records receive defaults only for blank fields, preserving every
+  // owner-authored value and making the migration idempotent after save.
+  const policyFallback = storedVersion < 3 ? TURO_POLICY_STARTER.rental : d.rental;
+  const ruleFallback = storedVersion < 3 ? TURO_POLICY_STARTER.houseRules : d.houseRules;
   const rules = Array.isArray(root.houseRules)
     ? root.houseRules.filter((item): item is string => typeof item === "string" && !!item.trim())
-    : d.houseRules;
+    : ruleFallback;
   const sourceVehicleId = nullableText(car.sourceVehicleId, null);
 
   return {
-    version: 2,
+    version: 3,
     companyName: text(root.companyName, d.companyName),
     tagline: text(root.tagline, d.tagline),
     brand: {
@@ -230,16 +288,16 @@ export function normalizeTenantConfig(value: unknown, scope: TenantConfigScope =
       teslaPaintCode: nullableText(car.teslaPaintCode, null),
     },
     rental: {
-      keyAccess: text(rental.keyAccess, d.rental.keyAccess),
-      chargeAccess: text(rental.chargeAccess, d.rental.chargeAccess),
-      chargingPolicy: text(rental.chargingPolicy, d.rental.chargingPolicy),
-      returnChargeLevel: text(rental.returnChargeLevel, d.rental.returnChargeLevel),
-      skipChargeOption: text(rental.skipChargeOption, d.rental.skipChargeOption),
-      pickupNote: text(rental.pickupNote, d.rental.pickupNote),
-      returnNote: text(rental.returnNote, d.rental.returnNote),
-      parkingNote: text(rental.parkingNote, d.rental.parkingNote),
+      keyAccess: text(rental.keyAccess, policyFallback.keyAccess),
+      chargeAccess: text(rental.chargeAccess, policyFallback.chargeAccess),
+      chargingPolicy: text(rental.chargingPolicy, policyFallback.chargingPolicy),
+      returnChargeLevel: text(rental.returnChargeLevel, policyFallback.returnChargeLevel),
+      skipChargeOption: text(rental.skipChargeOption, policyFallback.skipChargeOption),
+      pickupNote: text(rental.pickupNote, policyFallback.pickupNote),
+      returnNote: text(rental.returnNote, policyFallback.returnNote),
+      parkingNote: text(rental.parkingNote, policyFallback.parkingNote),
     },
-    houseRules: rules.length > 0 ? rules.map((item) => item.trim()) : d.houseRules,
+    houseRules: rules.length > 0 ? rules.map((item) => item.trim()) : [...ruleFallback],
   };
 }
 

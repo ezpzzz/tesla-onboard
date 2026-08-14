@@ -2,9 +2,9 @@
 
 /**
  * Vehicle detail: edit form (saves in place, no navigation), lifetime stats,
- * linked trips, and a two-step archive control. Vehicle CRUD state comes
+ * linked trips, and a reversible remove control. Vehicle CRUD state comes
  * from useVehicleState() directly (same instance renders + mutates, so
- * archiving/unarchiving reflects immediately); trip/charging data for the
+ * removing/restoring reflects immediately); trip/charging data for the
  * stat tiles and linked-trips list comes from useOwnerData(). Follows the
  * useParams()/not-found/SSR-hydration-guard pattern from
  * app/owner/drivers/[id]/page.tsx.
@@ -14,9 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
-  canArchiveVehicle,
   useVehicleState,
-  type VehicleState,
 } from "@/lib/owner/vehicle-state";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
@@ -48,15 +46,15 @@ export default function VehicleDetailPage() {
   } = useVehicleState();
   const { trips, chargingSessions, vehicleTelemetry, hydrated: dataHydrated } = useOwnerData();
   const [saved, setSaved] = useState(false);
-  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
 
-  const archiveTriggerRef = useRef<HTMLButtonElement>(null);
+  const removeTriggerRef = useRef<HTMLButtonElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
-  const unarchiveButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreButtonRef = useRef<HTMLButtonElement>(null);
   const wasConfirmingRef = useRef(false);
-  const hasMountedArchiveRef = useRef(false);
+  const hasMountedRemoveRef = useRef(false);
 
   const policyPct = useMemo(
     () => parseReturnPolicyPct(config.rental.returnChargeLevel),
@@ -65,26 +63,26 @@ export default function VehicleDetailPage() {
   const ready = vehicleHydrated && dataHydrated;
   const vehicle = vehicles.find((v) => v.id === id) ?? null;
 
-  // Move focus to whichever control just became the relevant one when the
-  // archive confirmation step opens, cancels, or completes — otherwise focus
+  // Move focus to whichever control just became relevant when the remove
+  // confirmation step opens, cancels, or completes — otherwise focus
   // is dropped to <body> when the trigger button unmounts (see review finding).
   useEffect(() => {
-    if (!hasMountedArchiveRef.current) {
-      hasMountedArchiveRef.current = true;
-      wasConfirmingRef.current = confirmArchive;
+    if (!hasMountedRemoveRef.current) {
+      hasMountedRemoveRef.current = true;
+      wasConfirmingRef.current = confirmRemove;
       return;
     }
-    if (confirmArchive && !wasConfirmingRef.current) {
+    if (confirmRemove && !wasConfirmingRef.current) {
       confirmButtonRef.current?.focus();
-    } else if (!confirmArchive && wasConfirmingRef.current) {
+    } else if (!confirmRemove && wasConfirmingRef.current) {
       if (vehicle?.status === "archived") {
-        unarchiveButtonRef.current?.focus();
+        restoreButtonRef.current?.focus();
       } else {
-        archiveTriggerRef.current?.focus();
+        removeTriggerRef.current?.focus();
       }
     }
-    wasConfirmingRef.current = confirmArchive;
-  }, [confirmArchive, vehicle?.status]);
+    wasConfirmingRef.current = confirmRemove;
+  }, [confirmRemove, vehicle?.status]);
 
   // Saved-flash timeout: cleared on unmount so it never fires setSaved(false)
   // after the host has already navigated away.
@@ -125,11 +123,7 @@ export default function VehicleDetailPage() {
     (t) => t.status === "upcoming" || t.status === "active",
   );
 
-  const vehicleState: VehicleState = {
-    version: 2,
-    vehicles: Object.fromEntries(vehicles.map((v) => [v.id, v])),
-  };
-  const archivable = canArchiveVehicle(vehicleState, vehicle.id);
+  const removable = activeOrUpcomingTrips.length === 0;
 
   const initialValues: Partial<VehicleInput> = {
     displayName: vehicle.displayName,
@@ -156,18 +150,18 @@ export default function VehicleDetailPage() {
     setSaved(true);
   }
 
-  async function handleArchiveClick() {
-    if (!confirmArchive) {
-      setConfirmArchive(true);
+  async function handleRemoveClick() {
+    if (!confirmRemove) {
+      setConfirmRemove(true);
       return;
     }
     setStatusSaving(true);
     setStatusError(null);
     try {
       await archiveVehicle(vehicle!.id);
-      setConfirmArchive(false);
+      setConfirmRemove(false);
     } catch (error) {
-      setStatusError(error instanceof Error ? error.message : "The vehicle could not be archived.");
+      setStatusError(error instanceof Error ? error.message : "The vehicle could not be removed.");
     } finally {
       setStatusSaving(false);
     }
@@ -194,7 +188,7 @@ export default function VehicleDetailPage() {
         >
           ← Vehicles
         </Link>
-        {vehicle.status === "archived" && <Badge>Archived</Badge>}
+        {vehicle.status === "archived" && <Badge>Removed</Badge>}
       </div>
 
       <VehicleArtwork
@@ -289,11 +283,11 @@ export default function VehicleDetailPage() {
 
       <Card className="p-4">
         <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">
-          Archive
+          Remove from fleet
         </div>
         <p role="status" aria-live="polite" className="sr-only">
-          {confirmArchive
-            ? "Confirm archive: this vehicle will be archived and hidden from active lists."
+          {confirmRemove
+            ? "Confirm removal: this vehicle will be hidden from the active fleet and guest onboarding."
             : ""}
         </p>
         {statusError ? (
@@ -304,38 +298,37 @@ export default function VehicleDetailPage() {
         {vehicle.status === "archived" ? (
           <div className="mt-3 space-y-3">
             <p className="text-sm text-muted">
-              This vehicle is archived and hidden from active lists.
+              This vehicle is removed from the active fleet. Its history is retained and it can be restored.
             </p>
-            <Button ref={unarchiveButtonRef} variant="secondary" onClick={handleUnarchive} disabled={statusSaving}>
-              {statusSaving ? "Restoring…" : "Unarchive"}
+            <Button ref={restoreButtonRef} variant="secondary" onClick={handleUnarchive} disabled={statusSaving}>
+              {statusSaving ? "Restoring…" : "Restore vehicle"}
             </Button>
           </div>
-        ) : !archivable ? (
+        ) : !removable ? (
           <p className="mt-3 text-sm text-muted">
-            This is your only active vehicle — add another before archiving this one.
+            This vehicle has {activeOrUpcomingTrips.length} active or upcoming trip{activeOrUpcomingTrips.length === 1 ? "" : "s"}.
+            Cancel, complete, or reassign {activeOrUpcomingTrips.length === 1 ? "it" : "them"} before removing the vehicle.
           </p>
-        ) : confirmArchive ? (
+        ) : confirmRemove ? (
           <div className="mt-3 space-y-3">
             <p className="text-sm text-ink-soft">
-              {activeOrUpcomingTrips.length > 0
-                ? `${activeOrUpcomingTrips.length} upcoming/active trip${
-                    activeOrUpcomingTrips.length === 1 ? "" : "s"
-                  } still reference this vehicle. Archiving won't unassign them.`
-                : "No upcoming or active trips reference this vehicle."}
+              Remove this vehicle from the active fleet? Historical trips stay intact. If it is
+              linked to guest onboarding, that walkthrough will pause automatically. You can
+              restore the vehicle later.
             </p>
             <div className="flex gap-2">
-              <Button ref={confirmButtonRef} variant="secondary" onClick={handleArchiveClick} disabled={statusSaving}>
-                {statusSaving ? "Archiving…" : "Confirm archive"}
+              <Button ref={confirmButtonRef} variant="secondary" onClick={handleRemoveClick} disabled={statusSaving}>
+                {statusSaving ? "Removing…" : "Confirm removal"}
               </Button>
-              <Button variant="ghost" onClick={() => setConfirmArchive(false)}>
+              <Button variant="ghost" onClick={() => setConfirmRemove(false)}>
                 Cancel
               </Button>
             </div>
           </div>
         ) : (
           <div className="mt-3">
-            <Button ref={archiveTriggerRef} variant="secondary" onClick={handleArchiveClick}>
-              Archive vehicle
+            <Button ref={removeTriggerRef} variant="secondary" onClick={handleRemoveClick}>
+              Remove vehicle
             </Button>
           </div>
         )}

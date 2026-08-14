@@ -258,13 +258,6 @@ export function validateVehicleInput(
   return errors;
 }
 
-/** False only when `id` is the sole active vehicle. */
-export function canArchiveVehicle(state: VehicleState, id: string): boolean {
-  const target = state.vehicles[id];
-  if (!target || target.status !== "active") return true;
-  return Object.values(state.vehicles).filter((vehicle) => vehicle.status === "active").length > 1;
-}
-
 export function useVehicleState() {
   const { tenantSlug } = useTenantConfig();
   const scope = useMemo(() => vehicleWorkspaceScope(tenantSlug), [tenantSlug]);

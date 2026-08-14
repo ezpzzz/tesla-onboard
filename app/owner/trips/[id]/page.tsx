@@ -133,7 +133,7 @@ export default function TripDetailPage() {
                   <span>
                     {vehicle.displayName} {vehicle.trim} · {vehicle.color}
                   </span>
-                  {vehicle.status === "archived" && <Badge tone="neutral">Archived</Badge>}
+                  {vehicle.status === "archived" && <Badge tone="neutral">Removed</Badge>}
                 </Link>
               ) : (
                 `${config.car.year} ${config.car.model} ${config.car.trim} · ${config.car.color}`

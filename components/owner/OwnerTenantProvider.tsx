@@ -15,6 +15,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   DEFAULT_TENANT_CONFIG,
   featuresWithTenantConfig,
+  newTenantConfigDraft,
   tenantReference,
   tenantConfigFromFeatures,
   tenantSetupCompletedAt,
@@ -143,7 +144,7 @@ function supabaseConfigured(): boolean {
 }
 
 function demoWorkspace(): OwnerWorkspace {
-  let config = DEFAULT_TENANT_CONFIG;
+  let config = newTenantConfigDraft("Local demo");
   let features: unknown = {};
   try {
     window.localStorage.removeItem("rtr:demo-tenant-config:v1");
@@ -265,10 +266,10 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
             role: membership?.role ?? "member",
             shopSlug,
             tenantRef: key,
-            config: tenantConfigFromFeatures(branding?.features) ?? {
-              ...DEFAULT_TENANT_CONFIG,
-              companyName: branding?.display_name || row.name || DEFAULT_TENANT_CONFIG.companyName,
-            },
+            config: tenantConfigFromFeatures(branding?.features)
+              ?? newTenantConfigDraft(
+                branding?.display_name || row.name || DEFAULT_TENANT_CONFIG.companyName,
+              ),
             features: branding?.features ?? {},
             brandingUpdatedAt: branding?.updated_at ?? null,
           };

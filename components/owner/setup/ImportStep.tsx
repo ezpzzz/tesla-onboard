@@ -343,7 +343,7 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
                 </span>
               </span>
               {alreadyImported && <Badge tone="good">Imported — select to refresh</Badge>}
-              {isArchived && <Badge tone="warn">Archived — re-importing will restore it</Badge>}
+              {isArchived && <Badge tone="warn">Removed — re-importing will restore it</Badge>}
             </label>
           );
         })}
