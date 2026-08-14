@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   canonicalTeslaModel,
   resolveTeslaVehicleMedia,
+  teslaMediaUnavailableReason,
   vehicleMediaImageUrl,
   vehiclePaintHex,
 } from "@/lib/vehicle-media";
@@ -22,6 +23,8 @@ interface VehicleArtworkProps {
   compact?: boolean;
   eager?: boolean;
   decorative?: boolean;
+  /** False for an unbound guest profile whose values have no fleet source. */
+  configurationVerified?: boolean;
 }
 
 export function VehicleArtwork({
@@ -37,8 +40,28 @@ export function VehicleArtwork({
   compact = false,
   eager = false,
   decorative = false,
+  configurationVerified = true,
 }: VehicleArtworkProps) {
-  const resolved = resolveTeslaVehicleMedia(
+  const resolved = configurationVerified
+    ? resolveTeslaVehicleMedia(
+        model,
+        color,
+        trim,
+        wheelType,
+        year,
+        interior,
+        interiorCode,
+        paintCode,
+      )
+    : null;
+  const displayUrl = resolved
+    ? vehicleMediaImageUrl(resolved, compact ? 512 : 1200)
+    : null;
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const imageFailed = !!displayUrl && failedUrl === displayUrl;
+  const canonicalModel = canonicalTeslaModel(model);
+  const paint = vehiclePaintHex(color);
+  const unavailableReason = teslaMediaUnavailableReason(
     model,
     color,
     trim,
@@ -47,14 +70,8 @@ export function VehicleArtwork({
     interior,
     interiorCode,
     paintCode,
+    configurationVerified,
   );
-  const displayUrl = resolved
-    ? vehicleMediaImageUrl(resolved, compact ? 512 : 1200)
-    : null;
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const imageFailed = !!displayUrl && failedUrl === displayUrl;
-  const canonicalModel = canonicalTeslaModel(model);
-  const paint = vehiclePaintHex(color);
 
   useEffect(() => {
     if (displayUrl !== failedUrl) setFailedUrl(null);
@@ -94,16 +111,16 @@ export function VehicleArtwork({
           className="flex h-full items-center justify-center bg-gradient-to-br from-white via-white to-black/[0.035] px-4 text-center"
         >
           <div>
-            <div
-              aria-hidden="true"
-              className="mx-auto h-12 w-24 rounded-[50%] border border-black/10 opacity-80 shadow-[0_12px_18px_-12px_rgba(0,0,0,0.55)]"
-              style={{ background: `linear-gradient(145deg, ${paint}, #171a20)` }}
-            />
-            <div className="mt-3 text-lg font-semibold tracking-tight text-ink">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
+              Official Tesla image
+            </div>
+            <div className="mt-1 text-lg font-semibold tracking-tight text-ink">
               {canonicalModel}
             </div>
             {!compact && (
-              <div className="mt-0.5 text-xs text-muted">Exact Tesla image unavailable</div>
+              <div className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted">
+                {unavailableReason}
+              </div>
             )}
           </div>
         </div>

@@ -35,6 +35,8 @@ export interface TeslaImportedSpec {
 
 export interface Vehicle {
   id: string; // "veh-01", "veh-02", ... zero-padded sequential
+  /** Opaque, collision-resistant reference safe to publish in guest config. */
+  guestSourceId: string;
   displayName: string;
   model: string;
   trim: string;
@@ -63,7 +65,10 @@ export interface Vehicle {
   updatedAt: number;
 }
 
-export type VehicleInput = Omit<Vehicle, "id" | "status" | "createdAt" | "updatedAt">;
+export type VehicleInput = Omit<
+  Vehicle,
+  "id" | "guestSourceId" | "status" | "createdAt" | "updatedAt"
+>;
 
 export interface VehicleStats {
   vehicleId: string;

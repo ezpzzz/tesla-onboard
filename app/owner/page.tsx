@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { useOwnerState } from "@/lib/owner/owner-state";
 import { useOwnerSetupState, needsSetup } from "@/lib/owner/setup-state";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { deriveAlerts } from "@/lib/owner/alerts";
 import {
   driverStatus,
@@ -28,7 +29,7 @@ import {
   TripStatusBadge,
 } from "@/components/owner/owner-ui";
 import { MiniBarChart } from "@/components/owner/charts";
-import { Button, Card } from "@/components/ui";
+import { Badge, Button, Card } from "@/components/ui";
 import { IconBolt, IconChevronRight } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { DriverStatus } from "@/lib/owner/types";
@@ -58,6 +59,7 @@ const NEEDS_ATTENTION_RANK: Record<DriverStatus, number> = {
 
 export default function OwnerOverviewPage() {
   const router = useRouter();
+  const { config } = useTenantConfig();
   const { drivers, trips, vehicles, chargingSessions, stats, policyPct } = useOwnerData();
   const { state: ownerState, hydrated: ownerHydrated } = useOwnerState();
   const { state: setupState, hydrated: setupHydrated, update: updateSetup } = useOwnerSetupState();
@@ -183,8 +185,13 @@ export default function OwnerOverviewPage() {
                   />
                   <div className="flex items-center justify-between gap-3 p-3.5">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-ink">
-                        {vehicle.displayName}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="truncate text-sm font-semibold text-ink">
+                          {vehicle.displayName}
+                        </div>
+                        {config.car.sourceVehicleId === vehicle.guestSourceId ? (
+                          <Badge tone="brand">Guest vehicle</Badge>
+                        ) : null}
                       </div>
                       <div className="truncate text-xs text-muted">
                         {[vehicle.year, vehicle.trim, vehicle.color, vehicle.interior]

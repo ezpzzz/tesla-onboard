@@ -6,10 +6,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { TenantConfigBoundary } from "@/components/TenantConfigProvider";
+import { TenantConfigBoundary, useTenantConfig } from "@/components/TenantConfigProvider";
 import { createClient } from "@/lib/supabase/client";
 import {
   DEFAULT_TENANT_CONFIG,
@@ -18,6 +19,8 @@ import {
   tenantConfigFromFeatures,
   type TenantConfig,
 } from "@/lib/tenant-config";
+import { useVehicleState } from "@/lib/owner/vehicle-state";
+import { tenantCarFromVehicle, tenantCarMatchesVehicle } from "@/lib/tenant-vehicle";
 import { DEMO_TENANT_CONFIG_KEY, DEMO_TENANT_SLUG } from "@/lib/tenant-storage";
 
 const ACTIVE_WORKSPACE_KEY = "rtr:owner-workspace:v1";
@@ -72,6 +75,42 @@ const DEMO_OWNER_TENANT: OwnerTenantContextValue = {
     throw new Error("Owner tenant provider is unavailable.");
   },
 };
+
+/**
+ * Keep the public guest snapshot synchronized with its private browser-local
+ * source whenever this owner session can see that vehicle. This publishes
+ * presentation fields only; VIN, plate, notes, and telemetry never leave the
+ * owner store.
+ */
+function GuestVehicleSync() {
+  const { config } = useTenantConfig();
+  const { workspace, saveConfig } = useOwnerTenant();
+  const { vehicles, hydrated } = useVehicleState();
+  const attemptedKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    const sourceId = config.car.sourceVehicleId;
+    if (!workspace || !hydrated || !sourceId) return;
+    const source = vehicles.find((vehicle) =>
+      vehicle.guestSourceId === sourceId && vehicle.status === "active"
+    );
+    if (!source || tenantCarMatchesVehicle(config.car, source)) {
+      attemptedKey.current = null;
+      return;
+    }
+
+    const key = `${workspace.key}:${source.id}:${source.updatedAt}`;
+    if (attemptedKey.current === key) return;
+    attemptedKey.current = key;
+
+    void saveConfig({ ...config, car: tenantCarFromVehicle(source) }).catch(() => {
+      // TenantSettingsForm exposes the stale state and lets the owner retry.
+      // Avoid an effect retry loop when the workspace optimistic lock rejects.
+    });
+  }, [config, hydrated, saveConfig, vehicles, workspace]);
+
+  return null;
+}
 
 function supabaseConfigured(): boolean {
   return Boolean(
@@ -324,6 +363,7 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
         tenantSlug={workspace?.tenantRef ?? null}
         loading={loading}
       >
+        <GuestVehicleSync />
         {children}
       </TenantConfigBoundary>
     </OwnerTenantContext.Provider>

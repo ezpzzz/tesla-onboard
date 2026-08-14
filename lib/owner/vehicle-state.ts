@@ -27,6 +27,20 @@ export interface VehicleState {
 
 export const initialVehicleState: VehicleState = { version: 1, vehicles: {} };
 
+function newGuestSourceId(): string {
+  if (typeof window === "undefined") {
+    throw new Error("Guest vehicle source IDs can only be created in a browser.");
+  }
+  if (typeof window.crypto?.randomUUID === "function") {
+    return window.crypto.randomUUID();
+  }
+  const bytes = window.crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+}
+
 /* Same-tab cross-instance sync: multiple useVehicleState() call sites (owner
  * pages, use-owner-data) each hold their own copy of VehicleState. Without
  * this, a mutation from one instance leaves every other mounted instance
@@ -65,6 +79,28 @@ export function removeLegacyMockVehicles(state: VehicleState): VehicleState {
   return { ...state, vehicles };
 }
 
+export function ensureGuestSourceIds(state: VehicleState): VehicleState {
+  let changed = false;
+  const seen = new Set<string>();
+  const vehicles = Object.fromEntries(
+    Object.entries(state.vehicles).map(([id, vehicle]) => {
+      const sourceId = typeof vehicle.guestSourceId === "string"
+        ? vehicle.guestSourceId.trim()
+        : "";
+      if (sourceId && !seen.has(sourceId)) {
+        seen.add(sourceId);
+        return [id, vehicle];
+      }
+      changed = true;
+      let guestSourceId = newGuestSourceId();
+      while (seen.has(guestSourceId)) guestSourceId = newGuestSourceId();
+      seen.add(guestSourceId);
+      return [id, { ...vehicle, guestSourceId }];
+    }),
+  );
+  return changed ? { ...state, vehicles } : state;
+}
+
 export function loadVehicleState(tenantSlug?: string | null): VehicleState {
   if (typeof window === "undefined") return initialVehicleState;
   try {
@@ -72,7 +108,7 @@ export function loadVehicleState(tenantSlug?: string | null): VehicleState {
     const raw = window.localStorage.getItem(key);
     if (!raw) return initialVehicleState;
     const parsed = { ...initialVehicleState, ...JSON.parse(raw) } as VehicleState;
-    const migrated = removeLegacyMockVehicles(parsed);
+    const migrated = ensureGuestSourceIds(removeLegacyMockVehicles(parsed));
     if (migrated !== parsed) {
       window.localStorage.setItem(key, JSON.stringify(migrated));
     }
@@ -162,7 +198,14 @@ export function useVehicleState() {
     const fresh = loadVehicleState(tenantSlug);
     const id = nextVehicleId(fresh);
     const now = Date.now();
-    const vehicle: Vehicle = { ...input, id, status: "active", createdAt: now, updatedAt: now };
+    const vehicle: Vehicle = {
+      ...input,
+      id,
+      guestSourceId: newGuestSourceId(),
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    };
     const next: VehicleState = { ...fresh, vehicles: { ...fresh.vehicles, [id]: vehicle } };
     saveVehicleState(next, tenantSlug);
     setState(next);
