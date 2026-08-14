@@ -8,9 +8,7 @@
  *
  * Stacked (email above the Account/Sign out row) rather than one long row —
  * the sidebar mounts this in a fixed 184px-wide column, so a single row of
- * badge + two controls doesn't fit. `align="end"` right-aligns both lines
- * for the mobile topbar, where this sits opposite the "Guest walkthrough"
- * link.
+ * badge + two controls doesn't fit.
  *
  * Sign out is a plain <button>, not the shared Button component: Button's
  * own base classes (rounded-full px-6 py-3.5) are too wide for this column,
@@ -22,20 +20,11 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { cn } from "../ui";
 
 const controlClasses =
   "rounded px-1 py-3.5 transition-colors hover:text-ink";
 
-export function OwnerIdentity({
-  email,
-  align = "start",
-  className,
-}: {
-  email: string;
-  align?: "start" | "end";
-  className?: string;
-}) {
+export function OwnerIdentity({ email }: { email: string }) {
   useEffect(() => {
     const supabase = createClient();
     const {
@@ -49,13 +38,7 @@ export function OwnerIdentity({
   }, []);
 
   return (
-    <div
-      className={cn(
-        "flex min-w-0 flex-col gap-1.5",
-        align === "end" ? "items-end text-right" : "items-start",
-        className,
-      )}
-    >
+    <div className="flex min-w-0 flex-col items-start gap-1.5">
       <span
         className="block max-w-[10rem] truncate text-xs font-medium text-ink"
         title={email}

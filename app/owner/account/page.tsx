@@ -6,21 +6,66 @@
  * owner page.
  */
 
+import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
 import { createClient } from "@/lib/supabase/client";
+import { tenantGuestHref } from "@/lib/tenant-config";
 import { Badge, Button, Card } from "@/components/ui";
+import { IconExternal } from "@/components/icons";
 
 const SUPABASE_CONFIGURED =
   Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
   Boolean(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
 
 export default function AccountPage() {
+  const { tenantSlug } = useTenantConfig();
+  const { workspace, workspaces, setWorkspace, loading } = useOwnerTenant();
+  const guestHref = tenantGuestHref(tenantSlug);
+
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-ink">Account</h1>
         <p className="mt-1 text-sm text-muted">Sign-in settings for the owner dashboard.</p>
       </div>
+
+      <Card className="max-w-md p-5">
+        <h2 className="text-sm font-semibold text-ink">Rental workspace</h2>
+        <p className="mt-1 text-sm leading-relaxed text-muted">
+          Choose which rental brand and guest walkthrough you&apos;re managing.
+        </p>
+
+        {loading ? (
+          <p className="mt-4 text-sm text-muted">Loading workspace…</p>
+        ) : workspaces.length > 1 && workspace ? (
+          <label className="mt-4 block">
+            <span className="mb-1.5 block text-xs font-medium text-muted">Active workspace</span>
+            <select
+              value={workspace.key}
+              onChange={(event) => setWorkspace(event.target.value)}
+              className="field appearance-none"
+            >
+              {workspaces.map((item) => (
+                <option key={item.key} value={item.key}>{item.name}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="mt-4 text-sm font-medium text-ink">
+            {workspace?.name ?? "No workspace linked"}
+          </p>
+        )}
+
+        <Link
+          href={guestHref}
+          className="mt-4 flex min-h-12 items-center justify-between rounded-2xl border border-line bg-white px-4 text-sm font-medium text-ink transition-colors hover:bg-surface"
+        >
+          Open guest walkthrough
+          <IconExternal aria-hidden="true" className="h-4 w-4 text-muted" />
+        </Link>
+      </Card>
 
       {SUPABASE_CONFIGURED ? (
         <AccountCard />
@@ -145,6 +190,18 @@ function AccountCard() {
           {submitting ? "Saving…" : "Save password"}
         </Button>
       </form>
+
+      <div className="mt-6 border-t border-line pt-5">
+        <h2 className="text-sm font-semibold text-ink">Session</h2>
+        <p className="mt-1 text-sm leading-relaxed text-muted">
+          Sign out on this device without ending your Sophosic sessions elsewhere.
+        </p>
+        <form action="/auth/signout" method="post" className="mt-4">
+          <Button type="submit" variant="secondary" fullWidth>
+            Sign out
+          </Button>
+        </form>
+      </div>
     </Card>
   );
 }
