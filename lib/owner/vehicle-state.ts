@@ -212,52 +212,52 @@ export function useVehicleState() {
     return id;
   }, [tenantSlug]);
 
+  // Persist from a fresh snapshot before setting this hook's local copy. The
+  // save notifies other mounted useVehicleState() instances synchronously, so
+  // it must never run inside a React state-updater function (render phase).
   const updateVehicle = useCallback((id: string, input: VehicleInput): void => {
-    setState((prev) => {
-      const existing = prev.vehicles[id];
-      if (!existing) return prev;
-      const next: VehicleState = {
-        ...prev,
-        vehicles: {
-          ...prev.vehicles,
-          [id]: { ...existing, ...input, updatedAt: Date.now() },
-        },
-      };
-      saveVehicleState(next, tenantSlug);
-      return next;
-    });
+    const fresh = loadVehicleState(tenantSlug);
+    const existing = fresh.vehicles[id];
+    if (!existing) return;
+    const next: VehicleState = {
+      ...fresh,
+      vehicles: {
+        ...fresh.vehicles,
+        [id]: { ...existing, ...input, updatedAt: Date.now() },
+      },
+    };
+    saveVehicleState(next, tenantSlug);
+    setState(next);
   }, [tenantSlug]);
 
   const archiveVehicle = useCallback((id: string): void => {
-    setState((prev) => {
-      const existing = prev.vehicles[id];
-      if (!existing) return prev;
-      const next: VehicleState = {
-        ...prev,
-        vehicles: {
-          ...prev.vehicles,
-          [id]: { ...existing, status: "archived", updatedAt: Date.now() },
-        },
-      };
-      saveVehicleState(next, tenantSlug);
-      return next;
-    });
+    const fresh = loadVehicleState(tenantSlug);
+    const existing = fresh.vehicles[id];
+    if (!existing) return;
+    const next: VehicleState = {
+      ...fresh,
+      vehicles: {
+        ...fresh.vehicles,
+        [id]: { ...existing, status: "archived", updatedAt: Date.now() },
+      },
+    };
+    saveVehicleState(next, tenantSlug);
+    setState(next);
   }, [tenantSlug]);
 
   const unarchiveVehicle = useCallback((id: string): void => {
-    setState((prev) => {
-      const existing = prev.vehicles[id];
-      if (!existing) return prev;
-      const next: VehicleState = {
-        ...prev,
-        vehicles: {
-          ...prev.vehicles,
-          [id]: { ...existing, status: "active", updatedAt: Date.now() },
-        },
-      };
-      saveVehicleState(next, tenantSlug);
-      return next;
-    });
+    const fresh = loadVehicleState(tenantSlug);
+    const existing = fresh.vehicles[id];
+    if (!existing) return;
+    const next: VehicleState = {
+      ...fresh,
+      vehicles: {
+        ...fresh.vehicles,
+        [id]: { ...existing, status: "active", updatedAt: Date.now() },
+      },
+    };
+    saveVehicleState(next, tenantSlug);
+    setState(next);
   }, [tenantSlug]);
 
   const vehicles = Object.values(state.vehicles).sort((a, b) => a.id.localeCompare(b.id));
