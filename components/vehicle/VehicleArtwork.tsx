@@ -8,6 +8,7 @@ import {
   vehiclePaintHex,
 } from "@/lib/vehicle-media";
 import { cn } from "@/components/ui";
+import { ConfiguredVehicleIllustration } from "@/components/vehicle/ConfiguredVehicleIllustration";
 
 interface VehicleArtworkProps {
   model: string;
@@ -91,21 +92,18 @@ export function VehicleArtwork({
         />
       ) : (
         <div
-          className="flex h-full items-center justify-center bg-gradient-to-br from-white via-white to-black/[0.035] px-4 text-center"
+          className="flex h-full items-center justify-center bg-gradient-to-br from-white via-white to-black/[0.035]"
         >
-          <div>
-            <div
-              aria-hidden="true"
-              className="mx-auto h-12 w-24 rounded-[50%] border border-black/10 opacity-80 shadow-[0_12px_18px_-12px_rgba(0,0,0,0.55)]"
-              style={{ background: `linear-gradient(145deg, ${paint}, #171a20)` }}
-            />
-            <div className="mt-3 text-lg font-semibold tracking-tight text-ink">
-              {canonicalModel}
-            </div>
-            {!compact && (
-              <div className="mt-0.5 text-xs text-muted">Exact Tesla image unavailable</div>
-            )}
-          </div>
+          <ConfiguredVehicleIllustration
+            model={model}
+            color={color}
+            trim={trim}
+            wheelType={wheelType}
+            interior={interior}
+            interiorCode={interiorCode}
+            year={year}
+            decorative={decorative}
+          />
         </div>
       )}
 

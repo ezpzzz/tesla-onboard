@@ -583,3 +583,70 @@ export function vehiclePaintHex(color: string | null | undefined): string {
   if (/(black|pbsb)/.test(value)) return "#171a20";
   return "#68737f";
 }
+
+export type VehicleWheelFamily =
+  | "aero"
+  | "gemini"
+  | "sport"
+  | "turbine"
+  | "standard";
+
+/**
+ * Normalize Fleet API wheel names for the configuration-aware fallback art.
+ * Tesla has renamed the same broad wheel designs across generations; retain
+ * the imported family rather than substituting a current configurator wheel.
+ */
+export function vehicleWheelFamily(
+  wheelType: string | null | undefined,
+): VehicleWheelFamily {
+  const value = normalizedSpec(wheelType);
+  if (/(glider|aero|pinwheel|photon)/.test(value)) return "aero";
+  if (/(gemini|crossflow|machina|helix|aperture|prismata)/.test(value)) {
+    return "gemini";
+  }
+  if (/(sport|stiletto|nova|induction|zero.?g)/.test(value)) return "sport";
+  if (/(warp|uberturbine|turbine|arachnid)/.test(value)) return "turbine";
+  return "standard";
+}
+
+export type VehicleInteriorFamily = "black" | "white" | "unknown";
+
+/** Resolve a cabin tone only when imported labels and option codes agree. */
+export function vehicleInteriorFamily(
+  interior: string | null | undefined,
+  importedCode: string | null | undefined,
+): VehicleInteriorFamily {
+  const value = normalizedSpec(interior);
+  const explicit = normalizedSpec(importedCode);
+  const labelFamily: VehicleInteriorFamily = /(white|blackandwhite|ultrawhite)/.test(
+    value,
+  )
+    ? "white"
+    : /(black|allblack)/.test(value)
+      ? "black"
+      : "unknown";
+  const codeFamily: VehicleInteriorFamily = /(ipw|ibw|in\d*pw|white)/.test(explicit)
+    ? "white"
+    : /(ipb|ibb|in\d*pb|black)/.test(explicit)
+      ? "black"
+      : "unknown";
+
+  if (
+    labelFamily !== "unknown" &&
+    codeFamily !== "unknown" &&
+    labelFamily !== codeFamily
+  ) {
+    return "unknown";
+  }
+  return labelFamily !== "unknown" ? labelFamily : codeFamily;
+}
+
+export function vehicleInteriorHex(
+  interior: string | null | undefined,
+  importedCode: string | null | undefined,
+): string {
+  const family = vehicleInteriorFamily(interior, importedCode);
+  if (family === "white") return "#f1f2f3";
+  if (family === "black") return "#20242a";
+  return "#777f88";
+}
