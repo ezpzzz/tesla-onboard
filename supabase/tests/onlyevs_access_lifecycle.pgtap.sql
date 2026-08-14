@@ -1,5 +1,5 @@
 begin;
-select plan(53);
+select plan(57);
 
 select has_table('public'::name, 'onlyevs_integrations'::name);
 select has_table('public'::name, 'onlyevs_calendar_candidates'::name);
@@ -131,6 +131,14 @@ select has_function(
 select has_function('public', 'get_onlyevs_owner_import_profile', array['text']);
 select has_function('public', 'delete_onlyevs_owner_import_session', array['text']);
 select has_function('public', 'resolve_onlyevs_calendar_candidate_change', array['uuid', 'text']);
+select has_function(
+  'public',
+  'create_onlyevs_manual_trip',
+  array['uuid', 'text', 'uuid', 'text', 'text', 'text', 'timestamp with time zone', 'timestamp with time zone', 'text', 'timestamp with time zone']
+);
+select has_function('public', 'update_onlyevs_guest_onboarding_progress', array['text', 'jsonb']);
+select has_function('public', 'get_onlyevs_workspace_trip_snapshot', array['uuid', 'text']);
+select has_function('public', 'rotate_onlyevs_trip_public_token', array['uuid', 'text', 'timestamp with time zone']);
 select has_column(
   'public'::name,
   'onlyevs_access_grants'::name,

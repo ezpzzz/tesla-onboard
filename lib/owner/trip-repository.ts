@@ -1,8 +1,11 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import type { ProgressSummary } from "@/lib/flow";
 import type { Driver, OwnerSnapshot, Trip, TripStatus } from "./types";
 import type { VehicleWorkspaceScope } from "./vehicle-repository";
+
+export const OWNER_TRIPS_CHANGED_EVENT = "onlyevs:owner-trips-changed";
 
 export interface CalendarCandidate {
   id: string;
@@ -23,6 +26,26 @@ interface TripRow {
   status: "confirmed" | "armed" | "active" | "completed" | "cancelled" | "conflict";
   starts_at: string;
   ends_at: string;
+  onboarding_progress?: unknown;
+  progress_updated_at?: string | null;
+  guest_bound_at?: string | null;
+  onboarding_completed_at?: string | null;
+}
+
+export interface ManualGuestOnboardingInput {
+  workspaceId: string;
+  shopSlug: string;
+  vehicleId: string;
+  guestName: string;
+  guestEmail: string;
+  timezone: string;
+  startsAt: string;
+  endsAt: string;
+}
+
+export interface GuestOnboardingLink {
+  tripId: string;
+  guestUrl: string;
 }
 
 function ownerTripStatus(status: TripRow["status"]): TripStatus | null {
@@ -32,15 +55,80 @@ function ownerTripStatus(status: TripRow["status"]): TripStatus | null {
   return "upcoming";
 }
 
+function finiteNumber(value: unknown, min: number, max: number): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max
+    ? value
+    : null;
+}
+
+function stringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > 64) return null;
+  return value.every((item) => typeof item === "string" && item.length <= 120)
+    ? value as string[]
+    : null;
+}
+
+function checklist(value: unknown): Record<string, boolean> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length > 64 || entries.some(([key, checked]) => key.length > 120 || typeof checked !== "boolean")) {
+    return null;
+  }
+  return Object.fromEntries(entries) as Record<string, boolean>;
+}
+
+/** Treat database JSON as untrusted input before it reaches owner UI logic. */
+export function parseStoredProgress(value: unknown): ProgressSummary | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const pct = finiteNumber(row.pct, 0, 100);
+  const completed = stringArray(row.completed);
+  const checked = checklist(row.checklist);
+  const integers = [
+    row.moduleTotal,
+    row.checklistDone,
+    row.checklistTotal,
+    row.requiredChecklistDone,
+    row.requiredChecklistTotal,
+  ];
+  if (
+    typeof row.stepId !== "string" || !row.stepId || row.stepId.length > 120 ||
+    pct === null || typeof row.isDone !== "boolean" || !completed || !checked ||
+    integers.some((item) => !Number.isInteger(item) || (item as number) < 0 || (item as number) > 64) ||
+    !Number.isSafeInteger(row.updatedAt)
+  ) return null;
+  return {
+    stepId: row.stepId,
+    pct,
+    isDone: row.isDone,
+    completed,
+    checklist: checked,
+    moduleTotal: row.moduleTotal as number,
+    checklistDone: row.checklistDone as number,
+    checklistTotal: row.checklistTotal as number,
+    requiredChecklistDone: row.requiredChecklistDone as number,
+    requiredChecklistTotal: row.requiredChecklistTotal as number,
+    experience: row.experience === "owner" || row.experience === "account" || row.experience === "new"
+      ? row.experience
+      : null,
+    pathMode: row.pathMode === "full" || row.pathMode === "essentials" ? row.pathMode : null,
+    startedAt: Number.isSafeInteger(row.startedAt) ? row.startedAt as number : null,
+    guestName: typeof row.guestName === "string" && row.guestName.length <= 240 ? row.guestName : null,
+    updatedAt: row.updatedAt as number,
+  };
+}
+
+export function notifyOwnerTripsChanged(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(OWNER_TRIPS_CHANGED_EVENT));
+}
+
 export async function fetchWorkspaceOperationalSnapshot(
   scope: VehicleWorkspaceScope,
 ): Promise<OwnerSnapshot> {
-  const { data, error } = await createClient()
-    .from("onlyevs_trips")
-    .select("id,vehicle_id,guest_name,guest_email,status,starts_at,ends_at")
-    .eq("workspace_id", scope.workspaceId)
-    .eq("shop_slug", scope.shopSlug)
-    .order("starts_at", { ascending: false });
+  const { data, error } = await createClient().rpc("get_onlyevs_workspace_trip_snapshot", {
+    p_workspace_id: scope.workspaceId,
+    p_shop_slug: scope.shopSlug,
+  });
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as TripRow[];
   const trips: Trip[] = [];
@@ -54,7 +142,11 @@ export async function fetchWorkspaceOperationalSnapshot(
       name: row.guest_name,
       email: row.guest_email,
       source: "live",
-      progress: null,
+      progress: (() => {
+        const parsed = parseStoredProgress(row.onboarding_progress);
+        const receivedAt = row.progress_updated_at ? Date.parse(row.progress_updated_at) : Number.NaN;
+        return parsed && Number.isFinite(receivedAt) ? { ...parsed, updatedAt: receivedAt } : parsed;
+      })(),
     });
     trips.push({
       id: row.id,
@@ -71,6 +163,40 @@ export async function fetchWorkspaceOperationalSnapshot(
     });
   }
   return { drivers, trips, chargingSessions: [], vehicles: [] };
+}
+
+export async function createManualGuestOnboarding(
+  input: ManualGuestOnboardingInput,
+): Promise<GuestOnboardingLink> {
+  const response = await fetch("/api/owner/trips/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  });
+  const result = (await response.json().catch(() => null)) as Partial<GuestOnboardingLink> & {
+    error?: string;
+  } | null;
+  if (!response.ok || !result?.tripId || !result.guestUrl) {
+    throw new Error(result?.error ?? "The guest onboarding could not be created.");
+  }
+  notifyOwnerTripsChanged();
+  return { tripId: result.tripId, guestUrl: result.guestUrl };
+}
+
+export async function regenerateGuestOnboardingLink(tripId: string): Promise<string> {
+  const response = await fetch(`/api/owner/trips/${encodeURIComponent(tripId)}/link`, {
+    method: "POST",
+    cache: "no-store",
+  });
+  const result = (await response.json().catch(() => null)) as {
+    guestUrl?: string;
+    error?: string;
+  } | null;
+  if (!response.ok || !result?.guestUrl) {
+    throw new Error(result?.error ?? "A new guest link could not be generated.");
+  }
+  return result.guestUrl;
 }
 
 export async function fetchCalendarCandidates(

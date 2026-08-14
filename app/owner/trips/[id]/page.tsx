@@ -32,6 +32,7 @@ import {
 import { BatteryReturnGauge, TripTimeline } from "@/components/owner/charts";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconAlert } from "@/components/icons";
+import { regenerateGuestOnboardingLink } from "@/lib/owner/trip-repository";
 
 /* UTC-only formatting so server and first client paint always agree — see
  * the same convention in components/owner/owner-ui.tsx. */
@@ -54,12 +55,15 @@ function formatDateRange(startMs: number, endMs: number): string {
 }
 
 export default function TripDetailPage() {
-  const { config, tenantSlug } = useTenantConfig();
+  const { config } = useTenantConfig();
   const params = useParams<{ id: string }>();
   const tripId = params.id;
   const { trips, drivers, vehicles, chargingSessions, hydrated } = useOwnerData();
   const { state: ownerState } = useOwnerState();
   const [copied, setCopied] = useState(false);
+  const [generatingLink, setGeneratingLink] = useState(false);
+  const [guestUrl, setGuestUrl] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   const trip = trips.find((t) => t.id === tripId) ?? null;
   const driver = trip ? drivers.find((d) => d.id === trip.driverId) ?? null : null;
@@ -99,14 +103,24 @@ export default function TripDetailPage() {
     (energy.superchargerCostUsd > 0 || belowPolicy) &&
     !(belowPolicy && ownerState.tripChecklists[trip.id]?.chargedToPolicy);
 
-  function copyGuestLink() {
-    const params = new URLSearchParams({ trip: trip!.id });
-    if (tenantSlug) params.set("tenant", tenantSlug);
-    const url = `${window.location.origin}/?${params.toString()}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+  async function createGuestLink() {
+    setGeneratingLink(true);
+    setLinkError(null);
+    try {
+      const url = await regenerateGuestOnboardingLink(trip!.id);
+      setGuestUrl(url);
+      try {
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 2000);
+      } catch {
+        setLinkError("The new link is ready. Select and copy it from the field above.");
+      }
+    } catch (caught) {
+      setLinkError(caught instanceof Error ? caught.message : "A new link could not be generated.");
+    } finally {
+      setGeneratingLink(false);
+    }
   }
 
   return (
@@ -146,10 +160,27 @@ export default function TripDetailPage() {
           {formatDateRange(trip.startAt, trip.endAt)}
         </div>
 
-        {trip.status === "upcoming" && trip.driverId === null && (
-          <div className="mt-4">
-            <Button variant="secondary" onClick={copyGuestLink}>
-              {copied ? "Copied!" : "Copy guest link"}
+        {trip.status === "upcoming" && (
+          <div className="mt-4 border-t border-line pt-4">
+            <p className="text-xs leading-relaxed text-muted">
+              Generate a replacement private link only when the guest needs it. The previous link is invalidated immediately.
+            </p>
+            {guestUrl ? (
+              <input
+                aria-label="Latest private guest link"
+                readOnly
+                value={guestUrl}
+                className="mt-3 w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-base text-ink"
+              />
+            ) : null}
+            {linkError ? <p role="alert" className="mt-2 text-sm text-danger">{linkError}</p> : null}
+            <Button
+              variant="secondary"
+              onClick={() => void createGuestLink()}
+              disabled={generatingLink}
+              className="mt-3"
+            >
+              {generatingLink ? "Generating…" : copied ? "New link copied" : "Generate new guest link"}
             </Button>
           </div>
         )}

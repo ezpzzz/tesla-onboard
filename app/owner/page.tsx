@@ -34,6 +34,7 @@ import { MiniBarChart } from "@/components/owner/charts";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconBolt, IconChevronRight } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
+import { NewGuestOnboarding } from "@/components/owner/NewGuestOnboarding";
 import type { DriverStatus } from "@/lib/owner/types";
 
 // Stable pre-hydration fallback so SSR markup matches the first client paint —
@@ -151,6 +152,8 @@ export default function OwnerOverviewPage() {
           </Card>
         </section>
       )}
+
+      <NewGuestOnboarding vehicles={vehicles} />
 
       <section>
         <AlertsPanel alerts={alerts} />

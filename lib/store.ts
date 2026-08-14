@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { browserTenantScope, migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
+import { guestOnboardingStorageScope } from "@/lib/progress-bridge";
 import type { ExperienceLevel, TeslaProfile } from "./tesla";
 import type { PathMode } from "./flow";
 
@@ -83,27 +84,28 @@ export function useOnboarding() {
   const { tenantSlug } = useTenantConfig();
   const [state, setState] = useState<OnboardingState>(initialState);
   const [hydratedScope, setHydratedScope] = useState<string | null | undefined>(undefined);
+  const currentScope = guestOnboardingStorageScope(tenantSlug);
 
   useEffect(() => {
-    setState(loadState(tenantSlug));
-    setHydratedScope(tenantSlug);
-  }, [tenantSlug]);
+    setState(loadState(currentScope));
+    setHydratedScope(currentScope);
+  }, [currentScope]);
 
-  const hydrated = hydratedScope !== undefined && hydratedScope === tenantSlug;
+  const hydrated = hydratedScope !== undefined && hydratedScope === currentScope;
 
   const update = useCallback((patch: Patch) => {
     setState((prev) => {
       const delta = typeof patch === "function" ? patch(prev) : patch;
       const next = { ...prev, ...delta };
-      saveState(next, tenantSlug);
+      saveState(next, hydratedScope ?? tenantSlug);
       return next;
     });
-  }, [tenantSlug]);
+  }, [hydratedScope, tenantSlug]);
 
   const reset = useCallback(() => {
-    clearState(tenantSlug);
+    clearState(hydratedScope ?? tenantSlug);
     setState(initialState);
-  }, [tenantSlug]);
+  }, [hydratedScope, tenantSlug]);
 
   return { state, hydrated, update, reset };
 }

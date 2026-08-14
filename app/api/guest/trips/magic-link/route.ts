@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { allowRequest } from "@/lib/owner-throttle";
 import { createClient } from "@/lib/supabase/server";
-import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
+import { canonicalOnlyEvsOrigin } from "@/lib/onlyevs-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,27 +10,11 @@ export const dynamic = "force-dynamic";
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const WINDOW_MS = 60 * 60 * 1_000;
 
-function canonicalOrigin(request: Request): string {
-  const configured = process.env.ONLYEVS_CANONICAL_ORIGIN?.trim();
-  if (!configured) return new URL(request.url).origin;
-  try {
-    const url = new URL(configured);
-    if (url.protocol === "https:" && url.pathname === "/" && !url.username && !url.password) {
-      return url.origin;
-    }
-  } catch {
-    // Fail closed to the serving origin; deployment validation should reject a
-    // missing or malformed canonical origin before custom domains activate.
-  }
-  return new URL(request.url).origin;
-}
-
 function clientIp(request: Request): string {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
 }
 
 export async function POST(request: Request) {
-  if (!ONLYEVS_OPERATIONS_ENABLED) return NextResponse.json({ error: "Not available." }, { status: 404 });
   const generic = () => NextResponse.json({ ok: true }, {
     headers: { "Cache-Control": "no-store, private" },
   });
@@ -54,7 +38,7 @@ export async function POST(request: Request) {
     // Guest auth always completes on the platform's canonical allowlisted
     // origin. Custom domains remain tenant-branded entry points without
     // requiring an unbounded shared-Supabase redirect allowlist.
-    const callback = new URL("/auth/callback", canonicalOrigin(request));
+    const callback = new URL("/auth/callback", canonicalOnlyEvsOrigin(request));
     callback.searchParams.set("next", `/trip/${token}`);
     try {
       await supabase.auth.signInWithOtp({
