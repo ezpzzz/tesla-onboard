@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add a prominent owner-dashboard action for creating private, vehicle-linked guest onboarding trips.
+- Persist only hashed guest-link capabilities, bind onboarding to the booking email, and sync bounded progress across devices for owner tracking.
+- Let owners rotate a lost guest link while invalidating the previous URL immediately.
+
 ## 0.2.0 — 2026-08-14
 
 - Rename the platform to evhost.app and add canonical/custom-domain routing.
