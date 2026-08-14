@@ -60,7 +60,15 @@ const NEEDS_ATTENTION_RANK: Record<DriverStatus, number> = {
 export default function OwnerOverviewPage() {
   const router = useRouter();
   const { config } = useTenantConfig();
-  const { drivers, trips, vehicles, chargingSessions, stats, policyPct } = useOwnerData();
+  const {
+    drivers,
+    trips,
+    vehicles,
+    chargingSessions,
+    stats,
+    policyPct,
+    vehicleError,
+  } = useOwnerData();
   const { state: ownerState, hydrated: ownerHydrated } = useOwnerState();
   const { state: setupState, hydrated: setupHydrated, update: updateSetup } = useOwnerSetupState();
   const [now, setNow] = useState(SSR_FALLBACK_NOW);
@@ -107,6 +115,12 @@ export default function OwnerOverviewPage() {
           Fleet setup
         </Link>
       </div>
+
+      {vehicleError ? (
+        <Card role="alert" className="border-danger/20 bg-danger/[0.04] p-4 text-sm text-danger">
+          Fleet data is unavailable: {vehicleError}
+        </Card>
+      ) : null}
 
       {setupHydrated && needsSetup(setupState) && (
         <section>

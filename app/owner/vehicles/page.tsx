@@ -10,6 +10,7 @@
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useState } from "react";
 import { useVehicleState } from "@/lib/owner/vehicle-state";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
@@ -103,13 +104,23 @@ function VehicleCard({
 export default function VehiclesPage() {
   const router = useRouter();
   const { config } = useTenantConfig();
-  const { vehicles, hydrated: vehicleHydrated, unarchiveVehicle } = useVehicleState();
+  const {
+    vehicles,
+    hydrated: vehicleHydrated,
+    error: vehicleError,
+    unarchiveVehicle,
+  } = useVehicleState();
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const { trips, chargingSessions, hydrated: dataHydrated } = useOwnerData();
   const { hydrated: setupHydrated, update: updateSetupState } = useOwnerSetupState();
   const ready = vehicleHydrated && dataHydrated;
 
   if (!ready) {
     return <Card className="p-6 text-center text-sm text-muted">Loading vehicles…</Card>;
+  }
+
+  if (vehicleError) {
+    return <Card role="alert" className="border-danger/20 p-6 text-center text-sm text-danger">{vehicleError}</Card>;
   }
 
   const active = vehicles.filter((v) => v.status === "active");
@@ -146,6 +157,12 @@ export default function VehiclesPage() {
         </div>
       </div>
 
+      {mutationError ? (
+        <Card role="alert" className="border-danger/20 bg-danger/[0.04] p-4 text-sm text-danger">
+          {mutationError}
+        </Card>
+      ) : null}
+
       {!config.car.sourceVehicleId ? (
         <Card className="border-brand/20 bg-brand/[0.04] p-4 text-sm leading-relaxed text-muted">
           The guest walkthrough uses a standalone vehicle profile, so its specs and imagery can
@@ -153,7 +170,7 @@ export default function VehiclesPage() {
         </Card>
       ) : !guestVehicle || guestVehicle.status !== "active" ? (
         <Card className="border-warn/20 bg-warn/[0.04] p-4 text-sm leading-relaxed text-muted">
-          The vehicle linked to the guest walkthrough is unavailable in this browser&apos;s fleet.
+          The vehicle linked to the guest walkthrough is unavailable in this workspace fleet.
           <Link href="/owner/settings" className="ml-1 font-medium text-ink hover:underline">Choose an active source vehicle.</Link>
         </Card>
       ) : null}
@@ -195,7 +212,15 @@ export default function VehiclesPage() {
                   </Link>
                   <Badge>Archived</Badge>
                 </div>
-                <Button variant="secondary" onClick={() => unarchiveVehicle(vehicle.id)}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setMutationError(null);
+                    void unarchiveVehicle(vehicle.id).catch((error) => {
+                      setMutationError(error instanceof Error ? error.message : "The vehicle could not be restored.");
+                    });
+                  }}
+                >
                   Unarchive
                 </Button>
               </Card>

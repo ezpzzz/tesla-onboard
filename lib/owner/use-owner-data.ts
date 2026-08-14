@@ -3,7 +3,7 @@
 /**
  * Owner dashboard data hook. Renders an honest empty snapshot on the server
  * and first client paint, then layers in real browser-local guest progress
- * and the host's persisted vehicle roster after hydration.
+ * and the host's workspace-persisted vehicle roster after hydration.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -24,7 +24,11 @@ export function useOwnerData() {
   const [snapshot, setSnapshot] = useState<OwnerSnapshot>(INITIAL_SNAPSHOT);
   const [dataHydrated, setDataHydrated] = useState(false);
   const guestProgress = useGuestProgress();
-  const { vehicles: vehicleStateVehicles, hydrated: vehicleHydrated } = useVehicleState();
+  const {
+    vehicles: vehicleStateVehicles,
+    hydrated: vehicleHydrated,
+    error: vehicleError,
+  } = useVehicleState();
 
   useEffect(() => {
     let cancelled = false;
@@ -94,5 +98,6 @@ export function useOwnerData() {
     stats,
     policyPct,
     hydrated,
+    vehicleError,
   };
 }

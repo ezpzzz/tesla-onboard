@@ -11,6 +11,9 @@
 import { canonicalTeslaModel } from "./tesla-model";
 export { canonicalTeslaModel } from "./tesla-model";
 
+/** Future model years must be re-audited instead of inheriting today's tuples. */
+export const TESLA_MEDIA_CATALOG_VERIFIED_THROUGH_YEAR = 2026;
+
 export interface VehicleMedia {
   imageUrl: string;
   provider: "tesla";
@@ -87,10 +90,23 @@ const MODEL_MEDIA: Record<string, VehicleMedia> = {
 const TESLA_PAINT_CODES: Array<[RegExp, string]> = [
   [/(diamondblack|px02)/, "PX02"],
   [/(solidblack|pbsb)/, "PBSB"],
+  [/(basewhite|pbcw)/, "PBCW"],
   [/(frostbluemetallic|frostblue|pb00)/, "PB00"],
   [/(glacierblue|pb01)/, "PB01"],
   [/(marineblue|pb02)/, "PB02"],
   [/(pearlwhitemulticoat|pearlwhite|ppsw)/, "PPSW"],
+  [/(pearlwhitepromulticoat|pearlwhitepro|pm00)/, "PM00"],
+  [/(midnightcherryred|pr00)/, "PR00"],
+  [/(redmulticoat|ppmr)/, "PPMR"],
+  [/(midnightsilvermetallic|midnightsilver|pmng)/, "PMNG"],
+  [/(silvermetallic|pmss)/, "PMSS"],
+  [/(obsidianblackmetallic|obsidianblack|pmbl)/, "PMBL"],
+  [/(pmmb)/, "PMMB"],
+  [/(pmab)/, "PMAB"],
+  [/(pmtg)/, "PMTG"],
+  [/(pmsg)/, "PMSG"],
+  [/(signaturered|ppsr)/, "PPSR"],
+  [/(titaniumsilvermetallic|titaniumsilver|ppti)/, "PPTI"],
   [/(stealthgrey|stealthgray|pn01)/, "PN01"],
   [/(quicksilver|pn00)/, "PN00"],
   [/(lunarsilver|pn02)/, "PN02"],
@@ -101,11 +117,15 @@ const TESLA_PAINT_CODES: Array<[RegExp, string]> = [
 ];
 
 function normalizedPaint(color: string | null | undefined): string {
-  return (color ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return normalizedSpec(color);
 }
 
 function normalizedSpec(value: string | null | undefined): string {
-  return (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return (value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 export function teslaPaintCode(
@@ -119,11 +139,13 @@ const SUPPORTED_PAINT_CODES = new Set(TESLA_PAINT_CODES.map(([, code]) => code))
 
 function paintFamily(value: string | null | undefined): string | null {
   const normalized = normalizedPaint(value);
-  if (/(black|pbsb|px02)/.test(normalized)) return "black";
-  if (/(white|ppsw)/.test(normalized)) return "white";
-  if (/(blue|ppsb|pb00|pb01|pb02)/.test(normalized)) return "blue";
-  if (/(red|pr01|pr02)/.test(normalized)) return "red";
-  if (/(grey|gray|silver|pn00|pn01|pn02|pn03)/.test(normalized)) return "grey";
+  if (/(black|pbsb|px02|pmbl)/.test(normalized)) return "black";
+  if (/(white|ppsw|pbcw|pm00)/.test(normalized)) return "white";
+  if (/(blue|ppsb|pb00|pb01|pb02|pmmb)/.test(normalized)) return "blue";
+  if (/(red|pr00|pr01|pr02|ppmr|ppsr)/.test(normalized)) return "red";
+  if (/(grey|gray|silver|pn00|pn01|pn02|pn03|pmng|pmss|pmtg|ppti)/.test(normalized)) return "grey";
+  if (/(brown|pmab)/.test(normalized)) return "brown";
+  if (/(green|pmsg)/.test(normalized)) return "green";
   return null;
 }
 
@@ -185,10 +207,10 @@ function configuratorMedia({
 
 function exactInteriorCode(
   blackCode: string,
+  whiteCode: string | null,
   interior: string | null | undefined,
   importedCode: string | null | undefined,
 ): string | null {
-  const whiteCode = blackCode.replace(/B(?=\d+$)/, "W");
   const explicit = (importedCode ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   const value = normalizedSpec(interior);
   const labelCode = /(white|blackandwhite|ultrawhite)/.test(value)
@@ -197,7 +219,7 @@ function exactInteriorCode(
       ? blackCode
       : null;
   if (value && !labelCode) return null;
-  if (explicit === blackCode || explicit === whiteCode) {
+  if (explicit === blackCode || (whiteCode !== null && explicit === whiteCode)) {
     return labelCode && labelCode !== explicit ? null : explicit;
   }
   if (labelCode) return labelCode;
@@ -208,7 +230,8 @@ function exactInteriorCode(
 
 interface Model3TrimConfig {
   trimCode: "MT367" | "MT369" | "MT370" | "MT371";
-  interiorCode: "IBB4" | "IPB2" | "IPB3" | "IPB4";
+  blackInteriorCode: "IBB4" | "IPB2" | "IPB3" | "IPB4";
+  whiteInteriorCode: "IPW2" | "IPW3" | "IPW4" | null;
   defaultWheelCode: "W38A" | "W38C" | "W30P";
   allowedWheelCodes: Array<"W38A" | "W38C" | "W39G" | "W30P">;
   allowedPaintCodes: string[];
@@ -220,37 +243,41 @@ function model3TrimConfig(trim: string | null | undefined): Model3TrimConfig | n
   if (/(performance|p74d|perf)/.test(value)) {
     return {
       trimCode: "MT371",
-      interiorCode: "IPB4",
+      blackInteriorCode: "IPB4",
+      whiteInteriorCode: "IPW4",
       defaultWheelCode: "W30P",
       allowedWheelCodes: ["W30P"],
-      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB00", "PBSB", "PPSW", "PR01"],
+      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB00", "PPSB", "PBSB", "PPSW", "PR01"],
     };
   }
   if (/(longrangeawd|premiumawd|allwheeldrive|dualmotor|74d|awd)/.test(value)) {
     return {
       trimCode: "MT370",
-      interiorCode: "IPB3",
+      blackInteriorCode: "IPB3",
+      whiteInteriorCode: "IPW3",
       defaultWheelCode: "W38A",
       allowedWheelCodes: ["W38A", "W39G"],
-      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB02", "PBSB", "PPSW", "PR01"],
+      allowedPaintCodes: ["PN01", "PN00", "PX02", "PPSB", "PBSB", "PPSW", "PR01"],
     };
   }
   if (/(longrangerwd|premiumrwd|^74$)/.test(value)) {
     return {
       trimCode: "MT369",
-      interiorCode: "IPB2",
+      blackInteriorCode: "IPB2",
+      whiteInteriorCode: "IPW2",
       defaultWheelCode: "W38A",
       allowedWheelCodes: ["W38A", "W39G"],
-      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB02", "PBSB", "PPSW", "PR01"],
+      allowedPaintCodes: ["PN01", "PN00", "PX02", "PPSB", "PBSB", "PPSW", "PR01"],
     };
   }
   if (/(rearwheeldrive|standardrange|standardrangeplus|base|rwd|74r)/.test(value)) {
     return {
       trimCode: "MT367",
-      interiorCode: "IBB4",
+      blackInteriorCode: "IBB4",
+      whiteInteriorCode: null,
       defaultWheelCode: "W38C",
-      allowedWheelCodes: ["W38C", "W39G"],
-      allowedPaintCodes: ["PN01", "PX02", "PPSW"],
+      allowedWheelCodes: ["W38A", "W38C", "W39G"],
+      allowedPaintCodes: ["PN01", "PN00", "PX02", "PPSB", "PBSB", "PPSW", "PR01"],
     };
   }
   return null;
@@ -292,12 +319,19 @@ function model3ConfiguratorMedia(
 ): VehicleMedia | null {
   const paintCode = exactPaintCode(color, importedPaintCode);
   const trimConfig = model3TrimConfig(trim);
-  if (!paintCode || !trimConfig || !year || year < 2024) return null;
+  if (
+    !paintCode
+    || !trimConfig
+    || !year
+    || year < 2024
+    || year > TESLA_MEDIA_CATALOG_VERIFIED_THROUGH_YEAR
+  ) return null;
   if (!trimConfig.allowedPaintCodes.includes(paintCode)) return null;
   const wheel = model3WheelCode(wheelType, trimConfig);
   if (!wheel?.matched) return null;
   const interiorCode = exactInteriorCode(
-    trimConfig.interiorCode,
+    trimConfig.blackInteriorCode,
+    trimConfig.whiteInteriorCode,
     interior,
     importedInteriorCode,
   );
@@ -320,7 +354,8 @@ function model3ConfiguratorMedia(
 
 interface ModelYTrimConfig {
   trimCode: string;
-  interiorCode: string;
+  blackInteriorCode: string;
+  whiteInteriorCode: string | null;
   allowedWheelCodes: string[];
   allowedPaintCodes: string[];
 }
@@ -336,25 +371,28 @@ function modelYTrimConfig(
     if (/(performance|perf)/.test(value)) {
       return {
         trimCode: "MTY38",
-        interiorCode: "INPB0",
+        blackInteriorCode: "INPB0",
+        whiteInteriorCode: "INPW0",
         allowedWheelCodes: ["WY21P"],
-        allowedPaintCodes: ["PBSB", "PPSB", "PPSW", "PR01", "PN01", "PN00"],
+        allowedPaintCodes: ["PBSB", "PPSB", "PPSW", "PR00", "PR01", "PPMR", "PMNG", "PN01", "PN00"],
       };
     }
     if (/(longrangeawd|allwheeldrive|dualmotor|awd)/.test(value)) {
       return {
         trimCode: "MTY37",
-        interiorCode: "INPB0",
+        blackInteriorCode: "INPB0",
+        whiteInteriorCode: "INPW0",
         allowedWheelCodes: ["WY19B", "WY19C", "WY20P"],
-        allowedPaintCodes: ["PBSB", "PPSB", "PPSW", "PN01", "PR01", "PN00"],
+        allowedPaintCodes: ["PBSB", "PPSB", "PPSW", "PR00", "PR01", "PPMR", "PMNG", "PN01", "PN00"],
       };
     }
     if (/(longrangerwd|rearwheeldrive|standardrange|rwd)/.test(value)) {
       return {
         trimCode: "MTY35",
-        interiorCode: "INPB0",
+        blackInteriorCode: "INPB0",
+        whiteInteriorCode: "INPW0",
         allowedWheelCodes: ["WY19B", "WY19C", "WY20P"],
-        allowedPaintCodes: ["PN01", "PBSB", "PPSB", "PPSW", "PR01", "PN00"],
+        allowedPaintCodes: ["PN01", "PBSB", "PPSB", "PPSW", "PR00", "PR01", "PPMR", "PMNG", "PN00"],
       };
     }
     return null;
@@ -363,49 +401,55 @@ function modelYTrimConfig(
   if (/(performance|perf)/.test(value)) {
     return {
       trimCode: "MTY70",
-      interiorCode: "IPB14",
+      blackInteriorCode: "IPB14",
+      whiteInteriorCode: "IPW14",
       allowedWheelCodes: ["WY21A"],
-      allowedPaintCodes: ["PN00", "PN01", "PPSW", "PR01", "PX02", "PB00"],
+      allowedPaintCodes: ["PN00", "PN01", "PPSW", "PR01", "PX02", "PB00", "PB01", "PB02"],
     };
   }
   if (/(longwheelbase|modelyl|launch|e80)/.test(value)) {
     return {
       trimCode: "MTY83",
-      interiorCode: "IPB17",
+      blackInteriorCode: "IPB17",
+      whiteInteriorCode: "IPW17",
       allowedWheelCodes: ["WY19L", "WY20L"],
-      allowedPaintCodes: ["PN03", "PX02", "PB01"],
+      allowedPaintCodes: ["PN03", "PX02", "PB01", "PN01", "PR01"],
     };
   }
   if (/(premium|longrange)/.test(value) && /(awd|allwheeldrive|dualmotor)/.test(value)) {
     return {
       trimCode: "MTY48",
-      interiorCode: "IPB12",
+      blackInteriorCode: "IPB12",
+      whiteInteriorCode: "IPW12",
       allowedWheelCodes: ["WY19P", "WY20B"],
-      allowedPaintCodes: ["PN01", "PN00", "PPSW", "PR01", "PX02", "PB02"],
+      allowedPaintCodes: ["PN01", "PN00", "PPSW", "PR01", "PX02", "PB01", "PB02"],
     };
   }
   if (/(premium|longrange)/.test(value) && /(rwd|rearwheeldrive)/.test(value)) {
     return {
       trimCode: "MTY60",
-      interiorCode: "IPB12",
+      blackInteriorCode: "IPB12",
+      whiteInteriorCode: "IPW12",
       allowedWheelCodes: ["WY19P", "WY20B"],
-      allowedPaintCodes: ["PN01", "PN00", "PPSW", "PR01", "PX02", "PB02"],
+      allowedPaintCodes: ["PN01", "PN00", "PPSW", "PR01", "PX02", "PB01", "PB02"],
     };
   }
   if (/(awd|allwheeldrive|dualmotor)/.test(value)) {
     return {
       trimCode: "MTY77",
-      interiorCode: "IBB6",
+      blackInteriorCode: "IBB6",
+      whiteInteriorCode: null,
       allowedWheelCodes: ["WY18P", "WY19P"],
-      allowedPaintCodes: ["PN01", "PPSW", "PX02"],
+      allowedPaintCodes: ["PN01", "PN00", "PPSW", "PR01", "PX02", "PB01", "PB02"],
     };
   }
   if (/(rearwheeldrive|standardrange|rwd)/.test(value)) {
     return {
       trimCode: "MTY61",
-      interiorCode: "IBB6",
+      blackInteriorCode: "IBB6",
+      whiteInteriorCode: null,
       allowedWheelCodes: ["WY18P", "WY19P"],
-      allowedPaintCodes: ["PN01", "PPSW", "PX02"],
+      allowedPaintCodes: ["PN01", "PN00", "PPSW", "PR01", "PX02", "PB01", "PB02"],
     };
   }
   return null;
@@ -414,8 +458,8 @@ function modelYTrimConfig(
 function modelYWheelCode(wheelType: string | null | undefined): string | null {
   const value = normalizedSpec(wheelType);
   if (/(aperture|wy18p)/.test(value)) return "WY18P";
-  if (/(geminidark|wy19c)/.test(value)) return "WY19C";
-  if (/(gemini|wy19b)/.test(value)) return "WY19B";
+  if (/(apollodark|geminidark|wy19c)/.test(value)) return "WY19C";
+  if (/(apollo|gemini|wy19b)/.test(value)) return "WY19B";
   if (/(crossflow|wy19p)/.test(value)) return "WY19P";
   if (/(machina|wy19l)/.test(value)) return "WY19L";
   if (/(helix20|wy20b|wy20a)/.test(value)) return "WY20B";
@@ -435,7 +479,7 @@ function modelYConfiguratorMedia(
   importedPaintCode: string | null | undefined,
   year: number | null | undefined,
 ): VehicleMedia | null {
-  if (!year || year < 2020) return null;
+  if (!year || year < 2020 || year > TESLA_MEDIA_CATALOG_VERIFIED_THROUGH_YEAR) return null;
   const trimConfig = modelYTrimConfig(trim, year);
   const paintCode = exactPaintCode(color, importedPaintCode);
   const wheelCode = modelYWheelCode(wheelType);
@@ -443,7 +487,8 @@ function modelYConfiguratorMedia(
   if (!trimConfig.allowedPaintCodes.includes(paintCode)) return null;
   if (!trimConfig.allowedWheelCodes.includes(wheelCode)) return null;
   const interiorCode = exactInteriorCode(
-    trimConfig.interiorCode,
+    trimConfig.blackInteriorCode,
+    trimConfig.whiteInteriorCode,
     interior,
     importedInteriorCode,
   );
@@ -501,7 +546,11 @@ function cybertruckConfiguratorMedia(
   wheelType: string | null | undefined,
   year: number | null | undefined,
 ): VehicleMedia | null {
-  if (!year || year < 2024) return null;
+  if (
+    !year
+    || year < 2024
+    || year > TESLA_MEDIA_CATALOG_VERIFIED_THROUGH_YEAR
+  ) return null;
   const paint = normalizedPaint(color);
   if (paint && !/(stainless|silver|unpainted|steel)/.test(paint)) return null;
   const trimConfig = cybertruckTrimConfig(trim);
@@ -582,6 +631,9 @@ export function teslaMediaUnavailableReason(
   }
 
   const canonicalModel = canonicalTeslaModel(model);
+  if (year && year > TESLA_MEDIA_CATALOG_VERIFIED_THROUGH_YEAR) {
+    return "This model year has not been verified against Tesla's exact image catalog yet.";
+  }
   if (
     (canonicalModel === "Model 3" && year && year < 2024)
     || (canonicalModel === "Model Y" && year && year < 2020)

@@ -34,7 +34,8 @@ export interface TeslaImportedSpec {
 }
 
 export interface Vehicle {
-  id: string; // "veh-01", "veh-02", ... zero-padded sequential
+  /** Database UUID in workspace mode; legacy veh-NN id in local demo mode. */
+  id: string;
   /** Opaque, collision-resistant reference safe to publish in guest config. */
   guestSourceId: string;
   displayName: string;
@@ -61,13 +62,15 @@ export interface Vehicle {
   // unchanged; only import-mapping.ts sets it, on the Tesla -> Vehicle path.
   teslaImportKey?: string | null;
   status: VehicleStatus;
+  /** Database-owned optimistic-concurrency token; absent in local demo mode. */
+  remoteRevision?: number;
   createdAt: number;
   updatedAt: number;
 }
 
 export type VehicleInput = Omit<
   Vehicle,
-  "id" | "guestSourceId" | "status" | "createdAt" | "updatedAt"
+  "id" | "guestSourceId" | "status" | "remoteRevision" | "createdAt" | "updatedAt"
 >;
 
 export interface VehicleStats {

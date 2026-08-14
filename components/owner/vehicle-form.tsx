@@ -5,13 +5,13 @@
  * set, used by both /owner/vehicles/new (mode "create") and embedded on
  * /owner/vehicles/[id] (mode "edit"). Pure controlled form: local field
  * state (strings, so number/nullable fields can be empty mid-edit),
- * validated with validateVehicleInput on submit, and onSubmit only fires
- * once every field passes.
+ * validated with validateVehicleInput on submit. Durable workspace writes are
+ * awaited and failures stay visible in the form instead of reporting success.
  *
  * Note: this form edits the *owner dashboard's* record of the vehicle
  * (stats, policy overrides, notes) — it never writes to hostConfig, so it
- * intentionally cannot change what a guest sees in the onboarding
- * walkthrough. See the hint copy below.
+ * intentionally cannot change the selected guest vehicle until the owner
+ * chooses it in Settings. See the hint copy below.
  */
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
@@ -28,7 +28,7 @@ interface VehicleFormProps {
   mode: "create" | "edit";
   initialValues?: Partial<VehicleInput>;
   globalPolicyPct: number;
-  onSubmit: (input: VehicleInput) => void;
+  onSubmit: (input: VehicleInput) => void | Promise<void>;
   onCancel?: () => void;
   submitLabel?: string;
 }
@@ -139,6 +139,8 @@ export function VehicleForm({
   const [values, setValues] = useState<FormValues>(() => initialFormValues(initialValues));
   const [errors, setErrors] = useState<Partial<Record<keyof VehicleInput, string>>>({});
   const [currentYear, setCurrentYear] = useState(SSR_FALLBACK_YEAR);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     const year = new Date().getFullYear();
@@ -155,6 +157,7 @@ export function VehicleForm({
   }, []);
 
   function set<K extends keyof FormValues>(key: K, v: FormValues[K]) {
+    setSubmitError(null);
     setValues((prev) => {
       const next = { ...prev, [key]: v };
       // Once errors are showing, keep them live so a corrected field clears
@@ -168,7 +171,7 @@ export function VehicleForm({
     });
   }
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const input = toVehicleInput(values, initialValues);
     const fieldErrors = validateVehicleInput(input, currentYear);
@@ -177,7 +180,15 @@ export function VehicleForm({
       return;
     }
     setErrors({});
-    onSubmit(input);
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onSubmit(input);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Vehicle changes could not be saved.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const defaultSubmitLabel = mode === "create" ? "Add vehicle" : "Save changes";
@@ -185,9 +196,15 @@ export function VehicleForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off" noValidate>
       <div className="rounded-2xl border border-line bg-surface px-3.5 py-3 text-xs leading-relaxed text-muted">
-        Editing here doesn&apos;t change what guests see in the walkthrough — that still comes
-        from the host config.
+        Editing here updates the private workspace fleet. Choose the guest-facing vehicle in
+        Settings to publish its safe presentation fields to the walkthrough.
       </div>
+
+      {submitError ? (
+        <div role="alert" className="rounded-2xl border border-danger/20 bg-danger/[0.04] px-3.5 py-3 text-sm text-danger">
+          {submitError}
+        </div>
+      ) : null}
 
       <Field id="vehicle-displayName" label="Display name" error={errors.displayName}>
         <input
@@ -379,9 +396,11 @@ export function VehicleForm({
       </Field>
 
       <div className="flex items-center gap-3 pt-1">
-        <Button type="submit">{submitLabel ?? defaultSubmitLabel}</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? "Saving…" : submitLabel ?? defaultSubmitLabel}
+        </Button>
         {onCancel && (
-          <Button type="button" variant="secondary" onClick={onCancel}>
+          <Button type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
             Cancel
           </Button>
         )}

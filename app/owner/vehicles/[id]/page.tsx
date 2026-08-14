@@ -38,11 +38,19 @@ export default function VehicleDetailPage() {
   const { config } = useTenantConfig();
   const params = useParams<{ id: string }>();
   const id = params.id;
-  const { vehicles, hydrated: vehicleHydrated, updateVehicle, archiveVehicle, unarchiveVehicle } =
-    useVehicleState();
+  const {
+    vehicles,
+    hydrated: vehicleHydrated,
+    error: vehicleError,
+    updateVehicle,
+    archiveVehicle,
+    unarchiveVehicle,
+  } = useVehicleState();
   const { trips, chargingSessions, hydrated: dataHydrated } = useOwnerData();
   const [saved, setSaved] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const archiveTriggerRef = useRef<HTMLButtonElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
@@ -90,6 +98,10 @@ export default function VehicleDetailPage() {
     return <Card className="p-6 text-center text-sm text-muted">Loading vehicle…</Card>;
   }
 
+  if (vehicleError) {
+    return <Card role="alert" className="border-danger/20 p-6 text-center text-sm text-danger">{vehicleError}</Card>;
+  }
+
   if (!vehicle) {
     return (
       <EmptyState
@@ -113,7 +125,7 @@ export default function VehicleDetailPage() {
   );
 
   const vehicleState: VehicleState = {
-    version: 1,
+    version: 2,
     vehicles: Object.fromEntries(vehicles.map((v) => [v.id, v])),
   };
   const archivable = canArchiveVehicle(vehicleState, vehicle.id);
@@ -138,18 +150,38 @@ export default function VehicleDetailPage() {
     teslaImportKey: vehicle.teslaImportKey,
   };
 
-  function handleSubmit(input: VehicleInput) {
-    updateVehicle(vehicle!.id, input);
+  async function handleSubmit(input: VehicleInput) {
+    await updateVehicle(vehicle!.id, input);
     setSaved(true);
   }
 
-  function handleArchiveClick() {
+  async function handleArchiveClick() {
     if (!confirmArchive) {
       setConfirmArchive(true);
       return;
     }
-    archiveVehicle(vehicle!.id);
-    setConfirmArchive(false);
+    setStatusSaving(true);
+    setStatusError(null);
+    try {
+      await archiveVehicle(vehicle!.id);
+      setConfirmArchive(false);
+    } catch (error) {
+      setStatusError(error instanceof Error ? error.message : "The vehicle could not be archived.");
+    } finally {
+      setStatusSaving(false);
+    }
+  }
+
+  async function handleUnarchive() {
+    setStatusSaving(true);
+    setStatusError(null);
+    try {
+      await unarchiveVehicle(vehicle!.id);
+    } catch (error) {
+      setStatusError(error instanceof Error ? error.message : "The vehicle could not be restored.");
+    } finally {
+      setStatusSaving(false);
+    }
   }
 
   return (
@@ -239,13 +271,18 @@ export default function VehicleDetailPage() {
             ? "Confirm archive: this vehicle will be archived and hidden from active lists."
             : ""}
         </p>
+        {statusError ? (
+          <p role="alert" className="mt-3 rounded-xl border border-danger/20 bg-danger/[0.04] p-3 text-sm text-danger">
+            {statusError}
+          </p>
+        ) : null}
         {vehicle.status === "archived" ? (
           <div className="mt-3 space-y-3">
             <p className="text-sm text-muted">
               This vehicle is archived and hidden from active lists.
             </p>
-            <Button ref={unarchiveButtonRef} variant="secondary" onClick={() => unarchiveVehicle(vehicle.id)}>
-              Unarchive
+            <Button ref={unarchiveButtonRef} variant="secondary" onClick={handleUnarchive} disabled={statusSaving}>
+              {statusSaving ? "Restoring…" : "Unarchive"}
             </Button>
           </div>
         ) : !archivable ? (
@@ -262,8 +299,8 @@ export default function VehicleDetailPage() {
                 : "No upcoming or active trips reference this vehicle."}
             </p>
             <div className="flex gap-2">
-              <Button ref={confirmButtonRef} variant="secondary" onClick={handleArchiveClick}>
-                Confirm archive
+              <Button ref={confirmButtonRef} variant="secondary" onClick={handleArchiveClick} disabled={statusSaving}>
+                {statusSaving ? "Archiving…" : "Confirm archive"}
               </Button>
               <Button variant="ghost" onClick={() => setConfirmArchive(false)}>
                 Cancel

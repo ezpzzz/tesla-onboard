@@ -59,7 +59,7 @@ export function TenantSettingsForm({
 }) {
   const { config } = useTenantConfig();
   const { workspace, workspaces, loading, error, persistence, setWorkspace, saveConfig } = useOwnerTenant();
-  const { vehicles, hydrated: vehiclesHydrated } = useVehicleState();
+  const { vehicles, hydrated: vehiclesHydrated, error: vehicleError } = useVehicleState();
   const [draft, setDraft] = useState<TenantConfig>(config);
   const [rules, setRules] = useState(config.houseRules.join("\n"));
   const [saving, setSaving] = useState(false);
@@ -107,7 +107,9 @@ export function TenantSettingsForm({
         );
         if (!source) {
           throw new Error(
-            "The selected fleet vehicle is no longer active on this device. Choose another vehicle or switch to a custom guest vehicle.",
+            vehicleError
+              ? `The private workspace fleet could not be loaded: ${vehicleError}`
+              : "The selected fleet vehicle is no longer active in this workspace. Choose another vehicle or switch to a custom guest vehicle.",
           );
         }
         // The linked fleet record is authoritative. Re-materialize at the
@@ -175,6 +177,11 @@ export function TenantSettingsForm({
       </SettingsSection>
 
       <SettingsSection title="Guest vehicle">
+        {vehicleError ? (
+          <div role="alert" className="rounded-xl border border-danger/20 bg-danger/[0.04] px-3.5 py-3 text-sm text-danger">
+            {vehicleError}
+          </div>
+        ) : null}
         <VehicleArtwork
           model={draft.car.model}
           color={draft.car.color}
@@ -211,7 +218,7 @@ export function TenantSettingsForm({
         <div className="rounded-xl border border-line bg-surface px-3.5 py-3 text-sm leading-relaxed text-muted">
           {draft.car.sourceVehicleId
             ? !linkedVehicleActive
-              ? "This linked fleet vehicle is unavailable on this device. Select another active vehicle before saving."
+              ? "This linked fleet vehicle is unavailable in this workspace. Select another active vehicle before saving."
               : linkedVehicleCurrent
                 ? `Linked to ${linkedVehicle?.displayName ?? "the selected vehicle"}. Guest and owner surfaces use the same exact-spec snapshot.`
                 : `Linked to ${linkedVehicle?.displayName ?? "the selected vehicle"}. Its fleet details changed; saving will publish the latest exact-spec snapshot.`
