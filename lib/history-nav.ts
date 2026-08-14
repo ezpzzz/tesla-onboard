@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { buildFlow, indexOfStep, type PathMode } from "./flow";
+import { mergeStepHistoryState } from "./history-state";
 
 interface HistoryEntry {
   rtr?: boolean;
@@ -50,7 +51,10 @@ export function useStepHistory({ hydrated, stepId, pathMode, newToTesla, setStep
     // First sync after load (or after a reset): tag the current entry in place.
     if (synced.current === null) {
       depth.current = 0;
-      window.history.replaceState({ rtr: true, stepId, depth: 0 }, "");
+      window.history.replaceState(
+        mergeStepHistoryState(window.history.state, stepId, 0),
+        "",
+      );
       synced.current = stepId;
       return;
     }
@@ -61,10 +65,16 @@ export function useStepHistory({ hydrated, stepId, pathMode, newToTesla, setStep
     const forward = indexOfStep(flow, stepId) > indexOfStep(flow, synced.current);
     if (forward) {
       depth.current += 1;
-      window.history.pushState({ rtr: true, stepId, depth: depth.current }, "");
+      window.history.pushState(
+        mergeStepHistoryState(window.history.state, stepId, depth.current),
+        "",
+      );
     } else {
       // Backward move via a direct state change (e.g. reset) — rewrite in place.
-      window.history.replaceState({ rtr: true, stepId, depth: depth.current }, "");
+      window.history.replaceState(
+        mergeStepHistoryState(window.history.state, stepId, depth.current),
+        "",
+      );
     }
     synced.current = stepId;
   }, [hydrated, stepId, pathMode, newToTesla]);

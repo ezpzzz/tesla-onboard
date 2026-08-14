@@ -20,11 +20,12 @@ assert.match(repository, /\.from\("onlyevs_vehicles"\)/);
 assert.match(repository, /\.eq\("workspace_id", scope\.workspaceId\)/);
 assert.match(repository, /\.eq\("shop_slug", scope\.shopSlug\)/);
 assert.match(repository, /\.eq\("revision", existing\.remoteRevision \?\? 1\)/);
-assert.match(repository, /candidate\.vin[\s\S]*candidate\.teslaImportKey/);
+assert.doesNotMatch(repository, /migrateBrowserVehicles/);
 
-const migrationCall = state.indexOf("await migrateBrowserVehicles(");
+const remoteLoad = state.indexOf("await fetchWorkspaceVehicles(scope)");
 const migrationCompletion = state.indexOf("completeBrowserMigration(tenantSlug)");
-assert.ok(migrationCall >= 0 && migrationCompletion > migrationCall);
+assert.ok(remoteLoad >= 0 && migrationCompletion > remoteLoad);
+assert.doesNotMatch(state, /await migrateBrowserVehicles\(/);
 assert.match(state, /localStorage\.removeItem\(scopedStorageKey\(VEHICLE_KEY, tenantSlug\)\)/);
 assert.match(state, /persistence: scope \? "workspace" as const : "browser" as const/);
 
