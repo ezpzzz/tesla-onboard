@@ -56,6 +56,7 @@ export function WelcomeStep({ nav, update, state }: StepProps) {
           interiorCode={car.teslaInteriorCode}
           paintCode={car.teslaPaintCode}
           year={car.year}
+          configurationVerified={Boolean(car.sourceVehicleId)}
           eager
           className="mt-2 h-48 sm:h-72"
         />

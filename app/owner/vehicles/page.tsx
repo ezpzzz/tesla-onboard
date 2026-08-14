@@ -11,6 +11,7 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useVehicleState } from "@/lib/owner/vehicle-state";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { useOwnerSetupState } from "@/lib/owner/setup-state";
 import { vehicleStats, formatMiles, formatUsd, formatPct } from "@/lib/owner/derive";
@@ -18,6 +19,7 @@ import { Badge, Button, Card } from "@/components/ui";
 import { IconChevronRight } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { ChargingSession, Trip, Vehicle } from "@/lib/owner/types";
+import { tenantCarMatchesVehicle } from "@/lib/tenant-vehicle";
 
 function VehicleStatCell({ label, value }: { label: string; value: string }) {
   return (
@@ -32,10 +34,14 @@ function VehicleCard({
   vehicle,
   trips,
   chargingSessions,
+  isGuestVehicle,
+  guestSnapshotCurrent,
 }: {
   vehicle: Vehicle;
   trips: Trip[];
   chargingSessions: ChargingSession[];
+  isGuestVehicle: boolean;
+  guestSnapshotCurrent: boolean;
 }) {
   const stats = vehicleStats(vehicle.id, trips, chargingSessions);
   return (
@@ -59,7 +65,14 @@ function VehicleCard({
         <div className="p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="truncate font-medium text-ink">{vehicle.displayName}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="truncate font-medium text-ink">{vehicle.displayName}</div>
+                {isGuestVehicle ? (
+                  <Badge tone={guestSnapshotCurrent ? "brand" : "warn"}>
+                    {guestSnapshotCurrent ? "Guest vehicle" : "Guest sync pending"}
+                  </Badge>
+                ) : null}
+              </div>
               <div className="mt-0.5 text-sm text-muted">
                 {[vehicle.trim, vehicle.color, vehicle.interior].filter(Boolean).join(" · ")}
               </div>
@@ -89,6 +102,7 @@ function VehicleCard({
 
 export default function VehiclesPage() {
   const router = useRouter();
+  const { config } = useTenantConfig();
   const { vehicles, hydrated: vehicleHydrated, unarchiveVehicle } = useVehicleState();
   const { trips, chargingSessions, hydrated: dataHydrated } = useOwnerData();
   const { hydrated: setupHydrated, update: updateSetupState } = useOwnerSetupState();
@@ -100,6 +114,9 @@ export default function VehiclesPage() {
 
   const active = vehicles.filter((v) => v.status === "active");
   const archived = vehicles.filter((v) => v.status === "archived");
+  const guestVehicle = config.car.sourceVehicleId
+    ? vehicles.find((vehicle) => vehicle.guestSourceId === config.car.sourceVehicleId)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -129,6 +146,18 @@ export default function VehiclesPage() {
         </div>
       </div>
 
+      {!config.car.sourceVehicleId ? (
+        <Card className="border-brand/20 bg-brand/[0.04] p-4 text-sm leading-relaxed text-muted">
+          The guest walkthrough uses a standalone vehicle profile, so its specs and imagery can
+          drift from this fleet. <Link href="/owner/settings" className="font-medium text-brand hover:underline">Link a fleet vehicle in Settings.</Link>
+        </Card>
+      ) : !guestVehicle || guestVehicle.status !== "active" ? (
+        <Card className="border-warn/20 bg-warn/[0.04] p-4 text-sm leading-relaxed text-muted">
+          The vehicle linked to the guest walkthrough is unavailable in this browser&apos;s fleet.
+          <Link href="/owner/settings" className="ml-1 font-medium text-ink hover:underline">Choose an active source vehicle.</Link>
+        </Card>
+      ) : null}
+
       {active.length === 0 ? (
         <Card className="p-6 text-center text-sm text-muted">No active vehicles.</Card>
       ) : (
@@ -139,6 +168,8 @@ export default function VehiclesPage() {
               vehicle={vehicle}
               trips={trips}
               chargingSessions={chargingSessions}
+              isGuestVehicle={config.car.sourceVehicleId === vehicle.guestSourceId}
+              guestSnapshotCurrent={tenantCarMatchesVehicle(config.car, vehicle)}
             />
           ))}
         </div>

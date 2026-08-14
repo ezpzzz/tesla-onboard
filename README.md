@@ -73,8 +73,10 @@ onboarding progress in one place, separate from the guest flow. It shows:
   `vehicle_config` read for each of the first 10 cars to fill trim, exterior
   and interior color, and wheel type.
   Owner and renter cards share first-party Tesla Design Studio renders when
-  model generation, trim, paint, and wheels can all be matched. Unknown or
-  legacy configurations use a neutral fallback instead of a mismatched car.
+  model generation, trim, paint, wheels, and interior can all be matched.
+  Tesla exposes no supported vehicle-image endpoint, so unknown or legacy
+  configurations show an explicit official-image-unavailable state instead of
+  a generated or representative car.
 - **First-run setup wizard** — `/owner/setup` walks a new host through
   connecting their own Tesla account, importing their vehicles (deduped so
   re-running it never creates duplicates), and confirming rental settings.
@@ -87,7 +89,9 @@ onboarding progress in one place, separate from the guest flow. It shows:
   under the active Sophosic workspace and update that tenant's guest walkthrough
   without a rebuild or deployment. An imported fleet vehicle can populate the
   guest vehicle in one selection, including trim, exterior, interior, wheels,
-  and exact Tesla option codes used by the fail-closed artwork resolver.
+  and exact Tesla option codes used by the fail-closed artwork resolver. The
+  selected fleet record remains the source, so later owner edits refresh the
+  public guest-safe snapshot without publishing VINs, plates, or private notes.
 
 It ships without sample owner records. A fresh owner account starts with no
 drivers, trips, charging sessions, or vehicles; real or manually entered
@@ -200,8 +204,12 @@ Owners configure everything specific to a rental company in `/owner/setup` or
 `/owner/settings`: company and host identity, contact details, the guest vehicle,
 key and charging instructions, return policy, and house rules. The settings are
 stored in `workspace_branding.features.onlyevs` for the active Sophosic workspace.
-The guest vehicle can be populated from an imported vehicle so Tesla trim, paint,
+The guest vehicle can be linked to an active fleet record so Tesla trim, paint,
 interior, and wheel option codes remain attached to the published configuration.
+Only guest-safe presentation fields are materialized in workspace branding; VIN,
+plate, notes, and operational data stay in the private owner store. When that
+linked record changes, an owner session refreshes the public snapshot. Editing a
+guest vehicle field manually clears the link rather than silently allowing drift.
 Guest links carry an unambiguous `?tenant=<workspace-id>~<shop-slug>` reference
 so the public walkthrough resolves the correct branded shop at runtime—even
 when one workspace owns several shops. Legacy shop-slug-only links remain

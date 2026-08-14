@@ -564,6 +564,48 @@ export function resolveTeslaVehicleMedia(
   return null;
 }
 
+/** Explain a fail-closed result without implying that a representative or
+ * generated car image would be an acceptable substitute. */
+export function teslaMediaUnavailableReason(
+  model: string,
+  color?: string | null,
+  trim?: string | null,
+  wheelType?: string | null,
+  year?: number | null,
+  interior?: string | null,
+  interiorCode?: string | null,
+  paintCode?: string | null,
+  configurationVerified = true,
+): string {
+  if (!configurationVerified) {
+    return "Link a fleet vehicle to verify its exact configuration.";
+  }
+
+  const canonicalModel = canonicalTeslaModel(model);
+  if (
+    (canonicalModel === "Model 3" && year && year < 2024)
+    || (canonicalModel === "Model Y" && year && year < 2020)
+    || canonicalModel === "Model S"
+    || canonicalModel === "Model X"
+    || canonicalModel === "Roadster"
+  ) {
+    return "Tesla does not publish an exact image for this legacy configuration.";
+  }
+
+  if (
+    !color
+    || !trim
+    || !wheelType
+    || !year
+    || (!interior && !interiorCode)
+    || (!paintCode && !teslaPaintCode(color))
+  ) {
+    return "Exact Tesla trim, paint, wheel, or interior data is incomplete.";
+  }
+
+  return "Tesla does not publish an exact image for this configuration.";
+}
+
 /** Request an appropriately sized variant of a Tesla compositor asset. */
 export function vehicleMediaImageUrl(media: VehicleMedia, size: number): string {
   if (media.kind !== "vehicle-configurator") return media.imageUrl;

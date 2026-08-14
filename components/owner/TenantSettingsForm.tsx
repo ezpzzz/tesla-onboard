@@ -5,7 +5,13 @@ import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
 import { normalizeTenantConfig, type TenantConfig } from "@/lib/tenant-config";
 import { useVehicleState } from "@/lib/owner/vehicle-state";
+import {
+  customTenantCar,
+  tenantCarFromVehicle,
+  tenantCarMatchesVehicle,
+} from "@/lib/tenant-vehicle";
 import { Button, Card } from "@/components/ui";
+import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 
 function Field({
   label,
@@ -56,38 +62,37 @@ export function TenantSettingsForm({
   const { vehicles, hydrated: vehiclesHydrated } = useVehicleState();
   const [draft, setDraft] = useState<TenantConfig>(config);
   const [rules, setRules] = useState(config.houseRules.join("\n"));
-  const [vehicleSource, setVehicleSource] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(config);
     setRules(config.houseRules.join("\n"));
-    setVehicleSource("");
     setMessage(null);
-  }, [config, workspace?.id]);
+  }, [config, workspace?.key]);
 
   function patchRoot(patch: Partial<TenantConfig>) {
     setDraft((current) => ({ ...current, ...patch }));
   }
 
   function useFleetVehicle(vehicleId: string) {
-    setVehicleSource(vehicleId);
+    if (!vehicleId) {
+      setDraft((current) => ({
+        ...current,
+        car: customTenantCar(current.car, {}),
+      }));
+      return;
+    }
     const vehicle = vehicles.find((item) => item.id === vehicleId);
     if (!vehicle) return;
-    patchRoot({
-      car: {
-        model: vehicle.model,
-        trim: vehicle.trim,
-        year: vehicle.year,
-        color: vehicle.color,
-        shifter: vehicle.shifter,
-        wheelType: vehicle.wheelType ?? null,
-        interior: vehicle.interior ?? null,
-        teslaInteriorCode: vehicle.teslaInteriorCode ?? null,
-        teslaPaintCode: vehicle.teslaPaintCode ?? null,
-      },
-    });
+    patchRoot({ car: tenantCarFromVehicle(vehicle) });
+  }
+
+  function patchCar(patch: Partial<TenantConfig["car"]>) {
+    setDraft((current) => ({
+      ...current,
+      car: customTenantCar(current.car, patch),
+    }));
   }
 
   async function submit(event: React.FormEvent) {
@@ -95,8 +100,23 @@ export function TenantSettingsForm({
     setSaving(true);
     setMessage(null);
     try {
+      let car = draft.car;
+      if (car.sourceVehicleId) {
+        const source = vehicles.find((vehicle) =>
+          vehicle.guestSourceId === car.sourceVehicleId && vehicle.status === "active"
+        );
+        if (!source) {
+          throw new Error(
+            "The selected fleet vehicle is no longer active on this device. Choose another vehicle or switch to a custom guest vehicle.",
+          );
+        }
+        // The linked fleet record is authoritative. Re-materialize at the
+        // save boundary so a stale form can never publish an older spec.
+        car = tenantCarFromVehicle(source);
+      }
       const next = normalizeTenantConfig({
         ...draft,
+        car,
         houseRules: rules.split("\n").map((rule) => rule.trim()).filter(Boolean),
       });
       await saveConfig(next);
@@ -119,6 +139,14 @@ export function TenantSettingsForm({
   if (!workspace) {
     return <Card className="p-4 text-sm leading-relaxed text-muted">{error ?? "No workspace available."}</Card>;
   }
+
+  const linkedVehicle = draft.car.sourceVehicleId
+    ? vehicles.find((vehicle) => vehicle.guestSourceId === draft.car.sourceVehicleId)
+    : null;
+  const linkedVehicleActive = linkedVehicle?.status === "active";
+  const linkedVehicleCurrent = linkedVehicle
+    ? tenantCarMatchesVehicle(draft.car, linkedVehicle)
+    : false;
 
   return (
     <form onSubmit={submit} className="space-y-6">
@@ -147,15 +175,31 @@ export function TenantSettingsForm({
       </SettingsSection>
 
       <SettingsSection title="Guest vehicle">
+        <VehicleArtwork
+          model={draft.car.model}
+          color={draft.car.color}
+          trim={draft.car.trim}
+          wheelType={draft.car.wheelType}
+          interior={draft.car.interior}
+          interiorCode={draft.car.teslaInteriorCode}
+          paintCode={draft.car.teslaPaintCode}
+          year={draft.car.year}
+          configurationVerified={Boolean(draft.car.sourceVehicleId)}
+          decorative
+          className="h-44 rounded-xl border border-line"
+        />
         {vehiclesHydrated && vehicles.some((vehicle) => vehicle.status === "active") ? (
           <label className="block text-sm font-medium text-ink">
             Use a fleet vehicle
             <select
-              value={vehicleSource}
+              value={linkedVehicle?.id ?? (draft.car.sourceVehicleId ? "unavailable" : "")}
               onChange={(event) => useFleetVehicle(event.target.value)}
               className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
             >
-              <option value="">Keep the current guest vehicle</option>
+              <option value="">Custom / unlinked guest vehicle</option>
+              {draft.car.sourceVehicleId && !linkedVehicleActive ? (
+                <option value="unavailable">Linked vehicle unavailable</option>
+              ) : null}
               {vehicles.filter((vehicle) => vehicle.status === "active").map((vehicle) => (
                 <option key={vehicle.id} value={vehicle.id}>
                   {vehicle.displayName} — {vehicle.year} {vehicle.model} {vehicle.trim}
@@ -164,25 +208,31 @@ export function TenantSettingsForm({
             </select>
           </label>
         ) : null}
-        <Field label="Model" value={draft.car.model} onChange={(model) => patchRoot({ car: { ...draft.car, model } })} />
-        <Field label="Trim" value={draft.car.trim} onChange={(trim) => patchRoot({ car: { ...draft.car, trim } })} />
-        <Field label="Year" type="number" value={String(draft.car.year)} onChange={(value) => patchRoot({ car: { ...draft.car, year: Number(value) } })} />
-        <Field label="Exterior color" value={draft.car.color} onChange={(color) => patchRoot({ car: { ...draft.car, color } })} />
-        <Field label="Interior" value={draft.car.interior ?? ""} onChange={(interior) => patchRoot({ car: { ...draft.car, interior: interior || null } })} />
-        <Field label="Wheel package or Tesla code" value={draft.car.wheelType ?? ""} onChange={(wheelType) => patchRoot({ car: { ...draft.car, wheelType: wheelType || null } })} />
-        <Field label="Tesla paint option code" value={draft.car.teslaPaintCode ?? ""} onChange={(teslaPaintCode) => patchRoot({ car: { ...draft.car, teslaPaintCode: teslaPaintCode || null } })} />
-        <Field label="Tesla interior option code" value={draft.car.teslaInteriorCode ?? ""} onChange={(teslaInteriorCode) => patchRoot({ car: { ...draft.car, teslaInteriorCode: teslaInteriorCode || null } })} />
+        <div className="rounded-xl border border-line bg-surface px-3.5 py-3 text-sm leading-relaxed text-muted">
+          {draft.car.sourceVehicleId
+            ? !linkedVehicleActive
+              ? "This linked fleet vehicle is unavailable on this device. Select another active vehicle before saving."
+              : linkedVehicleCurrent
+                ? `Linked to ${linkedVehicle?.displayName ?? "the selected vehicle"}. Guest and owner surfaces use the same exact-spec snapshot.`
+                : `Linked to ${linkedVehicle?.displayName ?? "the selected vehicle"}. Its fleet details changed; saving will publish the latest exact-spec snapshot.`
+            : "This is a standalone guest profile. Link an active fleet vehicle so its owner and guest imagery cannot drift."}
+        </div>
+        <Field label="Model" value={draft.car.model} onChange={(model) => patchCar({ model })} />
+        <Field label="Trim" value={draft.car.trim} onChange={(trim) => patchCar({ trim })} />
+        <Field label="Year" type="number" value={String(draft.car.year)} onChange={(value) => patchCar({ year: Number(value) })} />
+        <Field label="Exterior color" value={draft.car.color} onChange={(color) => patchCar({ color })} />
+        <Field label="Interior" value={draft.car.interior ?? ""} onChange={(interior) => patchCar({ interior: interior || null })} />
+        <Field label="Wheel package or Tesla code" value={draft.car.wheelType ?? ""} onChange={(wheelType) => patchCar({ wheelType: wheelType || null })} />
+        <Field label="Tesla paint option code" value={draft.car.teslaPaintCode ?? ""} onChange={(teslaPaintCode) => patchCar({ teslaPaintCode: teslaPaintCode || null })} />
+        <Field label="Tesla interior option code" value={draft.car.teslaInteriorCode ?? ""} onChange={(teslaInteriorCode) => patchCar({ teslaInteriorCode: teslaInteriorCode || null })} />
         <label className="block text-sm font-medium text-ink">
           Shifter
           <select
             value={draft.car.shifter}
             onChange={(event) => {
               const value = event.target.value;
-              patchRoot({
-                car: {
-                  ...draft.car,
-                  shifter: value === "stalk" || value === "console" ? value : "screen",
-                },
+              patchCar({
+                shifter: value === "stalk" || value === "console" ? value : "screen",
               });
             }}
             className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"

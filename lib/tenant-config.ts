@@ -3,25 +3,36 @@
  * credentials (Supabase/Tesla client secrets, cookie encryption keys, etc.)
  * deliberately do not belong here.
  */
+export interface TenantCarConfig {
+  /**
+   * Browser-local fleet record that owns this public snapshot. Guests cannot
+   * read the private fleet store, so the safe display fields are materialized
+   * here and kept in sync whenever an owner session can see the source car.
+   * The identifier is an opaque per-record UUID, never a VIN or sequential
+   * browser-local id that could collide on another device.
+   */
+  sourceVehicleId: string | null;
+  sourceVehicleUpdatedAt: number | null;
+  model: string;
+  trim: string;
+  year: number;
+  color: string;
+  shifter: "stalk" | "screen" | "console";
+  wheelType: string | null;
+  interior: string | null;
+  teslaInteriorCode: string | null;
+  teslaPaintCode: string | null;
+}
+
 export interface TenantConfig {
-  version: 1;
+  version: 2;
   companyName: string;
   tagline: string;
   hostName: string;
   hostPhone: string;
   supportEmail: string;
   roadsidePhone: string;
-  car: {
-    model: string;
-    trim: string;
-    year: number;
-    color: string;
-    shifter: "stalk" | "screen" | "console";
-    wheelType: string | null;
-    interior: string | null;
-    teslaInteriorCode: string | null;
-    teslaPaintCode: string | null;
-  };
+  car: TenantCarConfig;
   rental: {
     keyAccess: string;
     chargeAccess: string;
@@ -36,7 +47,7 @@ export interface TenantConfig {
 }
 
 export const DEFAULT_TENANT_CONFIG: TenantConfig = {
-  version: 1,
+  version: 2,
   companyName: "Your Rental Co",
   tagline: "Your Tesla, ready to roll.",
   hostName: "Your host",
@@ -44,6 +55,8 @@ export const DEFAULT_TENANT_CONFIG: TenantConfig = {
   supportEmail: "host@example.com",
   roadsidePhone: "555-555-0199",
   car: {
+    sourceVehicleId: null,
+    sourceVehicleUpdatedAt: null,
     model: "Model 3",
     trim: "Performance",
     year: 2024,
@@ -98,6 +111,12 @@ function nullableText(value: unknown, fallback: string | null): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function nullableTimestamp(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
 function year(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) && value >= 2008 && value <= 2100
     ? value
@@ -113,9 +132,10 @@ export function normalizeTenantConfig(value: unknown): TenantConfig {
   const rules = Array.isArray(root.houseRules)
     ? root.houseRules.filter((item): item is string => typeof item === "string" && !!item.trim())
     : d.houseRules;
+  const sourceVehicleId = nullableText(car.sourceVehicleId, null);
 
   return {
-    version: 1,
+    version: 2,
     companyName: text(root.companyName, d.companyName),
     tagline: text(root.tagline, d.tagline),
     hostName: text(root.hostName, d.hostName),
@@ -123,6 +143,10 @@ export function normalizeTenantConfig(value: unknown): TenantConfig {
     supportEmail: text(root.supportEmail, d.supportEmail),
     roadsidePhone: text(root.roadsidePhone, d.roadsidePhone),
     car: {
+      sourceVehicleId,
+      sourceVehicleUpdatedAt: sourceVehicleId
+        ? nullableTimestamp(car.sourceVehicleUpdatedAt)
+        : null,
       model: text(car.model, d.car.model),
       trim: text(car.trim, d.car.trim),
       year: year(car.year, d.car.year),
