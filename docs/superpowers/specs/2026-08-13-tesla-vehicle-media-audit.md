@@ -24,16 +24,28 @@
    Tesla's public website—not from an unsupported vehicle command or legacy owner API.
 5. Tesla's current public Design Studio uses a first-party compositor whose option lexicon maps
    trim, paint, wheels and interior to a rendered car. The app uses that surface only for
-   model/year/configuration tuples verified against Tesla's own lexicon. Current Model 3,
-   pre-refresh/current Model Y, and Cybertruck mappings are supported. Unknown or incompatible
+   model/year/configuration tuples verified against Tesla's own lexicon. Exact published tuples
+   for 2024+ Model 3, 2020+ Model Y, and 2024+ Cybertruck are supported. Unknown or incompatible
    values fail closed to neutral artwork instead of displaying a different configuration.
+   `scripts/verify-tesla-media-contract.mjs` locks the Fleet-name normalization, exact options,
+   contradictory-signal rejection, and negative cases; `--live` additionally requires every
+   representative admitted tuple to return an image from Tesla's compositor. The release-only
+   `scripts/verify-tesla-media-catalog-live.mjs` checks the full 339-tuple Model 3/Model Y
+   cross-product against Tesla without putting hundreds of network calls in the normal build.
 6. Tesla's service manuals retain the paint and wheel taxonomy for legacy Model S/X and earlier
-   colors (for example Obsidian Black, Signature Red and Titanium Silver). The normalizer covers
-   Tesla's compact current and legacy car-type, trim-badge, paint and wheel identifiers, and
+   colors (for example Base White, Obsidian Black, Signature Red and Titanium Silver). The
+   normalizer covers Tesla's compact current and legacy car-type, trim-badge, paint and wheel
+   identifiers—including model-specific wheel names whose size differs between S/X/3/Y—and
    preserves unknown future identifiers as readable labels instead of dropping them. Those specs
    are displayed, but the app does not substitute a current-model marketing photo for a legacy
    vehicle. An exact legacy image remains unavailable unless Tesla exposes a matching public
    compositor generation.
+7. A Tesla service-manual entry is necessary but not sufficient for exact media. The live
+   compositor rejects some documented options for a given trim/generation (HTTP 412), including
+   Silver Metallic on the 2020-2024 Model Y catalog, Pearl White Pro Multi-Coat on the Model Y L
+   catalog, and white-interior codes on refreshed base Model Y trims. These remain normalized and
+   visible as specifications but are intentionally excluded from exact imagery. The resolver no
+   longer manufactures a white option code by changing a letter in a black code.
 
 Primary sources:
 
@@ -46,7 +58,11 @@ Primary sources:
 - <https://www.tesla.com/model3/design>
 - <https://www.tesla.com/modely/design>
 - <https://www.tesla.com/cybertruck/design>
+- <https://service.tesla.com/docs/Model3/ServiceManual/2024/en-us/GUID-769C9625-76EE-467B-B756-C9032AC2B99A.html>
+- <https://service.tesla.com/docs/ModelY/ServiceManual/2025/en-us/GUID-769C9625-76EE-467B-B756-C9032AC2B99A.html>
+- <https://service.tesla.com/docs/ModelY/ServiceManual/en-us/GUID-769C9625-76EE-467B-B756-C9032AC2B99A.html>
 - <https://service.tesla.com/docs/ModelS/ServiceManual/Palladium/en-us/GUID-769C9625-76EE-467B-B756-C9032AC2B99A.html>
+- <https://service.tesla.com/docs/ModelX/ServiceManual/Palladium/en-us/GUID-769C9625-76EE-467B-B756-C9032AC2B99A.html>
 
 ## Data flow
 

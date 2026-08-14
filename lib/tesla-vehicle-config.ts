@@ -103,6 +103,8 @@ export function displayTeslaColor(value: unknown): string | undefined {
     solidblack: "Solid Black",
     pearlwhite: "Pearl White Multi-Coat",
     pearlwhitemulticoat: "Pearl White Multi-Coat",
+    pearlwhitepro: "Pearl White Pro Multi-Coat",
+    pearlwhitepromulticoat: "Pearl White Pro Multi-Coat",
     midnightsilver: "Midnight Silver Metallic",
     deepblue: "Deep Blue Metallic",
     redmulticoat: "Red Multi-Coat",
@@ -117,7 +119,7 @@ export function displayTeslaColor(value: unknown): string | undefined {
     glacierblue: "Glacier Blue",
     marineblue: "Marine Blue",
     garnetred: "Garnet Red",
-    basewhite: "Solid White",
+    basewhite: "Base White",
     oceanblue: "Ocean Blue Metallic",
     obsidianblack: "Obsidian Black Metallic",
     signaturesred: "Signature Red",
@@ -135,10 +137,16 @@ export function displayTeslaColor(value: unknown): string | undefined {
     // are expanded; every unknown value still survives through words(raw).
     pbsb: "Solid Black",
     ppsw: "Pearl White Multi-Coat",
-    pbcw: "Pearl White Multi-Coat",
+    pm00: "Pearl White Pro Multi-Coat",
+    pbcw: "Base White",
     ppsb: "Deep Blue Metallic",
+    pr00: "Midnight Cherry Red",
     pmng: "Midnight Silver Metallic",
     ppmr: "Red Multi-Coat",
+    pmmb: "Blue Metallic",
+    pmab: "Brown Metallic",
+    pmtg: "Grey Metallic",
+    pmsg: "Green Metallic",
     pmbl: "Obsidian Black Metallic",
     ppsr: "Signature Red",
     ppti: "Titanium Silver Metallic",
@@ -157,22 +165,52 @@ export function displayTeslaColor(value: unknown): string | undefined {
   return known[key] ?? words(raw);
 }
 
-export function displayTeslaWheel(value: unknown): string | undefined {
+export function displayTeslaWheel(value: unknown, model?: string): string | undefined {
   const raw = nonEmptyString(value);
   if (!raw) return undefined;
   const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const canonicalModel = model ? canonicalTeslaModel(model) : undefined;
+  if (key === "uberturbine") {
+    if (canonicalModel === "Model 3") return '20" Uber Turbine Wheels';
+    if (canonicalModel === "Model Y") return '21" Uberturbine Wheels';
+    return "Uberturbine Wheels";
+  }
+  if (key === "turbine") {
+    if (canonicalModel === "Model X") return '22" Turbine Wheels';
+    if (canonicalModel === "Model S") return '21" Turbine Wheels';
+    return "Turbine Wheels";
+  }
+  if (key === "slipstream") {
+    if (canonicalModel === "Model X") return '20" Slipstream Wheels';
+    if (canonicalModel === "Model S") return '19" Slipstream Wheels';
+    return "Slipstream Wheels";
+  }
+  if (key === "cyclone") {
+    if (canonicalModel === "Model X") return '20" Cyclone Wheels';
+    if (canonicalModel === "Model S") return '19" Cyclone Wheels';
+    return "Cyclone Wheels";
+  }
   const known: Record<string, string> = {
     aero: '18" Aero Wheels',
     aerowheel: '18" Aero Wheels',
     photon: '18" Photon Wheels',
     prismata: '18" Prismata Wheels',
     nova: '19" Nova Wheels',
-    warp: '20" Warp Wheels',
+    warp: "Warp Wheels",
     gemini: '19" Gemini Wheels',
     geminidark: '19" Gemini Dark Wheels',
     induction: '20" Induction Wheels',
-    uberturbine: '21" Überturbine Wheels',
     arachnid: '21" Arachnid Wheels',
+    apollo: '19" Apollo Wheels',
+    apollodark: '19" Apollo Dark Wheels',
+    stiletto: "Stiletto Wheels",
+    zerog: '20" Zero-G Wheels',
+    aeroturbine: '20" Aero Turbine Wheels',
+    magnetite: '19" Magnetite Wheels',
+    velarium: '21" Velarium Wheels',
+    cardenio: '19" Cardenio Wheels',
+    halo: '22" Halo Wheels',
+    riptide: '20" Riptide Wheels',
     aperture: '18" Aperture Wheels',
     crossflow: '19" Crossflow Wheels',
     helix: '20" Helix Wheels',
@@ -182,11 +220,9 @@ export function displayTeslaWheel(value: unknown): string | undefined {
     core: '20" Core Wheels',
     mantle: '20" Mantle Wheels',
     tempest: '19" Tempest Wheels',
-    turbine: '21" Turbine Wheels',
     twinturbine: '21" Twin Turbine Wheels',
-    slipstream: '19" Slipstream Wheels',
-    cyclone: '19" Cyclone Wheels',
     soniccarbon: "Sonic Carbon Wheels",
+    soniccarbonslipstream: "Sonic Carbon Slipstream Wheels",
     aero18: '18" Aero Wheels',
     aero18cap: '18" Aero Wheels',
     pinwheel18: '18" Aero Wheels',
@@ -194,17 +230,21 @@ export function displayTeslaWheel(value: unknown): string | undefined {
     glider18: '18" Photon Wheels',
     photon18: '18" Photon Wheels',
     prismata18: '18" Prismata Wheels',
-    stiletto19: '19" Sport Wheels',
-    stiletto19refresh: '19" Sport Wheels',
+    stiletto19: '19" Stiletto Wheels',
+    stiletto19refresh: '19" Stiletto Wheels',
+    stiletto20: '20" Stiletto Wheels',
     nova19: '19" Nova Wheels',
+    warp19: '19" Warp Wheels',
     warp20: '20" Warp Wheels',
     wishbone20: '20" Warp Wheels',
     wishbone20staggered: '20" Warp Wheels',
-    uberturbine20: '20" Überturbine Wheels',
+    uberturbine20: '20" Uber Turbine Wheels',
     gemini19: '19" Gemini Wheels',
     gemini19dark: '19" Gemini Dark Wheels',
     induction20: '20" Induction Wheels',
-    uberturbine21: '21" Überturbine Wheels',
+    uberturbine21: '21" Uberturbine Wheels',
+    apollo19: '19" Apollo Wheels',
+    apollo19dark: '19" Apollo Dark Wheels',
     aperture18: '18" Aperture Wheels',
     crossflow19: '19" Crossflow Wheels',
     helix20: '20" Helix Wheels',
@@ -218,6 +258,13 @@ export function displayTeslaWheel(value: unknown): string | undefined {
     twinturbine21: '21" Twin Turbine Wheels',
     cyberstream20: '20" Cyberstream Wheels',
     turbine22: '22" Turbine Wheels',
+    magnetite19: '19" Magnetite Wheels',
+    velarium21: '21" Velarium Wheels',
+    cardenio19: '19" Cardenio Wheels',
+    halo22: '22" Halo Wheels',
+    riptide20: '20" Riptide Wheels',
+    zerog20: '20" Zero-G Wheels',
+    aeroturbine20: '20" Aero Turbine Wheels',
     molten18: '18" Molten Wheels',
     core20: '20" Core Wheels',
     mantle20: '20" Mantle Wheels',
@@ -323,9 +370,14 @@ function optionCodeList(value: unknown): string[] {
 
 /** Preserve Tesla's explicit paint option when present; names alone can be ambiguous. */
 export function teslaPaintOptionCode(value: unknown): string | undefined {
+  const paintCodes = new Set([
+    "PBSB", "PPSW", "PPSB", "PBCW", "PM00", "PR00", "PR01", "PR02", "PPMR",
+    "PN00", "PN01", "PN02", "PN03", "PX02", "PB00", "PB01", "PB02",
+    "PMNG", "PMSS", "PMMB", "PMAB", "PMTG", "PMSG", "PMBL", "PPSR", "PPTI",
+  ]);
   return optionCodeList(value)
     .map((code) => code.toUpperCase().replace(/^\$/, ""))
-    .find((code) => /^(?:PBSB|PPSW|PPSB|PR0[12]|PN0[0-3]|PX02|PB0[0-2])$/.test(code));
+    .find((code) => paintCodes.has(code));
 }
 
 /** Return only an explicit Tesla interior option code; never infer one here. */
@@ -365,7 +417,7 @@ export function parseTeslaVehicleConfig(
     trim: displayTeslaTrim(value.trim_badging, model),
     color: displayTeslaColor(value.exterior_color) ?? displayTeslaColor(paintCode),
     paintCode,
-    wheelType: displayTeslaWheel(value.wheel_type),
+    wheelType: displayTeslaWheel(value.wheel_type, model),
     interior,
     interiorCode,
   };
