@@ -41,8 +41,20 @@ export function displayTeslaTrim(value: unknown, model: string): string | undefi
   const raw = nonEmptyString(value);
   if (!raw) return undefined;
   const key = raw.toLowerCase().replace(/\+/g, "plus").replace(/[^a-z0-9]/g, "");
-  const modelKey = canonicalTeslaModel(model).toLowerCase().replace(/[^a-z0-9]/g, "");
+  const canonicalModel = canonicalTeslaModel(model);
+  const modelKey = canonicalModel.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (key === modelKey || key === "base") return undefined;
+
+  // Current Model 3 Fleet responses can retain the battery/drivetrain badges
+  // used by the vehicle firmware even though Design Studio uses named trims.
+  if (canonicalModel === "Model 3") {
+    const model3Badges: Record<string, string> = {
+      "74": "Long Range RWD",
+      "74d": "Long Range AWD",
+      p74d: "Performance",
+    };
+    if (model3Badges[key]) return model3Badges[key];
+  }
 
   const known: Record<string, string> = {
     performance: "Performance",
@@ -179,12 +191,15 @@ export function displayTeslaWheel(value: unknown): string | undefined {
     aero18cap: '18" Aero Wheels',
     pinwheel18: '18" Aero Wheels',
     pinwheel18cap: '18" Aero Wheels',
+    glider18: '18" Photon Wheels',
     photon18: '18" Photon Wheels',
     prismata18: '18" Prismata Wheels',
     stiletto19: '19" Sport Wheels',
     stiletto19refresh: '19" Sport Wheels',
     nova19: '19" Nova Wheels',
     warp20: '20" Warp Wheels',
+    wishbone20: '20" Warp Wheels',
+    wishbone20staggered: '20" Warp Wheels',
     uberturbine20: '20" Überturbine Wheels',
     gemini19: '19" Gemini Wheels',
     gemini19dark: '19" Gemini Dark Wheels',
@@ -224,10 +239,12 @@ export function displayTeslaInterior(value: unknown): string | undefined {
   const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
   const known: Record<string, string> = {
     black: "Black Interior",
+    black2: "Black Interior",
     allblack: "Black Interior",
     allblackpremium: "Black Interior",
     blackpremium: "Black Interior",
     white: "White Interior",
+    white2: "White Interior",
     blackandwhite: "White Interior",
     whitepremium: "White Interior",
     blackandwhitepremium: "White Interior",

@@ -223,7 +223,7 @@ function model3TrimConfig(trim: string | null | undefined): Model3TrimConfig | n
       interiorCode: "IPB4",
       defaultWheelCode: "W30P",
       allowedWheelCodes: ["W30P"],
-      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB00", "PPSW", "PR01"],
+      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB00", "PBSB", "PPSW", "PR01"],
     };
   }
   if (/(longrangeawd|premiumawd|allwheeldrive|dualmotor|74d|awd)/.test(value)) {
@@ -232,16 +232,16 @@ function model3TrimConfig(trim: string | null | undefined): Model3TrimConfig | n
       interiorCode: "IPB3",
       defaultWheelCode: "W38A",
       allowedWheelCodes: ["W38A", "W39G"],
-      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB02", "PPSW", "PR01"],
+      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB02", "PBSB", "PPSW", "PR01"],
     };
   }
-  if (/(longrangerwd|premiumrwd)/.test(value)) {
+  if (/(longrangerwd|premiumrwd|^74$)/.test(value)) {
     return {
       trimCode: "MT369",
       interiorCode: "IPB2",
       defaultWheelCode: "W38A",
       allowedWheelCodes: ["W38A", "W39G"],
-      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB02", "PPSW", "PR01"],
+      allowedPaintCodes: ["PN01", "PN00", "PX02", "PB02", "PBSB", "PPSW", "PR01"],
     };
   }
   if (/(rearwheeldrive|standardrange|standardrangeplus|base|rwd|74r)/.test(value)) {
@@ -272,10 +272,10 @@ function model3WheelCode(
   }
 
   let candidate: Model3TrimConfig["allowedWheelCodes"][number] | null = null;
-  if (/(warp|uberturbine|w30p)/.test(value)) candidate = "W30P";
+  if (/(warp|uberturbine|wishbone20|w30p)/.test(value)) candidate = "W30P";
   else if (/(nova|w39g)/.test(value)) candidate = "W39G";
   else if (/(prismata|w38c)/.test(value)) candidate = "W38C";
-  else if (/(photon|pinwheel|w38a)/.test(value)) candidate = "W38A";
+  else if (/(photon|pinwheel|glider18|w38a)/.test(value)) candidate = "W38A";
 
   if (!candidate || !trim.allowedWheelCodes.includes(candidate)) return null;
   return { code: candidate, matched: true };
