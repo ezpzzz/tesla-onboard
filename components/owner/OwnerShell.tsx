@@ -58,6 +58,9 @@ export function OwnerShell({
   const guestHref = tenantGuestHref(tenantSlug);
   const accountActive = isActive(pathname, "/owner/account");
   const ownerInitial = ownerEmail?.trim().charAt(0).toUpperCase();
+  const tenantName = loading
+    ? "Onboarding"
+    : config.companyName || workspace?.name || "Owner portal";
 
   return (
     <div className="min-h-dvh bg-surface">
@@ -66,7 +69,7 @@ export function OwnerShell({
         <aside className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col border-r border-line bg-card md:flex">
           <div className="px-5 pt-6 pb-4">
             <span className="text-base font-semibold tracking-tight text-ink">
-              {loading ? "Onboarding" : config.companyName}
+              {tenantName}
             </span>
             <div className="mt-2">
               <Badge>Host view</Badge>
@@ -127,7 +130,7 @@ export function OwnerShell({
             <div className="mx-auto flex h-14 w-full max-w-[1100px] items-center justify-between">
               <Link
                 href="/owner"
-                aria-label={`${loading ? "Onboarding" : config.companyName} overview`}
+                aria-label={`${tenantName} overview`}
                 className="flex min-w-0 flex-1 items-center gap-2.5 pr-3 text-ink"
               >
                 <span
@@ -135,7 +138,7 @@ export function OwnerShell({
                   className="h-2 w-2 shrink-0 rounded-full bg-brand shadow-[0_0_0_4px_rgba(2,135,216,0.10)]"
                 />
                 <span className="truncate text-[15px] font-semibold tracking-tight">
-                  {loading ? "Onboarding" : config.companyName}
+                  {tenantName}
                 </span>
               </Link>
 

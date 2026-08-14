@@ -6,24 +6,23 @@ import { IconArrowRight, IconBolt, IconCheck, IconSparkle } from "../icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { StepProps } from "../step-types";
 
-const highlights = [
-  {
-    icon: <IconSparkle className="h-4 w-4" />,
-    text: "Adaptive — connect your Tesla account and skip what you already know.",
-  },
-  {
-    icon: <IconBolt className="h-4 w-4" />,
-    text: "Bite-sized lessons with official Tesla videos for the Model 3.",
-  },
-  {
-    icon: <IconCheck className="h-4 w-4" />,
-    text: "Pick up right where you left off — your progress is saved.",
-  },
-];
-
 export function WelcomeStep({ nav, update, state }: StepProps) {
   const { config } = useTenantConfig();
   const { car, companyName, tagline } = config;
+  const highlights = [
+    {
+      icon: <IconSparkle className="h-4 w-4" />,
+      text: "Adaptive — connect your Tesla account and skip what you already know.",
+    },
+    {
+      icon: <IconBolt className="h-4 w-4" />,
+      text: `Bite-sized lessons with official Tesla videos for the ${car.model}.`,
+    },
+    {
+      icon: <IconCheck className="h-4 w-4" />,
+      text: "Pick up right where you left off — your progress is saved.",
+    },
+  ];
 
   return (
     <StepFrame

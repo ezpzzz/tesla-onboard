@@ -13,7 +13,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   DEFAULT_TENANT_CONFIG,
   parseTenantReference,
-  tenantConfigFromFeatures,
+  publishedTenantConfigFromFeatures,
   type TenantConfig,
 } from "@/lib/tenant-config";
 import {
@@ -27,6 +27,7 @@ export interface TenantConfigContextValue {
   tenantSlug: string | null;
   loading: boolean;
   source: "default" | "workspace";
+  readiness: "loading" | "missing-tenant" | "workspace-unavailable" | "setup-required" | "ready";
 }
 
 const DEFAULT_CONTEXT: TenantConfigContextValue = {
@@ -34,6 +35,7 @@ const DEFAULT_CONTEXT: TenantConfigContextValue = {
   tenantSlug: null,
   loading: false,
   source: "default",
+  readiness: "missing-tenant",
 };
 
 const TenantConfigContext = createContext<TenantConfigContextValue>(DEFAULT_CONTEXT);
@@ -50,6 +52,7 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
   const [value, setValue] = useState<TenantConfigContextValue>({
     ...DEFAULT_CONTEXT,
     loading: true,
+    readiness: "loading",
   });
 
   useEffect(() => {
@@ -65,7 +68,12 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
     const slug = querySlug ?? storedSlug;
 
     if (!slug) {
-      setValue({ ...DEFAULT_CONTEXT, tenantSlug: slug, loading: false });
+      setValue({
+        ...DEFAULT_CONTEXT,
+        tenantSlug: slug,
+        loading: false,
+        readiness: "missing-tenant",
+      });
       return () => {
         cancelled = true;
       };
@@ -84,9 +92,9 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
       if (slug === DEMO_TENANT_SLUG) {
         try {
           const raw = window.localStorage.getItem(DEMO_TENANT_CONFIG_KEY);
-          config = raw ? tenantConfigFromFeatures(JSON.parse(raw)) : null;
+          config = raw ? publishedTenantConfigFromFeatures(JSON.parse(raw)) : null;
         } catch {
-          // A malformed preview value falls back to the validated defaults.
+          // A malformed preview value remains unavailable.
         }
       }
       setValue({
@@ -94,6 +102,7 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
         tenantSlug: slug,
         loading: false,
         source: config ? "workspace" : "default",
+        readiness: config ? "ready" : "setup-required",
       });
       return () => {
         cancelled = true;
@@ -113,12 +122,17 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
       .maybeSingle()
       .then(({ data, error }) => {
         if (cancelled) return;
-        const config = !error ? tenantConfigFromFeatures(data?.features) : null;
+        const config = !error ? publishedTenantConfigFromFeatures(data?.features) : null;
         setValue({
           config: config ?? DEFAULT_TENANT_CONFIG,
           tenantSlug: slug,
           loading: false,
           source: config ? "workspace" : "default",
+          readiness: error || !data
+            ? "workspace-unavailable"
+            : config
+              ? "ready"
+              : "setup-required",
         });
       });
 
@@ -135,11 +149,13 @@ export function TenantConfigBoundary({
   config,
   tenantSlug,
   loading = false,
+  readiness = "ready",
 }: {
   children: ReactNode;
   config: TenantConfig;
   tenantSlug: string | null;
   loading?: boolean;
+  readiness?: TenantConfigContextValue["readiness"];
 }) {
   const value = useMemo<TenantConfigContextValue>(
     () => ({
@@ -147,8 +163,9 @@ export function TenantConfigBoundary({
       tenantSlug,
       loading,
       source: tenantSlug ? "workspace" : "default",
+      readiness: loading ? "loading" : readiness,
     }),
-    [config, tenantSlug, loading],
+    [config, tenantSlug, loading, readiness],
   );
   return <TenantConfigContext.Provider value={value}>{children}</TenantConfigContext.Provider>;
 }

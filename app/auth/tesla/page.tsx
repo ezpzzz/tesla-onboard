@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { loadState, saveState } from "@/lib/store";
 import {
+  AUTH_MODE,
   TESLA_PERSONAS,
   defaultPathMode,
   deriveExperience,
@@ -49,6 +50,25 @@ function safeReturnPath(raw: string | null): string | null {
 }
 
 export default function TeslaConsentPage() {
+  if (AUTH_MODE === "live") {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-surface px-5">
+        <div className="w-full max-w-[420px] rounded-3xl border border-line bg-white p-8 text-center">
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Tesla sign-in uses live OAuth.</h1>
+          <p className="mt-3 text-sm leading-relaxed text-muted">
+            This simulated account screen is disabled in production. Return to your rental link and connect through Tesla.
+          </p>
+          <a href="/" className="mt-6 inline-flex min-h-12 items-center rounded-full bg-ink px-6 text-sm font-medium text-white">
+            Return to onboarding
+          </a>
+        </div>
+      </div>
+    );
+  }
+  return <MockTeslaConsentPage />;
+}
+
+function MockTeslaConsentPage() {
   const { config } = useTenantConfig();
   const [personaKey, setPersonaKey] = useState(TESLA_PERSONAS[0].key);
   const [busy, setBusy] = useState(false);

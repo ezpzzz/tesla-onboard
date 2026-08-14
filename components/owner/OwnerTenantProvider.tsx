@@ -17,6 +17,8 @@ import {
   featuresWithTenantConfig,
   tenantReference,
   tenantConfigFromFeatures,
+  tenantSetupCompletedAt,
+  type TenantConfigSaveOptions,
   type TenantConfig,
 } from "@/lib/tenant-config";
 import { useVehicleState } from "@/lib/owner/vehicle-state";
@@ -60,7 +62,7 @@ interface OwnerTenantContextValue {
   error: string | null;
   persistence: "workspace" | "browser";
   setWorkspace: (workspaceId: string) => void;
-  saveConfig: (config: TenantConfig) => Promise<void>;
+  saveConfig: (config: TenantConfig, options?: TenantConfigSaveOptions) => Promise<void>;
 }
 
 const OwnerTenantContext = createContext<OwnerTenantContextValue | null>(null);
@@ -90,11 +92,32 @@ function GuestVehicleSync() {
 
   useEffect(() => {
     const sourceId = config.car.sourceVehicleId;
-    if (!workspace || !hydrated || error || !sourceId) return;
+    if (!workspace || !hydrated || error) return;
+    const publishedAt = tenantSetupCompletedAt(workspace.features);
+    if (!sourceId) {
+      if (!publishedAt) return;
+      const key = `${workspace.key}:unpublish:unlinked`;
+      if (attemptedKey.current === key) return;
+      attemptedKey.current = key;
+      void saveConfig(config, { publishedAt: null }).catch(() => {
+        attemptedKey.current = null;
+      });
+      return;
+    }
     const source = vehicles.find((vehicle) =>
       vehicle.guestSourceId === sourceId && vehicle.status === "active"
     );
-    if (!source || tenantCarMatchesVehicle(config.car, source)) {
+    if (!source) {
+      if (!publishedAt) return;
+      const key = `${workspace.key}:unpublish:${sourceId}`;
+      if (attemptedKey.current === key) return;
+      attemptedKey.current = key;
+      void saveConfig(config, { publishedAt: null }).catch(() => {
+        attemptedKey.current = null;
+      });
+      return;
+    }
+    if (tenantCarMatchesVehicle(config.car, source)) {
       attemptedKey.current = null;
       return;
     }
@@ -104,6 +127,7 @@ function GuestVehicleSync() {
     attemptedKey.current = key;
 
     void saveConfig({ ...config, car: tenantCarFromVehicle(source) }).catch(() => {
+      attemptedKey.current = null;
       // TenantSettingsForm exposes the stale state and lets the owner retry.
       // Avoid an effect retry loop when the workspace optimistic lock rejects.
     });
@@ -120,11 +144,14 @@ function supabaseConfigured(): boolean {
 
 function demoWorkspace(): OwnerWorkspace {
   let config = DEFAULT_TENANT_CONFIG;
+  let features: unknown = {};
   try {
+    window.localStorage.removeItem("rtr:demo-tenant-config:v1");
     const raw = window.localStorage.getItem(DEMO_TENANT_CONFIG_KEY);
-    config = raw ? tenantConfigFromFeatures(JSON.parse(raw)) ?? config : config;
+    features = raw ? JSON.parse(raw) : {};
+    config = tenantConfigFromFeatures(features) ?? config;
   } catch {
-    // Invalid or unavailable local storage falls back to the safe defaults.
+    // Invalid or unavailable local storage remains an empty, unpublished draft.
   }
   return {
     key: DEMO_WORKSPACE_ID,
@@ -135,7 +162,7 @@ function demoWorkspace(): OwnerWorkspace {
     shopSlug: DEMO_TENANT_SLUG,
     tenantRef: DEMO_TENANT_SLUG,
     config,
-    features: featuresWithTenantConfig({}, config),
+    features,
     brandingUpdatedAt: null,
   };
 }
@@ -277,10 +304,12 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const saveConfig = useCallback(
-    async (config: TenantConfig) => {
+    async (config: TenantConfig, options?: TenantConfigSaveOptions) => {
       const current = workspaces.find((item) => item.key === workspaceId);
       if (!current) throw new Error("Choose a workspace before saving settings.");
-      const features = featuresWithTenantConfig(current.features, config);
+      const features = featuresWithTenantConfig(current.features, config, options);
+      const savedConfig = tenantConfigFromFeatures(features) ?? config;
+      const displayName = savedConfig.companyName || current.name.replace(/ — .+$/, "");
 
       if (!supabaseConfigured() || current.id === DEMO_WORKSPACE_ID) {
         try {
@@ -289,7 +318,9 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
           throw new Error("Browser storage is unavailable, so this local preview could not be saved.");
         }
         setWorkspaces((items) =>
-          items.map((item) => item.key === current.key ? { ...item, config, features } : item),
+          items.map((item) => item.key === current.key
+            ? { ...item, config: savedConfig, features }
+            : item),
         );
         return;
       }
@@ -300,14 +331,18 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
       if (current.brandingUpdatedAt) {
         const { data, error: updateError } = await supabase
           .from("workspace_branding")
-          .update({ features, display_name: config.companyName })
+          .update({ features, display_name: displayName })
           .eq("workspace_id", current.id)
           .eq("shop_slug", current.shopSlug)
           .eq("updated_at", current.brandingUpdatedAt)
           .select("workspace_id,shop_slug,display_name,features,updated_at")
           .maybeSingle();
-        if (updateError) throw new Error(updateError.message);
+        if (updateError) {
+          await load();
+          throw new Error(updateError.message);
+        }
         if (!data) {
+          await load();
           throw new Error("These settings changed in another session. Reload and try again.");
         }
         saved = data as BrandingRow;
@@ -317,7 +352,7 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
           .insert({
             workspace_id: current.id,
             shop_slug: current.shopSlug,
-            display_name: config.companyName,
+            display_name: displayName,
             features,
           })
           .select("workspace_id,shop_slug,display_name,features,updated_at")
@@ -331,11 +366,11 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
           item.key === current.key
             ? {
                 ...item,
-                config,
+                config: tenantConfigFromFeatures(saved?.features ?? features) ?? savedConfig,
                 features: saved?.features ?? features,
                 shopSlug: saved?.shop_slug ?? item.shopSlug,
                 name: workspaces.filter((candidate) => candidate.id === item.id).length > 1
-                  ? `${item.name.replace(/ — .+$/, "")} — ${saved?.display_name ?? config.companyName}`
+                  ? `${item.name.replace(/ — .+$/, "")} — ${saved?.display_name ?? displayName}`
                   : item.name,
                 brandingUpdatedAt: saved?.updated_at ?? item.brandingUpdatedAt,
               }
@@ -343,7 +378,7 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
         ),
       );
     },
-    [workspaceId, workspaces],
+    [load, workspaceId, workspaces],
   );
 
   const value = useMemo<OwnerTenantContextValue>(

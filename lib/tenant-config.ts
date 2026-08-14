@@ -48,48 +48,36 @@ export interface TenantConfig {
 
 export const DEFAULT_TENANT_CONFIG: TenantConfig = {
   version: 2,
-  companyName: "Your Rental Co",
-  tagline: "Your Tesla, ready to roll.",
-  hostName: "Your host",
-  hostPhone: "555-555-0100",
-  supportEmail: "host@example.com",
-  roadsidePhone: "555-555-0199",
+  companyName: "",
+  tagline: "",
+  hostName: "",
+  hostPhone: "",
+  supportEmail: "",
+  roadsidePhone: "",
   car: {
     sourceVehicleId: null,
     sourceVehicleUpdatedAt: null,
-    model: "Model 3",
-    trim: "Performance",
-    year: 2024,
-    color: "Black",
+    model: "",
+    trim: "",
+    year: 0,
+    color: "",
     shifter: "screen",
-    wheelType: "W30P",
-    interior: "White Interior",
-    teslaInteriorCode: "IPW4",
-    teslaPaintCode: "PX02",
+    wheelType: null,
+    interior: null,
+    teslaInteriorCode: null,
+    teslaPaintCode: null,
   },
   rental: {
-    keyAccess:
-      "Your phone becomes the key — we'll send a Tesla app invite before pickup. A backup key card is clipped inside the center console.",
-    chargeAccess:
-      "Supercharging just works — plug in and the session bills automatically to this car's Tesla account. There's no card to swipe at the stall.",
-    chargingPolicy:
-      "Charging isn't included in the rental. Whatever you Supercharge is billed to the car, then passed through to you and settled after your trip ends — at Tesla's published rate, no markup.",
-    returnChargeLevel: "at least 80%",
-    skipChargeOption:
-      "Don't want to charge before returning? Add the $25 return-without-recharging option in the Turo app and we'll top it off for you.",
-    pickupNote:
-      "Walk around the car with us, check it's unlocked via your phone key, and make sure the Tesla app shows the car before you drive off.",
-    returnNote:
-      "Park where you picked it up, leave the key card in the console, take all your belongings, and tap 'Lock' in the app or walk away to auto-lock.",
-    parkingNote: "Return to the same pickup spot unless we've agreed otherwise in your Turo messages.",
+    keyAccess: "",
+    chargeAccess: "",
+    chargingPolicy: "",
+    returnChargeLevel: "",
+    skipChargeOption: "",
+    pickupNote: "",
+    returnNote: "",
+    parkingNote: "",
   },
-  houseRules: [
-    "No smoking or vaping — a clean cabin keeps this car a joy for everyone.",
-    "Pets are welcome in a carrier or with a seat cover. Please vacuum up fur before return.",
-    "Full Self-Driving (Supervised) still needs you — keep your hands ready, eyes on the road, and be ready to take over instantly.",
-    "Return with at least 80% charge, or add the $25 return-without-recharging option in the Turo app.",
-    "Treat the screen and seats kindly — no shoes on seats, no stickers, no mods.",
-  ],
+  houseRules: [],
 };
 
 export const ONLYEVS_FEATURE_KEY = "onlyevs";
@@ -181,12 +169,78 @@ export function tenantConfigFromFeatures(features: unknown): TenantConfig | null
   return normalizeTenantConfig(onlyevs.config);
 }
 
-export function featuresWithTenantConfig(features: unknown, config: TenantConfig): UnknownRecord {
+export function tenantSetupCompletedAt(features: unknown): number | null {
+  const candidate = record(features)[ONLYEVS_FEATURE_KEY];
+  if (!candidate || typeof candidate !== "object") return null;
+  const onlyevs = record(candidate);
+  if (onlyevs.enabled !== true) return null;
+  return nullableTimestamp(onlyevs.publishedAt);
+}
+
+export function tenantConfigPublicationIssues(config: TenantConfig): string[] {
+  const issues: string[] = [];
+  const requiredText: Array<[string, string]> = [
+    ["company name", config.companyName],
+    ["tagline", config.tagline],
+    ["host name", config.hostName],
+    ["host phone", config.hostPhone],
+    ["support email", config.supportEmail],
+    ["roadside phone", config.roadsidePhone],
+    ["vehicle model", config.car.model],
+    ["vehicle trim", config.car.trim],
+    ["vehicle color", config.car.color],
+    ["key-access policy", config.rental.keyAccess],
+    ["charge-access policy", config.rental.chargeAccess],
+    ["charging policy", config.rental.chargingPolicy],
+    ["return charge level", config.rental.returnChargeLevel],
+    ["skip-charge option", config.rental.skipChargeOption],
+    ["pickup note", config.rental.pickupNote],
+    ["return note", config.rental.returnNote],
+    ["parking note", config.rental.parkingNote],
+  ];
+  for (const [label, value] of requiredText) {
+    if (!value.trim()) issues.push(`${label} is required`);
+  }
+  if (!config.car.sourceVehicleId) issues.push("an active workspace vehicle must be linked");
+  if (!Number.isInteger(config.car.year) || config.car.year < 2008 || config.car.year > 2100) {
+    issues.push("vehicle year is invalid");
+  }
+  if (config.houseRules.length === 0) issues.push("at least one house rule is required");
+  return issues;
+}
+
+/** Guest reads are stricter than owner draft reads. A workspace configuration
+ * is public only after the owner explicitly completes setup with a fully
+ * populated snapshot linked to an active durable fleet record. */
+export function publishedTenantConfigFromFeatures(features: unknown): TenantConfig | null {
+  const config = tenantConfigFromFeatures(features);
+  if (!config || !tenantSetupCompletedAt(features)) return null;
+  return tenantConfigPublicationIssues(config).length === 0 ? config : null;
+}
+
+export interface TenantConfigSaveOptions {
+  /** Omit to preserve the current publication state. Pass null to unpublish. */
+  publishedAt?: number | null;
+}
+
+export function featuresWithTenantConfig(
+  features: unknown,
+  config: TenantConfig,
+  options: TenantConfigSaveOptions = {},
+): UnknownRecord {
+  const normalized = normalizeTenantConfig(config);
+  const requestedPublishedAt = Object.prototype.hasOwnProperty.call(options, "publishedAt")
+    ? nullableTimestamp(options.publishedAt)
+    : tenantSetupCompletedAt(features);
+  const publishedAt = tenantConfigPublicationIssues(normalized).length === 0
+    ? requestedPublishedAt
+    : null;
   return {
     ...record(features),
     [ONLYEVS_FEATURE_KEY]: {
       enabled: true,
-      config: normalizeTenantConfig(config),
+      publishedAt,
+      config: normalized,
     },
   };
 }

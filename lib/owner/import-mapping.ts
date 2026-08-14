@@ -49,8 +49,13 @@ function importedSpec(input: VehicleInput): TeslaImportedSpec {
   };
 }
 
-export function vehicleInputFromTesla(tv: TeslaVehicle, fallbackYear: number): VehicleInput {
-  const year = tv.year ?? fallbackYear;
+export function vehicleInputFromTesla(tv: TeslaVehicle): VehicleInput {
+  if (!tv.year) {
+    throw new Error(
+      `Tesla did not provide a model year for ${tv.displayName || tv.model}. Add that vehicle manually instead of inheriting another listing's year.`,
+    );
+  }
+  const year = tv.year;
   const displayName = tv.displayName?.trim() || `${year} ${tv.model}`;
   const input: VehicleInput = {
     displayName,

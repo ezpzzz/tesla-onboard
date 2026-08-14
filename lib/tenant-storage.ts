@@ -1,5 +1,5 @@
 export const LAST_TENANT_KEY = "rtr:tenant:v1";
-export const DEMO_TENANT_CONFIG_KEY = "rtr:demo-tenant-config:v1";
+export const DEMO_TENANT_CONFIG_KEY = "rtr:demo-tenant-config:v2";
 export const DEMO_TENANT_SLUG = "local-demo";
 
 export function scopedStorageKey(base: string, tenantSlug?: string | null): string {

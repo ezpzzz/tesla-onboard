@@ -13,6 +13,8 @@ import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { useOwnerState } from "@/lib/owner/owner-state";
 import { useOwnerSetupState, needsSetup } from "@/lib/owner/setup-state";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
+import { tenantSetupCompletedAt } from "@/lib/tenant-config";
 import { deriveAlerts } from "@/lib/owner/alerts";
 import {
   driverStatus,
@@ -60,6 +62,7 @@ const NEEDS_ATTENTION_RANK: Record<DriverStatus, number> = {
 export default function OwnerOverviewPage() {
   const router = useRouter();
   const { config } = useTenantConfig();
+  const { workspace } = useOwnerTenant();
   const {
     drivers,
     trips,
@@ -122,7 +125,7 @@ export default function OwnerOverviewPage() {
         </Card>
       ) : null}
 
-      {setupHydrated && needsSetup(setupState) && (
+      {setupHydrated && !tenantSetupCompletedAt(workspace?.features) && needsSetup(setupState) && (
         <section>
           <Card className="flex flex-wrap items-center justify-between gap-4 border-brand/20 bg-brand/5 p-5">
             <div className="min-w-0">

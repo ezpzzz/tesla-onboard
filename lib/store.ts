@@ -15,7 +15,8 @@ import { browserTenantScope, migrateLegacyStorage, scopedStorageKey } from "@/li
 import type { ExperienceLevel, TeslaProfile } from "./tesla";
 import type { PathMode } from "./flow";
 
-export const ONBOARDING_KEY = "rtr:state:v1";
+export const ONBOARDING_KEY = "rtr:state:v2";
+const LEGACY_ONBOARDING_KEY = "rtr:state:v1";
 
 export interface OnboardingState {
   profile: TeslaProfile | null;
@@ -47,6 +48,8 @@ export const initialState: OnboardingState = {
 export function loadState(tenantSlug: string | null = browserTenantScope()): OnboardingState {
   if (typeof window === "undefined") return initialState;
   try {
+    window.localStorage.removeItem(scopedStorageKey(LEGACY_ONBOARDING_KEY, tenantSlug));
+    window.localStorage.removeItem(LEGACY_ONBOARDING_KEY);
     const raw = window.localStorage.getItem(migrateLegacyStorage(ONBOARDING_KEY, tenantSlug));
     if (!raw) return initialState;
     return { ...initialState, ...JSON.parse(raw) };

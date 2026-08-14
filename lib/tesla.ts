@@ -48,8 +48,14 @@ export interface TeslaPersona {
   profile: TeslaProfile;
 }
 
+const configuredAuthMode = process.env.NEXT_PUBLIC_TESLA_AUTH_MODE;
+
+/** Production fails safe to the real OAuth path when the build-time setting is
+ * missing. Mock personas are an explicit local-development facility only. */
 export const AUTH_MODE: "mock" | "live" =
-  (process.env.NEXT_PUBLIC_TESLA_AUTH_MODE as "mock" | "live") ?? "mock";
+  configuredAuthMode === "live" || process.env.NODE_ENV === "production"
+    ? "live"
+    : "mock";
 
 /**
  * Demo personas shown on the simulated consent screen. In live mode the user's
