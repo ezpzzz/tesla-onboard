@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { useOwnerState } from "@/lib/owner/owner-state";
-import { hostConfig } from "@/lib/config";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import {
   formatMiles,
   formatUsd,
@@ -54,6 +54,7 @@ function formatDateRange(startMs: number, endMs: number): string {
 }
 
 export default function TripDetailPage() {
+  const { config, tenantSlug } = useTenantConfig();
   const params = useParams<{ id: string }>();
   const tripId = params.id;
   const { trips, drivers, vehicles, chargingSessions, hydrated } = useOwnerData();
@@ -67,8 +68,8 @@ export default function TripDetailPage() {
   const energy = useMemo(() => tripEnergy(sessions), [sessions]);
   const miles = trip ? tripMiles(trip) : null;
   const globalPolicyPct = useMemo(
-    () => parseReturnPolicyPct(hostConfig.rental.returnChargeLevel),
-    [],
+    () => parseReturnPolicyPct(config.rental.returnChargeLevel),
+    [config.rental.returnChargeLevel],
   );
   const policyPct = resolveVehiclePolicyPct(vehicle, globalPolicyPct);
 
@@ -99,7 +100,9 @@ export default function TripDetailPage() {
     !(belowPolicy && ownerState.tripChecklists[trip.id]?.chargedToPolicy);
 
   function copyGuestLink() {
-    const url = `${window.location.origin}/?trip=${trip!.id}`;
+    const params = new URLSearchParams({ trip: trip!.id });
+    if (tenantSlug) params.set("tenant", tenantSlug);
+    const url = `${window.location.origin}/?${params.toString()}`;
     navigator.clipboard.writeText(url).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -133,7 +136,7 @@ export default function TripDetailPage() {
                   {vehicle.status === "archived" && <Badge tone="neutral">Archived</Badge>}
                 </Link>
               ) : (
-                `${hostConfig.car.year} ${hostConfig.car.model} ${hostConfig.car.trim} · ${hostConfig.car.color}`
+                `${config.car.year} ${config.car.model} ${config.car.trim} · ${config.car.color}`
               )}
             </div>
           </div>

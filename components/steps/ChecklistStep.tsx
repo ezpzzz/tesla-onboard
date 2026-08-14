@@ -1,17 +1,21 @@
 "use client";
 
-import { CHECKLIST } from "@/lib/content";
+import { useMemo } from "react";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { checklistForTenant } from "@/lib/tenant-flow";
 import { Button, ProgressBar, StepFrame, cn } from "../ui";
 import { IconArrowRight, IconCheck, IconExternal } from "../icons";
 import type { StepProps } from "../step-types";
 
 export function ChecklistStep({ state, update, nav }: StepProps) {
+  const { config } = useTenantConfig();
+  const checklistItems = useMemo(() => checklistForTenant(config), [config]);
   const checklist = state.checklist;
-  const required = CHECKLIST.filter((i) => i.required);
+  const required = checklistItems.filter((i) => i.required);
   const doneRequired = required.filter((i) => checklist[i.id]).length;
   const allRequired = doneRequired === required.length;
-  const totalDone = CHECKLIST.filter((i) => checklist[i.id]).length;
-  const pct = Math.round((totalDone / CHECKLIST.length) * 100);
+  const totalDone = checklistItems.filter((i) => checklist[i.id]).length;
+  const pct = Math.round((totalDone / checklistItems.length) * 100);
 
   function toggle(id: string) {
     update((s) => ({ checklist: { ...s.checklist, [id]: !s.checklist[id] } }));
@@ -59,7 +63,7 @@ export function ChecklistStep({ state, update, nav }: StepProps) {
       </div>
 
       <ul className="mt-6 space-y-2.5">
-        {CHECKLIST.map((item) => {
+        {checklistItems.map((item) => {
           const checked = !!checklist[item.id];
           return (
             <li key={item.id}>

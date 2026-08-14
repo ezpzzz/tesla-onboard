@@ -7,7 +7,6 @@
  */
 
 import type { ReactNode } from "react";
-import { hostConfig } from "@/lib/config";
 import { Card } from "@/components/ui";
 
 export function OwnerAuthShell({ children }: { children: ReactNode }) {
@@ -16,7 +15,7 @@ export function OwnerAuthShell({ children }: { children: ReactNode }) {
       <div className="w-full max-w-[440px] animate-rise">
         <div className="mb-6 text-center">
           <span className="text-base font-semibold tracking-tight text-ink">
-            {hostConfig.companyName}
+            Onboarding
           </span>
         </div>
         <Card className="p-6 shadow-[0_0_80px_rgba(23,26,32,0.08)] sm:p-8">

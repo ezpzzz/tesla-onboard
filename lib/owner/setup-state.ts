@@ -12,6 +12,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
 import type { TeslaProfile } from "@/lib/tesla";
 import type { SetupStepId } from "./setup-flow";
 
@@ -44,15 +46,16 @@ export function needsSetup(s: OwnerSetupState): boolean {
   return !s.completedAt && !s.dismissedAt;
 }
 
-export function loadOwnerSetupState(): OwnerSetupState {
+export function loadOwnerSetupState(tenantSlug?: string | null): OwnerSetupState {
   if (typeof window === "undefined") return initialOwnerSetupState;
   try {
-    const raw = window.localStorage.getItem(OWNER_SETUP_KEY);
+    const key = migrateLegacyStorage(OWNER_SETUP_KEY, tenantSlug);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return initialOwnerSetupState;
     const parsed = { ...initialOwnerSetupState, ...JSON.parse(raw) } as OwnerSetupState;
     const migrated = removeLegacyMockSetupData(parsed);
     if (migrated !== parsed) {
-      window.localStorage.removeItem(OWNER_SETUP_KEY);
+      window.localStorage.removeItem(key);
     }
     return migrated;
   } catch {
@@ -60,19 +63,19 @@ export function loadOwnerSetupState(): OwnerSetupState {
   }
 }
 
-export function saveOwnerSetupState(state: OwnerSetupState): void {
+export function saveOwnerSetupState(state: OwnerSetupState, tenantSlug?: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(OWNER_SETUP_KEY, JSON.stringify(state));
+    window.localStorage.setItem(scopedStorageKey(OWNER_SETUP_KEY, tenantSlug), JSON.stringify(state));
   } catch {
     /* storage unavailable (private mode / full disk) — degrade gracefully */
   }
 }
 
-export function clearOwnerSetupState(): void {
+export function clearOwnerSetupState(tenantSlug?: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(OWNER_SETUP_KEY);
+    window.localStorage.removeItem(scopedStorageKey(OWNER_SETUP_KEY, tenantSlug));
   } catch {
     /* noop */
   }
@@ -82,27 +85,30 @@ type Patch = Partial<OwnerSetupState> | ((s: OwnerSetupState) => Partial<OwnerSe
 export type OwnerSetupUpdater = (patch: Patch) => void;
 
 export function useOwnerSetupState() {
+  const { tenantSlug } = useTenantConfig();
   const [state, setState] = useState<OwnerSetupState>(initialOwnerSetupState);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedScope, setHydratedScope] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
-    setState(loadOwnerSetupState());
-    setHydrated(true);
-  }, []);
+    setState(loadOwnerSetupState(tenantSlug));
+    setHydratedScope(tenantSlug);
+  }, [tenantSlug]);
+
+  const hydrated = hydratedScope !== undefined && hydratedScope === tenantSlug;
 
   const update = useCallback<OwnerSetupUpdater>((patch) => {
     setState((prev) => {
       const delta = typeof patch === "function" ? patch(prev) : patch;
       const next = { ...prev, ...delta };
-      saveOwnerSetupState(next);
+      saveOwnerSetupState(next, tenantSlug);
       return next;
     });
-  }, []);
+  }, [tenantSlug]);
 
   const reset = useCallback(() => {
-    clearOwnerSetupState();
+    clearOwnerSetupState(tenantSlug);
     setState(initialOwnerSetupState);
-  }, []);
+  }, [tenantSlug]);
 
   return { state, hydrated, update, reset };
 }

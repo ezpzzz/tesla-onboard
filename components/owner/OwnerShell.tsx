@@ -7,7 +7,7 @@
  * the curb during a handoff.
  *
  * AUTH: gating for /owner lives in middleware.ts (edge, cookie-based
- * session check) and lib/owner-auth.ts (allowlist + config helpers), with a
+ * session check) and lib/owner-auth.ts (config helpers), with a
  * second defense-in-depth check in app/owner/layout.tsx. When Supabase auth
  * env vars are unset, the app runs in demo mode — /owner stays open exactly
  * as before, `ownerEmail` is left undefined, and this shell renders
@@ -18,7 +18,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { hostConfig } from "@/lib/config";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
+import { tenantGuestHref } from "@/lib/tenant-config";
 import { Badge, cn } from "../ui";
 import { IconBattery, IconBolt, IconCar, IconUser } from "../icons";
 import { OwnerIdentity } from "./OwnerIdentity";
@@ -28,6 +30,7 @@ const NAV_ITEMS = [
   { href: "/owner/drivers", label: "Drivers", icon: IconUser },
   { href: "/owner/trips", label: "Trips", icon: IconCar },
   { href: "/owner/vehicles", label: "Vehicles", icon: IconBattery },
+  { href: "/owner/settings", label: "Settings", icon: IconUser },
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {
@@ -43,6 +46,9 @@ export function OwnerShell({
   ownerEmail?: string | null;
 }) {
   const pathname = usePathname() ?? "/owner";
+  const { config, tenantSlug, loading } = useTenantConfig();
+  const { workspace, workspaces, setWorkspace } = useOwnerTenant();
+  const guestHref = tenantGuestHref(tenantSlug);
 
   return (
     <div className="min-h-dvh bg-surface">
@@ -51,7 +57,7 @@ export function OwnerShell({
         <aside className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col border-r border-line bg-card md:flex">
           <div className="px-5 pt-6 pb-4">
             <span className="text-base font-semibold tracking-tight text-ink">
-              {hostConfig.companyName}
+              {loading ? "Onboarding" : config.companyName}
             </span>
             <div className="mt-2">
               <Badge>Host view</Badge>
@@ -60,6 +66,18 @@ export function OwnerShell({
               <div className="mt-3">
                 <OwnerIdentity email={ownerEmail} />
               </div>
+            ) : null}
+            {workspace && workspaces.length > 1 ? (
+              <select
+                aria-label="Active workspace"
+                value={workspace.key}
+                onChange={(event) => setWorkspace(event.target.value)}
+                className="mt-3 w-full rounded-lg border border-line bg-white px-2.5 py-2 text-xs text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+              >
+                {workspaces.map((item) => (
+                  <option key={item.key} value={item.key}>{item.name}</option>
+                ))}
+              </select>
             ) : null}
           </div>
           <nav className="flex-1 space-y-1 px-3">
@@ -86,7 +104,7 @@ export function OwnerShell({
           </nav>
           <div className="px-5 pb-6">
             <Link
-              href="/"
+              href={guestHref}
               className="text-xs font-medium text-muted transition-colors hover:text-ink"
             >
               Guest walkthrough →
@@ -99,13 +117,13 @@ export function OwnerShell({
           <header className="border-b border-line bg-card px-4 py-4 md:hidden">
             <div className="flex items-center justify-between">
               <span className="text-base font-semibold tracking-tight text-ink">
-                {hostConfig.companyName}
+                {loading ? "Onboarding" : config.companyName}
               </span>
               <Badge>Host view</Badge>
             </div>
             <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
               <Link
-                href="/"
+                href={guestHref}
                 className="inline-block shrink-0 text-xs font-medium text-muted transition-colors hover:text-ink"
               >
                 Guest walkthrough →

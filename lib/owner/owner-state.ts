@@ -8,6 +8,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
 
 export const OWNER_KEY = "rtr:owner:v1";
 
@@ -53,15 +55,16 @@ export function removeLegacyMockTripChecklists(state: OwnerState): OwnerState {
   return { ...state, tripChecklists };
 }
 
-export function loadOwnerState(): OwnerState {
+export function loadOwnerState(tenantSlug?: string | null): OwnerState {
   if (typeof window === "undefined") return initialOwnerState;
   try {
-    const raw = window.localStorage.getItem(OWNER_KEY);
+    const key = migrateLegacyStorage(OWNER_KEY, tenantSlug);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return initialOwnerState;
     const parsed = { ...initialOwnerState, ...JSON.parse(raw) } as OwnerState;
     const migrated = removeLegacyMockTripChecklists(parsed);
     if (migrated !== parsed) {
-      window.localStorage.setItem(OWNER_KEY, JSON.stringify(migrated));
+      window.localStorage.setItem(key, JSON.stringify(migrated));
     }
     return migrated;
   } catch {
@@ -69,19 +72,19 @@ export function loadOwnerState(): OwnerState {
   }
 }
 
-export function saveOwnerState(state: OwnerState): void {
+export function saveOwnerState(state: OwnerState, tenantSlug?: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(OWNER_KEY, JSON.stringify(state));
+    window.localStorage.setItem(scopedStorageKey(OWNER_KEY, tenantSlug), JSON.stringify(state));
   } catch {
     /* storage unavailable (private mode / full disk) — degrade gracefully */
   }
 }
 
-export function clearOwnerState(): void {
+export function clearOwnerState(tenantSlug?: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(OWNER_KEY);
+    window.localStorage.removeItem(scopedStorageKey(OWNER_KEY, tenantSlug));
   } catch {
     /* noop */
   }
@@ -91,27 +94,30 @@ type Patch = Partial<OwnerState> | ((s: OwnerState) => Partial<OwnerState>);
 export type OwnerUpdater = (patch: Patch) => void;
 
 export function useOwnerState() {
+  const { tenantSlug } = useTenantConfig();
   const [state, setState] = useState<OwnerState>(initialOwnerState);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedScope, setHydratedScope] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
-    setState(loadOwnerState());
-    setHydrated(true);
-  }, []);
+    setState(loadOwnerState(tenantSlug));
+    setHydratedScope(tenantSlug);
+  }, [tenantSlug]);
+
+  const hydrated = hydratedScope !== undefined && hydratedScope === tenantSlug;
 
   const update = useCallback<OwnerUpdater>((patch) => {
     setState((prev) => {
       const delta = typeof patch === "function" ? patch(prev) : patch;
       const next = { ...prev, ...delta };
-      saveOwnerState(next);
+      saveOwnerState(next, tenantSlug);
       return next;
     });
-  }, []);
+  }, [tenantSlug]);
 
   const reset = useCallback(() => {
-    clearOwnerState();
+    clearOwnerState(tenantSlug);
     setState(initialOwnerState);
-  }, []);
+  }, [tenantSlug]);
 
   return { state, hydrated, update, reset };
 }

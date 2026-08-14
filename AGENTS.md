@@ -37,9 +37,9 @@ The sequence of steps a guest sees is derived, never a fixed list. Trace the cha
 
 Because the flow is recomputed from state, changing modules or ordering means editing `buildFlow` / `lib/content.ts`, not the controller.
 
-### State lives in localStorage (key `rtr:state:v1`)
+### State lives in tenant-scoped localStorage
 
-`lib/store.ts` `useOnboarding()` is the single state hook — `OnboardingState` persisted to localStorage so a guest can resume mid-flow. Note `newToTesla` is intentionally **stable across sign-in** (it does not flip when experience changes) so the account-setup step doesn't vanish mid-walkthrough. `stepId` is the source of truth for "which step."
+`lib/store.ts` `useOnboarding()` is the single state hook. `lib/tenant-storage.ts` scopes guest and owner browser state by workspace shop slug so one tenant never reuses another tenant's progress or fleet records. Note `newToTesla` is intentionally **stable across sign-in** (it does not flip when experience changes) so the account-setup step doesn't vanish mid-walkthrough. `stepId` is the source of truth for "which step."
 
 ### Browser Back/Forward is mirrored into the History API
 
@@ -54,9 +54,10 @@ The entire app only ever sees a normalized `TeslaProfile`, so mock vs. live is i
 
 API routes: `app/api/tesla/{login,me,logout,public-key}/route.ts` and the live callback `app/auth/tesla/callback/route.ts`. `next.config.ts` rewrites `/.well-known/appspecific/com.tesla.3p.public-key.pem` → the public-key route. `lib/tesla-server.ts` has a header comment documenting Fleet API details that were handled defensively (region auto-discovery, VIN-derived model/year, gated docs) — read it before touching live OAuth.
 
-### Host configuration & content are data, not code
+### Tenant configuration & content are data, not code
 
-- **`lib/config.ts`** (`hostConfig`) — the ONE file a host edits per car/listing: car details, key access, charging, house rules, return, contacts. Components read from it; re-skinning a new car touches no components.
+- **`lib/tenant-config.ts`** defines the guest-safe per-shop configuration stored under `workspace_branding.features.onlyevs`. Owners edit it during `/owner/setup` or at `/owner/settings`; public guest links resolve it with `?tenant=<workspace-id>~<shop-slug>` (legacy slug-only links still work). Platform credentials stay in deployment env and must never be stored in this public JSON.
+- **`lib/config.ts`** is a legacy default/type source only. Runtime components use `useTenantConfig()`; do not add new `hostConfig` reads.
 - **`lib/content.ts`** — tutorial `MODULES` (each with copy, steps, and an optional `youtubeId`) + the readiness checklist. The `core` flag on a module is what `essentials` mode filters out.
 
 ### Official Tesla videos only (project rule)

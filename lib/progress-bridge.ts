@@ -6,7 +6,8 @@
  * The guest-facing onboarding flow and the host-facing /owner dashboard are two
  * separate apps that only ever meet through localStorage in the SAME browser:
  * the guest's `usePublishProgress` mirrors their onboarding state out to
- * `rtr:progress:v1` on every change, and the owner's `useGuestProgress` reads it
+ * a tenant-scoped `rtr:progress:v1` record on every change, and the owner's
+ * `useGuestProgress` reads it
  * back (plus `storage` events for cross-tab updates). There is no server in
  * between — this is a same-device demo bridge, not a real multi-guest sync.
  *
@@ -19,6 +20,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
 import { computeProgress, type ProgressInput, type ProgressSummary } from "./flow";
 
 export const PROGRESS_KEY = "rtr:progress:v1";
@@ -26,10 +29,10 @@ export const TRIP_KEY = "rtr:trip:v1";
 
 export type PublishedGuestProgress = ProgressSummary & { tripId: string | null };
 
-export function readPublishedProgress(): PublishedGuestProgress | null {
+export function readPublishedProgress(tenantSlug?: string | null): PublishedGuestProgress | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(PROGRESS_KEY);
+    const raw = window.localStorage.getItem(migrateLegacyStorage(PROGRESS_KEY, tenantSlug));
     if (!raw) return null;
     return JSON.parse(raw) as PublishedGuestProgress;
   } catch {
@@ -37,9 +40,9 @@ export function readPublishedProgress(): PublishedGuestProgress | null {
   }
 }
 
-function readTripId(): string | null {
+function readTripId(tenantSlug?: string | null): string | null {
   try {
-    return window.localStorage.getItem(TRIP_KEY);
+    return window.localStorage.getItem(migrateLegacyStorage(TRIP_KEY, tenantSlug));
   } catch {
     return null;
   }
@@ -47,7 +50,12 @@ function readTripId(): string | null {
 
 /** Guest-side: publish this browser's onboarding progress for the owner dashboard to read. */
 export function usePublishProgress(state: ProgressInput, hydrated: boolean): void {
+  const { tenantSlug } = useTenantConfig();
   const capturedTrip = useRef(false);
+
+  useEffect(() => {
+    capturedTrip.current = false;
+  }, [tenantSlug]);
 
   // One-time: capture ?trip=<id> from the URL into localStorage, first write wins.
   useEffect(() => {
@@ -55,13 +63,14 @@ export function usePublishProgress(state: ProgressInput, hydrated: boolean): voi
     capturedTrip.current = true;
     try {
       const trip = new URLSearchParams(window.location.search).get("trip");
-      if (trip && !window.localStorage.getItem(TRIP_KEY)) {
-        window.localStorage.setItem(TRIP_KEY, trip);
+      const tripKey = migrateLegacyStorage(TRIP_KEY, tenantSlug);
+      if (trip && !window.localStorage.getItem(tripKey)) {
+        window.localStorage.setItem(tripKey, trip);
       }
     } catch {
       /* storage unavailable — degrade gracefully, no trip tag on this browser */
     }
-  }, [hydrated]);
+  }, [hydrated, tenantSlug]);
 
   // Publish progress on every relevant state change.
   useEffect(() => {
@@ -69,28 +78,37 @@ export function usePublishProgress(state: ProgressInput, hydrated: boolean): voi
     try {
       const published: PublishedGuestProgress = {
         ...computeProgress(state),
-        tripId: readTripId(),
+        tripId: readTripId(tenantSlug),
       };
-      window.localStorage.setItem(PROGRESS_KEY, JSON.stringify(published));
+      window.localStorage.setItem(
+        scopedStorageKey(PROGRESS_KEY, tenantSlug),
+        JSON.stringify(published),
+      );
     } catch {
       /* storage unavailable (private mode / full disk) — degrade gracefully */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, hydrated]);
+  }, [state, hydrated, tenantSlug]);
 }
 
 /** Owner-side: read the guest's published progress, live-updating in this browser. */
 export function useGuestProgress(): PublishedGuestProgress | null {
-  const [progress, setProgress] = useState<PublishedGuestProgress | null>(null);
+  const { tenantSlug } = useTenantConfig();
+  const [snapshot, setSnapshot] = useState<{
+    scope: string | null | undefined;
+    progress: PublishedGuestProgress | null;
+  }>({ scope: undefined, progress: null });
 
   useEffect(() => {
-    setProgress(readPublishedProgress());
+    const progressKey = scopedStorageKey(PROGRESS_KEY, tenantSlug);
+    const tripKey = scopedStorageKey(TRIP_KEY, tenantSlug);
+    setSnapshot({ scope: tenantSlug, progress: readPublishedProgress(tenantSlug) });
 
     function refresh() {
-      setProgress(readPublishedProgress());
+      setSnapshot({ scope: tenantSlug, progress: readPublishedProgress(tenantSlug) });
     }
     function onStorage(e: StorageEvent) {
-      if (e.key === PROGRESS_KEY || e.key === TRIP_KEY || e.key === null) refresh();
+      if (e.key === progressKey || e.key === tripKey || e.key === null) refresh();
     }
     // "storage" only fires in OTHER tabs, so also re-read on focus/visibility for
     // same-tab navigation back from the guest flow. visibilitychange lives on
@@ -103,7 +121,7 @@ export function useGuestProgress(): PublishedGuestProgress | null {
       document.removeEventListener("visibilitychange", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, []);
+  }, [tenantSlug]);
 
-  return progress;
+  return snapshot.scope === tenantSlug ? snapshot.progress : null;
 }

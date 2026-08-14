@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
-  isAllowedOwnerEmail,
   isOwnerAuthConfigured,
   logOwnerAuthEvent,
   warnOwnerAuthDisabledOnce,
@@ -8,14 +7,15 @@ import {
 import { updateSession } from "@/lib/supabase/middleware";
 
 /**
- * Gates /owner behind Supabase Auth + a server-only email allowlist.
+ * Gates /owner behind Supabase Auth. Tenant authorization is enforced by the
+ * existing workspace_users/workspace_branding RLS policies after sign-in;
+ * membership replaces the single-deployment OWNER_ALLOWED_EMAILS allowlist.
  *
  * Demo mode (no NEXT_PUBLIC_SUPABASE_* configured): /owner stays exactly as
  * open as it was before this feature existed — no Supabase client is ever
  * constructed, no cookies are touched, one console.warn per process.
  *
  * Configured mode: unauthenticated -> /login?next=<path>. Authenticated but
- * not on the allowlist -> /not-authorized. Otherwise the refreshed-session
  * response is returned UNMODIFIED so the browser gets the updated cookies.
  *
  * Runs on the default Edge runtime. NOTE: getClaims() does NOT verify
@@ -79,13 +79,6 @@ export async function middleware(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = "/login";
       url.search = `?next=${encodeURIComponent(`${pathname}${search}`)}`;
-      return redirectWithSession(response, url);
-    }
-    if (!isAllowedOwnerEmail(email)) {
-      logOwnerAuthEvent({ type: "denied", email, path: pathname });
-      const url = request.nextUrl.clone();
-      url.pathname = "/not-authorized";
-      url.search = "";
       return redirectWithSession(response, url);
     }
     return response;

@@ -1,6 +1,17 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Retired single-tenant public variables must never be inlined into client
+  // chunks through the untouched legacy config/content modules. Runtime tenant
+  // settings now come from workspace_branding.features.onlyevs.
+  env: {
+    NEXT_PUBLIC_COMPANY_NAME: "",
+    NEXT_PUBLIC_TAGLINE: "",
+    NEXT_PUBLIC_HOST_NAME: "",
+    NEXT_PUBLIC_HOST_PHONE: "",
+    NEXT_PUBLIC_SUPPORT_EMAIL: "",
+    NEXT_PUBLIC_ROADSIDE_PHONE: "",
+  },
   async rewrites() {
     return [
       {

@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { Suspense } from "react";
+import { TenantConfigProvider } from "@/components/TenantConfigProvider";
 import "./globals.css";
 
 const inter = Inter({
@@ -34,7 +36,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body>{children}</body>
+      <body>
+        <Suspense fallback={children}>
+          <TenantConfigProvider>{children}</TenantConfigProvider>
+        </Suspense>
+      </body>
     </html>
   );
 }

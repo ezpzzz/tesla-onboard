@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { hostConfig } from "@/lib/config";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { parseReturnPolicyPct } from "@/lib/owner/derive";
 import { useVehicleState } from "@/lib/owner/vehicle-state";
 import {
@@ -20,11 +20,12 @@ import type { Vehicle } from "@/lib/owner/types";
 import type { SetupStepProps } from "./types";
 
 export function ImportStep({ state, update, nav }: SetupStepProps) {
+  const { config } = useTenantConfig();
   const profile = state.teslaProfile;
   const stepNumber = indexOfSetupStep(state.step) + 1;
   const { vehicles, addVehicle, updateVehicle, unarchiveVehicle } = useVehicleState();
-  const policyPct = parseReturnPolicyPct(hostConfig.rental.returnChargeLevel);
-  const fallbackYear = hostConfig.car.year;
+  const policyPct = parseReturnPolicyPct(config.rental.returnChargeLevel);
+  const fallbackYear = config.car.year;
 
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [committed, setCommitted] = useState<string[]>([]);

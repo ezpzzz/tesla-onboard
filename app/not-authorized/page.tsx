@@ -1,6 +1,7 @@
 /**
- * Shown when someone is signed in via Supabase but their email isn't on the
- * owner allowlist (see lib/owner-auth.ts). Lives OUTSIDE /owner — never
+ * Legacy public access-denied screen. Tenant authorization now comes from
+ * workspace membership + RLS rather than an app-level email allowlist. It
+ * lives OUTSIDE /owner and never
  * renders any dashboard data — and reads its own claims for display since
  * middleware doesn't pass state down to the page it redirects to.
  *
@@ -53,15 +54,15 @@ export default async function NotAuthorizedPage() {
   return (
     <OwnerAuthShell>
       <div className="text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Not authorized</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-ink">Workspace access required</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
           {email ? (
             <>
               Signed in as <span className="font-medium text-ink">{email}</span> —
-              this account isn&apos;t on the owner allowlist.
+              this account isn&apos;t linked to an OnlyEVs-enabled Sophosic workspace.
             </>
           ) : (
-            "This account isn't on the owner allowlist."
+            "This account isn't linked to an OnlyEVs-enabled Sophosic workspace."
           )}
         </p>
         <div className="mt-6 space-y-3">

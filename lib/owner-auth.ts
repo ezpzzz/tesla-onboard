@@ -11,37 +11,15 @@ import "server-only";
  * Partial config (only one of the pair set) counts as unconfigured — fail
  * toward demo mode, not toward a half-working gate.
  *
- * The allowlist is server-only and separate from the Supabase project's user
- * pool: a user can authenticate (prove they have an account in the SHARED
- * sophosic-platform project) without being an owner of *this* app. Signing in
- * only proves identity; the allowlist is what grants access.
+ * Signing in proves identity. Tenant access is resolved from the shared
+ * platform's workspace_users membership and enforced by its existing RLS
+ * policies, so this deployment no longer carries an email allowlist.
  */
-
-const DEFAULT_ALLOWLIST = ["alex@sophosic.ai"];
 
 export function isOwnerAuthConfigured(): boolean {
   return Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   );
-}
-
-/**
- * OWNER_ALLOWED_EMAILS, comma-separated, trimmed, lowercased.
- * - Unset (undefined) -> defaults to ["alex@sophosic.ai"].
- * - Explicitly set to "" -> [] (fail closed: nobody gets in).
- */
-export function getOwnerAllowlist(): string[] {
-  const raw = process.env.OWNER_ALLOWED_EMAILS;
-  if (raw === undefined) return DEFAULT_ALLOWLIST;
-  return raw
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-export function isAllowedOwnerEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return getOwnerAllowlist().includes(email.trim().toLowerCase());
 }
 
 let warnedDisabled = false;

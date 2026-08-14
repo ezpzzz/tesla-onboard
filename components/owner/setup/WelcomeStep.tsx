@@ -1,15 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { hostConfig } from "@/lib/config";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { Button, StepFrame } from "@/components/ui";
 import { IconArrowRight, IconBolt, IconCar, IconSparkle } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
-import {
-  LISTING_TESLA_INTERIOR,
-  LISTING_TESLA_INTERIOR_CODE,
-  LISTING_TESLA_PAINT_CODE,
-} from "@/lib/listing-vehicle-media";
 import type { SetupStepProps } from "./types";
 
 const highlights = [
@@ -29,6 +24,7 @@ const highlights = [
 
 export function WelcomeStep({ nav, update }: SetupStepProps) {
   const router = useRouter();
+  const { config } = useTenantConfig();
 
   return (
     <StepFrame
@@ -53,18 +49,19 @@ export function WelcomeStep({ nav, update }: SetupStepProps) {
       <div className="relative mb-7">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
-            {hostConfig.companyName}
+            {config.companyName}
           </span>
           <span className="h-3 w-3 rounded-full bg-brand shadow-[0_0_12px_2px] shadow-brand/50" />
         </div>
         <VehicleArtwork
-          model={hostConfig.car.model}
-          color={hostConfig.car.color}
-          trim={hostConfig.car.trim}
-          interior={LISTING_TESLA_INTERIOR}
-          interiorCode={LISTING_TESLA_INTERIOR_CODE}
-          paintCode={LISTING_TESLA_PAINT_CODE}
-          year={hostConfig.car.year}
+          model={config.car.model}
+          color={config.car.color}
+          trim={config.car.trim}
+          wheelType={config.car.wheelType}
+          interior={config.car.interior}
+          interiorCode={config.car.teslaInteriorCode}
+          paintCode={config.car.teslaPaintCode}
+          year={config.car.year}
           eager
           className="mt-2 h-48 sm:h-64"
         />
