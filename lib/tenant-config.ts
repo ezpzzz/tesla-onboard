@@ -181,11 +181,8 @@ export function tenantConfigPublicationIssues(config: TenantConfig): string[] {
   const issues: string[] = [];
   const requiredText: Array<[string, string]> = [
     ["company name", config.companyName],
-    ["tagline", config.tagline],
     ["host name", config.hostName],
     ["host phone", config.hostPhone],
-    ["support email", config.supportEmail],
-    ["roadside phone", config.roadsidePhone],
     ["vehicle model", config.car.model],
     ["vehicle trim", config.car.trim],
     ["vehicle color", config.car.color],
@@ -193,10 +190,6 @@ export function tenantConfigPublicationIssues(config: TenantConfig): string[] {
     ["charge-access policy", config.rental.chargeAccess],
     ["charging policy", config.rental.chargingPolicy],
     ["return charge level", config.rental.returnChargeLevel],
-    ["skip-charge option", config.rental.skipChargeOption],
-    ["pickup note", config.rental.pickupNote],
-    ["return note", config.rental.returnNote],
-    ["parking note", config.rental.parkingNote],
   ];
   for (const [label, value] of requiredText) {
     if (!value.trim()) issues.push(`${label} is required`);

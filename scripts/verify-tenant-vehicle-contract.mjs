@@ -135,6 +135,30 @@ const publishable = normalizeTenantConfig({
 });
 assert.deepEqual(tenantConfigPublicationIssues(publishable), []);
 
+const optionalDetailsBlank = {
+  ...publishable,
+  tagline: "",
+  supportEmail: "",
+  roadsidePhone: "",
+  rental: {
+    ...publishable.rental,
+    skipChargeOption: "",
+    pickupNote: "",
+    returnNote: "",
+    parkingNote: "",
+  },
+};
+assert.deepEqual(
+  tenantConfigPublicationIssues(optionalDetailsBlank),
+  [],
+  "optional brand, contact, and rental-note fields must not block publication",
+);
+assert.ok(
+  tenantConfigPublicationIssues({ ...optionalDetailsBlank, hostPhone: "" })
+    .includes("host phone is required"),
+  "essential host contact details must still block publication when missing",
+);
+
 const draftFeatures = featuresWithTenantConfig({}, publishable);
 assert.ok(tenantConfigFromFeatures(draftFeatures));
 assert.equal(tenantSetupCompletedAt(draftFeatures), null);
