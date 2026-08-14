@@ -3,10 +3,11 @@
 /**
  * Workspace fleet state.
  *
- * Authenticated workspace tenants use `public.onlyevs_vehicles` as the source
- * of truth. The historical localStorage roster is read exactly once, migrated
- * without overwriting database rows, then removed. The no-Supabase demo keeps
- * the original tenant-scoped browser store so local preview still works.
+ * Authenticated workspace tenants use `public.onlyevs_vehicles` as the sole
+ * source of truth. Historical localStorage rosters are removed after the
+ * remote store is reachable; automatically replaying them would resurrect a
+ * fleet that an owner intentionally reset on another device. The no-Supabase
+ * demo keeps the original tenant-scoped browser store so local preview works.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -15,7 +16,6 @@ import { migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
 import {
   fetchWorkspaceVehicles,
   insertWorkspaceVehicle,
-  migrateBrowserVehicles,
   replaceWorkspaceVehicle,
   setWorkspaceVehicleStatus,
   vehicleWorkspaceScope,
@@ -151,11 +151,6 @@ export function loadVehicleState(tenantSlug?: string | null): VehicleState {
   return parseStoredVehicleState(migrateLegacyStorage(VEHICLE_KEY, tenantSlug));
 }
 
-/** Never assign the former unscoped store to an arbitrary workspace. */
-function loadScopedBrowserMigrationState(tenantSlug: string): VehicleState {
-  return parseStoredVehicleState(scopedStorageKey(VEHICLE_KEY, tenantSlug));
-}
-
 export function saveVehicleState(state: VehicleState, tenantSlug?: string | null): void {
   if (typeof window === "undefined") return;
   try {
@@ -196,10 +191,8 @@ async function loadRemoteState(
 
   const load = (async () => {
     try {
-      let remote = await fetchWorkspaceVehicles(scope);
+      const remote = await fetchWorkspaceVehicles(scope);
       if (!browserMigrationComplete(tenantSlug)) {
-        const local = loadScopedBrowserMigrationState(tenantSlug);
-        remote = await migrateBrowserVehicles(scope, Object.values(local.vehicles), remote);
         completeBrowserMigration(tenantSlug);
       }
       const state = stateFromVehicles(remote);
