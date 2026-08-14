@@ -353,10 +353,14 @@ The raw Tesla subject is never persisted.
 ### Owner Tesla connect (live)
 
 The owner-side fleet setup wizard (`/owner/setup`) connects to Tesla
-independently from the guest flow—separate OAuth state, a fixed-size opaque
-import handle backed by a private 15-minute server session, a durable encrypted
-integration credential, and its own redirect URI. The browser cookie never
-contains VIN/fleet JSON, so large fleets do not overflow per-cookie limits. Register
+independently from the guest flow, with separate OAuth state and its own
+redirect URI. With the operations control plane enabled, a fixed-size opaque
+import handle resolves a private 15-minute server session and the rotating
+refresh credential is encrypted for the worker. While that control plane is
+disabled, the callback instead seals a short-lived access credential in an
+httpOnly cookie; `/api/owner/tesla/me` consumes it once, fetches the complete
+fleet, and deletes it. Neither path places VIN/fleet JSON in a cookie, so large
+fleets do not overflow per-cookie limits. Register
 `https://<domain>/auth/owner/tesla/callback` as a **second** redirect URI in the
 Tesla developer dashboard and set it as `TESLA_OWNER_REDIRECT_URI`, distinct
 from the guest's `TESLA_REDIRECT_URI`. The owner must also pair the application's
