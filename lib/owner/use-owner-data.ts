@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { EMPTY_OWNER_SNAPSHOT, getOwnerDataSource } from "./data-source";
 import { fleetStats, parseReturnPolicyPct } from "./derive";
 import { useVehicleState } from "./vehicle-state";
-import { hostConfig } from "@/lib/config";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useGuestProgress } from "@/lib/progress-bridge";
 import type { Driver, OwnerSnapshot, Trip } from "./types";
 
@@ -20,6 +20,7 @@ import type { Driver, OwnerSnapshot, Trip } from "./types";
 const INITIAL_SNAPSHOT: OwnerSnapshot = EMPTY_OWNER_SNAPSHOT;
 
 export function useOwnerData() {
+  const { config } = useTenantConfig();
   const [snapshot, setSnapshot] = useState<OwnerSnapshot>(INITIAL_SNAPSHOT);
   const [dataHydrated, setDataHydrated] = useState(false);
   const guestProgress = useGuestProgress();
@@ -41,8 +42,8 @@ export function useOwnerData() {
   }, []);
 
   const policyPct = useMemo(
-    () => parseReturnPolicyPct(hostConfig.rental.returnChargeLevel),
-    []
+    () => parseReturnPolicyPct(config.rental.returnChargeLevel),
+    [config.rental.returnChargeLevel]
   );
 
   const merged = useMemo<OwnerSnapshot>(() => {

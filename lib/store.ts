@@ -10,10 +10,12 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { browserTenantScope, migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
 import type { ExperienceLevel, TeslaProfile } from "./tesla";
 import type { PathMode } from "./flow";
 
-const KEY = "rtr:state:v1";
+export const ONBOARDING_KEY = "rtr:state:v1";
 
 export interface OnboardingState {
   profile: TeslaProfile | null;
@@ -42,10 +44,10 @@ export const initialState: OnboardingState = {
   newToTesla: false,
 };
 
-export function loadState(): OnboardingState {
+export function loadState(tenantSlug: string | null = browserTenantScope()): OnboardingState {
   if (typeof window === "undefined") return initialState;
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(migrateLegacyStorage(ONBOARDING_KEY, tenantSlug));
     if (!raw) return initialState;
     return { ...initialState, ...JSON.parse(raw) };
   } catch {
@@ -53,19 +55,19 @@ export function loadState(): OnboardingState {
   }
 }
 
-export function saveState(state: OnboardingState): void {
+export function saveState(state: OnboardingState, tenantSlug: string | null = browserTenantScope()): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(state));
+    window.localStorage.setItem(scopedStorageKey(ONBOARDING_KEY, tenantSlug), JSON.stringify(state));
   } catch {
     /* storage unavailable (private mode / full disk) — degrade gracefully */
   }
 }
 
-export function clearState(): void {
+export function clearState(tenantSlug: string | null = browserTenantScope()): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(KEY);
+    window.localStorage.removeItem(scopedStorageKey(ONBOARDING_KEY, tenantSlug));
   } catch {
     /* noop */
   }
@@ -75,27 +77,30 @@ type Patch = Partial<OnboardingState> | ((s: OnboardingState) => Partial<Onboard
 export type Updater = (patch: Patch) => void;
 
 export function useOnboarding() {
+  const { tenantSlug } = useTenantConfig();
   const [state, setState] = useState<OnboardingState>(initialState);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedScope, setHydratedScope] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
-    setState(loadState());
-    setHydrated(true);
-  }, []);
+    setState(loadState(tenantSlug));
+    setHydratedScope(tenantSlug);
+  }, [tenantSlug]);
+
+  const hydrated = hydratedScope !== undefined && hydratedScope === tenantSlug;
 
   const update = useCallback((patch: Patch) => {
     setState((prev) => {
       const delta = typeof patch === "function" ? patch(prev) : patch;
       const next = { ...prev, ...delta };
-      saveState(next);
+      saveState(next, tenantSlug);
       return next;
     });
-  }, []);
+  }, [tenantSlug]);
 
   const reset = useCallback(() => {
-    clearState();
+    clearState(tenantSlug);
     setState(initialState);
-  }, []);
+  }, [tenantSlug]);
 
   return { state, hydrated, update, reset };
 }

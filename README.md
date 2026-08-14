@@ -49,7 +49,9 @@ Welcome → Connect with Tesla → Your plan → [tutorial modules] → Readines
   one-tap host call, and roadside info.
 
 Progress is saved to `localStorage`, so a guest can close the tab at the
-Supercharger and pick up exactly where they left off.
+Supercharger and pick up exactly where they left off. Browser state is scoped
+by workspace slug, so switching rental companies never reuses another tenant's
+walkthrough, setup, vehicle, or trip-progress records.
 
 ### Owner dashboard
 
@@ -80,6 +82,12 @@ onboarding progress in one place, separate from the guest flow. It shows:
   page, never an automatic redirect, and its own progress is stored
   separately from everything else so starting over never touches your
   vehicle list.
+- **Workspace settings** — brand, contact, guest vehicle, rental policy, and
+  house rules are editable in setup and at `/owner/settings`. They are saved
+  under the active Sophosic workspace and update that tenant's guest walkthrough
+  without a rebuild or deployment. An imported fleet vehicle can populate the
+  guest vehicle in one selection, including trim, exterior, interior, wheels,
+  and exact Tesla option codes used by the fail-closed artwork resolver.
 
 It ships without sample owner records. A fresh owner account starts with no
 drivers, trips, charging sessions, or vehicles; real or manually entered
@@ -94,20 +102,18 @@ See [`lib/progress-bridge.ts`](lib/progress-bridge.ts) for that boundary.
 ### Owner login (Supabase Auth)
 
 `/owner` is **open by default** (demo mode) — nothing to configure. Setting
-three env vars turns on a real sign-in gate in front of it:
+the Supabase project variables turns on a real sign-in gate in front of it:
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
-OWNER_ALLOWED_EMAILS=          # comma-separated; unset defaults to alex@sophosic.ai
 ```
 
-Leave all three unset and `/owner` behaves exactly as it does today. Set
+Leave both unset and `/owner` behaves exactly as it does today. Set
 `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and the
-gate is live — signing in only proves you have an account in the Supabase
-project; `OWNER_ALLOWED_EMAILS` is the separate allowlist that actually grants
-`/owner` access. Setting it explicitly to an empty string locks everyone out
-(fail closed).
+gate is live. Tenant access comes from the signed-in user's existing
+`workspace_users` memberships and the shared platform's row-level-security
+policies; there is no deployment-wide email allowlist.
 
 **One-time Supabase dashboard step:** this app shares a Supabase project with
 other products, so the only thing to add is a redirect URL — go to
@@ -118,17 +124,17 @@ origin plus `/auth/callback` (e.g.
 project is touched: the email **template** is not modified, the Site URL is
 not changed, and no existing user is edited.
 
-**First account:** if you already have an account in the shared Supabase
-project, just add its email to `OWNER_ALLOWED_EMAILS` — no new user needed. To
-create a fresh one, use the operator-only script (never run by the app):
+**First account:** use an existing account that is already a member of the
+intended Sophosic workspace. To create a fresh auth account, use the
+operator-only script (never run by the app), then add that user to a workspace
+through the platform's normal membership flow:
 
 ```bash
 SUPABASE_SERVICE_ROLE_KEY=... node --env-file=.env.local scripts/owner-admin-create-user.mjs you@example.com
 ```
 
 The service-role key is shell-env-only — it must never go in `.env.example`
-or any file the app reads. The script prints the password once; save it, then
-add the email to `OWNER_ALLOWED_EMAILS`.
+or any file the app reads. The script prints the password once.
 
 Signing out from `/owner` is **this-device-only** (`scope: 'local'`) — it
 never revokes your sessions in the project's other apps, since the user pool
@@ -171,7 +177,7 @@ protect the shared Supabase project's rate limits.
   </tr>
 </table>
 
-> Demo uses placeholder branding and contact details; real values come from `.env.local` (see [Make it yours](#make-it-yours-host-configuration)).
+> Demo uses placeholder branding and contact details; signed-in owners configure real values per workspace in the setup wizard or `/owner/settings`.
 
 ---
 
@@ -188,19 +194,23 @@ can watch the flow adapt.
 
 ---
 
-## Make it yours (host configuration)
+## Make it yours (workspace configuration)
 
-Everything specific to your car and listing lives in one file:
-**[`lib/config.ts`](lib/config.ts)**. Edit the `hostConfig` object — car details,
-where the key card is, how charging is paid, house rules, and return instructions —
-and the entire experience re-skins itself. No components to touch.
+Owners configure everything specific to a rental company in `/owner/setup` or
+`/owner/settings`: company and host identity, contact details, the guest vehicle,
+key and charging instructions, return policy, and house rules. The settings are
+stored in `workspace_branding.features.onlyevs` for the active Sophosic workspace.
+The guest vehicle can be populated from an imported vehicle so Tesla trim, paint,
+interior, and wheel option codes remain attached to the published configuration.
+Guest links carry an unambiguous `?tenant=<workspace-id>~<shop-slug>` reference
+so the public walkthrough resolves the correct branded shop at runtime—even
+when one workspace owns several shops. Legacy shop-slug-only links remain
+readable. No source edit or redeploy is required.
 
-Your **identity and contact details** (company name, host name, phone numbers,
-support email) come from `NEXT_PUBLIC_*` environment variables instead of the
-source — copy `.env.example` → `.env.local` and fill them in. They're guest-facing,
-so they ship to the browser; env just keeps your personal info out of the repo. The
-header shows `NEXT_PUBLIC_COMPANY_NAME` as a text wordmark (drop in your own logo in
-`components/ui.tsx` if you'd rather).
+Deployment environment variables remain only for **platform infrastructure**:
+Supabase connectivity, Tesla OAuth credentials and registered callbacks, and
+the Tesla session-encryption secret. Those values are intentionally not editable
+in a browser and must never be stored in public workspace branding JSON.
 
 Tutorial copy and the readiness checklist live in
 **[`lib/content.ts`](lib/content.ts)**.
@@ -307,10 +317,12 @@ app/
   auth/tesla/page.tsx     Simulated "Sign in with Tesla" consent screen (mock)
   auth/tesla/callback/    Live OAuth callback (server-side token exchange)
   api/tesla/             login · callback-helpers · me · logout · public-key
-  owner/                  Host dashboard: page, drivers/, drivers/[id]/, trips/, trips/[id]/,
-                           vehicles/, vehicles/new/, vehicles/[id]/
+  owner/                  Host dashboard: page, drivers/, trips/, vehicles/, setup/, settings/
 lib/
-  config.ts               ← Host edits this (car, rules, contacts)
+  tenant-config.ts        Runtime-validated per-workspace public configuration
+  tenant-flow.ts          Applies tenant configuration to guest modules/checklist
+  tenant-storage.ts       Tenant-scoped browser-storage keys + legacy migration
+  config.ts               Legacy default shape; no longer a host editing surface
   content.ts              Tutorial modules + readiness checklist
   tesla.ts                Shared account model, personas, mock/live entry
   tesla-server.ts         Server-only: token exchange, identity/vehicle read, cookie seal

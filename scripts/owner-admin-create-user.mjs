@@ -67,6 +67,4 @@ console.log(`Created owner user: ${data.user?.email} (${data.user?.id})`);
 if (generatedPassword) {
   console.log(`Generated password (shown once, save it now): ${password}`);
 }
-console.log(
-  "Reminder: this account also needs to be in OWNER_ALLOWED_EMAILS (defaults to alex@sophosic.ai only) to reach /owner.",
-);
+console.log("Reminder: this account needs membership in a Sophosic workspace to save tenant settings.");

@@ -19,7 +19,7 @@ import {
   type VehicleState,
 } from "@/lib/owner/vehicle-state";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
-import { hostConfig } from "@/lib/config";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import {
   formatMiles,
   formatPct,
@@ -35,6 +35,7 @@ import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { VehicleInput } from "@/lib/owner/types";
 
 export default function VehicleDetailPage() {
+  const { config } = useTenantConfig();
   const params = useParams<{ id: string }>();
   const id = params.id;
   const { vehicles, hydrated: vehicleHydrated, updateVehicle, archiveVehicle, unarchiveVehicle } =
@@ -50,8 +51,8 @@ export default function VehicleDetailPage() {
   const hasMountedArchiveRef = useRef(false);
 
   const policyPct = useMemo(
-    () => parseReturnPolicyPct(hostConfig.rental.returnChargeLevel),
-    [],
+    () => parseReturnPolicyPct(config.rental.returnChargeLevel),
+    [config.rental.returnChargeLevel],
   );
   const ready = vehicleHydrated && dataHydrated;
   const vehicle = vehicles.find((v) => v.id === id) ?? null;

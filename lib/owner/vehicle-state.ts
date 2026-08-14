@@ -14,6 +14,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
 import type { Vehicle, VehicleInput } from "./types";
 
 export const VEHICLE_KEY = "rtr:vehicles:v1";
@@ -63,15 +65,16 @@ export function removeLegacyMockVehicles(state: VehicleState): VehicleState {
   return { ...state, vehicles };
 }
 
-export function loadVehicleState(): VehicleState {
+export function loadVehicleState(tenantSlug?: string | null): VehicleState {
   if (typeof window === "undefined") return initialVehicleState;
   try {
-    const raw = window.localStorage.getItem(VEHICLE_KEY);
+    const key = migrateLegacyStorage(VEHICLE_KEY, tenantSlug);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return initialVehicleState;
     const parsed = { ...initialVehicleState, ...JSON.parse(raw) } as VehicleState;
     const migrated = removeLegacyMockVehicles(parsed);
     if (migrated !== parsed) {
-      window.localStorage.setItem(VEHICLE_KEY, JSON.stringify(migrated));
+      window.localStorage.setItem(key, JSON.stringify(migrated));
     }
     return migrated;
   } catch {
@@ -79,10 +82,10 @@ export function loadVehicleState(): VehicleState {
   }
 }
 
-export function saveVehicleState(state: VehicleState): void {
+export function saveVehicleState(state: VehicleState, tenantSlug?: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(VEHICLE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(scopedStorageKey(VEHICLE_KEY, tenantSlug), JSON.stringify(state));
     notifyVehicleStateChange();
   } catch {
     /* storage unavailable (private mode / full disk) — degrade gracefully */
@@ -135,33 +138,36 @@ export function canArchiveVehicle(state: VehicleState, id: string): boolean {
 }
 
 export function useVehicleState() {
+  const { tenantSlug } = useTenantConfig();
   const [state, setState] = useState<VehicleState>(initialVehicleState);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedScope, setHydratedScope] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
-    setState(loadVehicleState());
-    setHydrated(true);
+    setState(loadVehicleState(tenantSlug));
+    setHydratedScope(tenantSlug);
     // Re-read whenever any useVehicleState() instance (this one included)
     // saves — keeps every mounted instance in sync within the same tab.
-    const onChange = () => setState(loadVehicleState());
+    const onChange = () => setState(loadVehicleState(tenantSlug));
     listeners.add(onChange);
     return () => {
       listeners.delete(onChange);
     };
-  }, []);
+  }, [tenantSlug]);
+
+  const hydrated = hydratedScope !== undefined && hydratedScope === tenantSlug;
 
   const addVehicle = useCallback((input: VehicleInput): string => {
     // Read fresh from storage rather than the closed-over `state` so two
     // rapid calls (or a call right after mount) never race on a stale id.
-    const fresh = loadVehicleState();
+    const fresh = loadVehicleState(tenantSlug);
     const id = nextVehicleId(fresh);
     const now = Date.now();
     const vehicle: Vehicle = { ...input, id, status: "active", createdAt: now, updatedAt: now };
     const next: VehicleState = { ...fresh, vehicles: { ...fresh.vehicles, [id]: vehicle } };
-    saveVehicleState(next);
+    saveVehicleState(next, tenantSlug);
     setState(next);
     return id;
-  }, []);
+  }, [tenantSlug]);
 
   const updateVehicle = useCallback((id: string, input: VehicleInput): void => {
     setState((prev) => {
@@ -174,10 +180,10 @@ export function useVehicleState() {
           [id]: { ...existing, ...input, updatedAt: Date.now() },
         },
       };
-      saveVehicleState(next);
+      saveVehicleState(next, tenantSlug);
       return next;
     });
-  }, []);
+  }, [tenantSlug]);
 
   const archiveVehicle = useCallback((id: string): void => {
     setState((prev) => {
@@ -190,10 +196,10 @@ export function useVehicleState() {
           [id]: { ...existing, status: "archived", updatedAt: Date.now() },
         },
       };
-      saveVehicleState(next);
+      saveVehicleState(next, tenantSlug);
       return next;
     });
-  }, []);
+  }, [tenantSlug]);
 
   const unarchiveVehicle = useCallback((id: string): void => {
     setState((prev) => {
@@ -206,10 +212,10 @@ export function useVehicleState() {
           [id]: { ...existing, status: "active", updatedAt: Date.now() },
         },
       };
-      saveVehicleState(next);
+      saveVehicleState(next, tenantSlug);
       return next;
     });
-  }, []);
+  }, [tenantSlug]);
 
   const vehicles = Object.values(state.vehicles).sort((a, b) => a.id.localeCompare(b.id));
 

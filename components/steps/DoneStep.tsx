@@ -1,19 +1,19 @@
 "use client";
 
-import { hostConfig } from "@/lib/config";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { Button, Card, StepFrame, cn } from "../ui";
 import { IconCheck, IconDownload, IconExternal, IconSparkle } from "../icons";
 import type { StepProps } from "../step-types";
 
-function buildReference(): string {
+function buildReference(config: ReturnType<typeof useTenantConfig>["config"]): string {
   const { companyName, car, rental, hostName, hostPhone, roadsidePhone, supportEmail, houseRules } =
-    hostConfig;
+    config;
   return [
     "Quick Reference",
     companyName,
     "",
     "VEHICLE",
-    `${car.year} ${car.model} ${car.trim} · ${car.color}`,
+    `${car.year} ${car.model} ${car.trim} · ${car.color}${car.interior ? ` · ${car.interior}` : ""}`,
     "",
     "KEY",
     rental.keyAccess,
@@ -32,8 +32,8 @@ function buildReference(): string {
   ].join("\n");
 }
 
-function downloadReference() {
-  const blob = new Blob([buildReference()], { type: "text/plain;charset=utf-8" });
+function downloadReference(config: ReturnType<typeof useTenantConfig>["config"]) {
+  const blob = new Blob([buildReference(config)], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -48,7 +48,8 @@ const linkBtn =
   "inline-flex w-full items-center justify-center gap-2 rounded-full border border-line bg-white px-6 py-3.5 text-[15px] font-medium text-ink transition-colors hover:bg-surface";
 
 export function DoneStep({ state, nav }: StepProps) {
-  const { car, rental, hostName, hostPhone, roadsidePhone } = hostConfig;
+  const { config } = useTenantConfig();
+  const { car, rental, hostName, hostPhone, roadsidePhone } = config;
   const rawName = state.profile?.firstName;
   const name = rawName && rawName !== "there" ? rawName : null;
 
@@ -63,7 +64,7 @@ export function DoneStep({ state, nav }: StepProps) {
     <StepFrame
       footer={
         <div className="space-y-2.5">
-          <Button variant="brand" fullWidth onClick={downloadReference}>
+          <Button variant="brand" fullWidth onClick={() => downloadReference(config)}>
             <IconDownload className="h-4 w-4" /> Save quick reference
           </Button>
           <a href="https://www.tesla.com/app" target="_blank" rel="noopener noreferrer" className={linkBtn}>

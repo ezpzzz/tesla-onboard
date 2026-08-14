@@ -8,16 +8,17 @@
 
 import { useRouter } from "next/navigation";
 import { useVehicleState } from "@/lib/owner/vehicle-state";
-import { hostConfig } from "@/lib/config";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { parseReturnPolicyPct } from "@/lib/owner/derive";
 import { VehicleForm } from "@/components/owner/vehicle-form";
 import { Card } from "@/components/ui";
 import type { VehicleInput } from "@/lib/owner/types";
 
 export default function NewVehiclePage() {
+  const { config } = useTenantConfig();
   const router = useRouter();
   const { addVehicle, hydrated } = useVehicleState();
-  const policyPct = parseReturnPolicyPct(hostConfig.rental.returnChargeLevel);
+  const policyPct = parseReturnPolicyPct(config.rental.returnChargeLevel);
 
   if (!hydrated) {
     return <Card className="p-6 text-center text-sm text-muted">Loading…</Card>;
@@ -33,8 +34,8 @@ export default function NewVehiclePage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-ink">Add vehicle</h1>
         <p className="mt-1 text-sm text-muted">
-          Add another car to your fleet. This doesn&apos;t change what guests see in the
-          walkthrough — that still comes from the host config.
+          Add another car to your fleet. To publish it in the guest walkthrough,
+          choose it from Rental settings and save.
         </p>
       </div>
       <Card className="p-4">

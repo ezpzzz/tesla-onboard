@@ -5,7 +5,6 @@
  * testable and safe to call during render.
  */
 
-import { hostConfig } from "@/lib/config";
 import type {
   ChargingSession,
   Driver,
@@ -55,7 +54,7 @@ export function tripEnergy(sessions: ChargingSession[]): {
   return { kWh, costUsd, superchargerCostUsd };
 }
 
-/** First integer found in hostConfig.rental.returnChargeLevel; fallback 80. */
+/** First integer found in the tenant return-charge policy; fallback 80. */
 export function parseReturnPolicyPct(text: string): number {
   const match = text.match(/\d+/);
   return match ? parseInt(match[0], 10) : 80;
@@ -165,7 +164,3 @@ export function formatUsd(n: number): string {
 export function formatPct(n: number): string {
   return `${Math.round(n)}%`;
 }
-
-// Re-exported for callers that want the fleet's configured return policy
-// without re-deriving it (e.g. `parseReturnPolicyPct(hostConfig.rental.returnChargeLevel)`).
-export const RETURN_POLICY_TEXT = hostConfig.rental.returnChargeLevel;

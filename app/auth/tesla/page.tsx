@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { hostConfig } from "@/lib/config";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { loadState, saveState } from "@/lib/store";
 import {
   TESLA_PERSONAS,
@@ -49,6 +49,7 @@ function safeReturnPath(raw: string | null): string | null {
 }
 
 export default function TeslaConsentPage() {
+  const { config } = useTenantConfig();
   const [personaKey, setPersonaKey] = useState(TESLA_PERSONAS[0].key);
   const [busy, setBusy] = useState(false);
   // Post-mount only: this screen is reused by the owner setup wizard, which
@@ -121,7 +122,7 @@ export default function TeslaConsentPage() {
             Sign in with Tesla
           </h1>
           <p className="mt-2 text-sm leading-relaxed text-muted">
-            <span className="font-medium text-ink">{hostConfig.companyName}</span>{" "}
+            <span className="font-medium text-ink">{config.companyName}</span>{" "}
             is requesting access to your Tesla Account.
           </p>
         </div>
@@ -140,7 +141,7 @@ export default function TeslaConsentPage() {
         </div>
 
         <p className="mt-3 px-1 text-xs leading-relaxed text-muted">
-          Read-only. {hostConfig.companyName} cannot drive, unlock, or locate any
+          Read-only. {config.companyName} cannot drive, unlock, or locate any
           vehicle.
         </p>
 

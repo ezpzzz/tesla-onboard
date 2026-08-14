@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { hostConfig } from "@/lib/config";
-import { buildFlow, indexOfStep, type Step } from "@/lib/flow";
+import { indexOfStep, type Step } from "@/lib/flow";
+import { buildTenantFlow } from "@/lib/tenant-flow";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useOnboarding } from "@/lib/store";
 import { usePublishProgress } from "@/lib/progress-bridge";
 import { useStepHistory } from "@/lib/history-nav";
@@ -17,11 +18,12 @@ import { DoneStep } from "./steps/DoneStep";
 import type { StepNav, StepProps } from "./step-types";
 
 export default function OnboardingApp() {
+  const { config, loading: configLoading } = useTenantConfig();
   const { state, hydrated, update, reset } = useOnboarding();
   usePublishProgress(state, hydrated);
   const flow = useMemo(
-    () => buildFlow(state.pathMode, { newToTesla: state.newToTesla }),
-    [state.pathMode, state.newToTesla],
+    () => buildTenantFlow(state.pathMode, config, { newToTesla: state.newToTesla }),
+    [state.pathMode, state.newToTesla, config],
   );
   const idx = indexOfStep(flow, state.stepId);
   const step = flow[idx];
@@ -35,11 +37,11 @@ export default function OnboardingApp() {
     setStep,
   });
 
-  if (!hydrated) return <Splash />;
+  if (!hydrated || configLoading) return <Splash />;
 
   const stepBack = () =>
     update((s) => {
-      const f = buildFlow(s.pathMode, { newToTesla: s.newToTesla });
+      const f = buildTenantFlow(s.pathMode, config, { newToTesla: s.newToTesla });
       const i = indexOfStep(f, s.stepId);
       const prevStep = f[i - 1];
       return { stepId: prevStep ? prevStep.id : s.stepId };
@@ -48,7 +50,7 @@ export default function OnboardingApp() {
   const nav: StepNav = {
     next: () =>
       update((s) => {
-        const f = buildFlow(s.pathMode, { newToTesla: s.newToTesla });
+        const f = buildTenantFlow(s.pathMode, config, { newToTesla: s.newToTesla });
         const i = indexOfStep(f, s.stepId);
         const cur = f[i];
         const completed =
@@ -113,10 +115,11 @@ function renderStep(step: Step, props: StepProps) {
 }
 
 function Splash() {
+  const { config, loading } = useTenantConfig();
   return (
     <div className="flex min-h-dvh items-center justify-center bg-surface">
       <span className="text-lg font-semibold tracking-tight text-ink opacity-90">
-        {hostConfig.companyName}
+        {loading ? "Onboarding" : config.companyName}
       </span>
     </div>
   );
