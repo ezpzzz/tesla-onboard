@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
 import {
@@ -11,6 +11,7 @@ import {
 import { useVehicleState } from "@/lib/owner/vehicle-state";
 import {
   customTenantCar,
+  tenantCarForSettingsDraft,
   tenantCarFromVehicle,
   tenantCarMatchesVehicle,
 } from "@/lib/tenant-vehicle";
@@ -72,18 +73,45 @@ export function TenantSettingsForm({
   const [rules, setRules] = useState(config.houseRules.join("\n"));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const initializedConfig = useRef<{
+    config: TenantConfig;
+    workspaceKey: string | null;
+  } | null>(null);
+  const carEditedSinceConfig = useRef(false);
 
   useEffect(() => {
     setDraft(config);
     setRules(config.houseRules.join("\n"));
     setMessage(null);
+    initializedConfig.current = null;
+    carEditedSinceConfig.current = false;
   }, [config, workspace?.key]);
+
+  useEffect(() => {
+    if (!vehiclesHydrated) return;
+    const workspaceKey = workspace?.key ?? null;
+    if (
+      initializedConfig.current?.config === config
+      && initializedConfig.current.workspaceKey === workspaceKey
+    ) {
+      return;
+    }
+
+    setDraft((current) => carEditedSinceConfig.current
+      ? current
+      : {
+          ...current,
+          car: tenantCarForSettingsDraft(config.car, vehicles),
+        });
+    initializedConfig.current = { config, workspaceKey };
+  }, [config, vehicles, vehiclesHydrated, workspace?.key]);
 
   function patchRoot(patch: Partial<TenantConfig>) {
     setDraft((current) => ({ ...current, ...patch }));
   }
 
   function useFleetVehicle(vehicleId: string) {
+    carEditedSinceConfig.current = true;
     if (!vehicleId) {
       setDraft((current) => ({
         ...current,
@@ -97,6 +125,7 @@ export function TenantSettingsForm({
   }
 
   function patchCar(patch: Partial<TenantConfig["car"]>) {
+    carEditedSinceConfig.current = true;
     setDraft((current) => ({
       ...current,
       car: customTenantCar(current.car, patch),
@@ -152,6 +181,7 @@ export function TenantSettingsForm({
     return <Card className="p-4 text-sm leading-relaxed text-muted">{error ?? "No workspace available."}</Card>;
   }
 
+  const activeVehicles = vehicles.filter((vehicle) => vehicle.status === "active");
   const linkedVehicle = draft.car.sourceVehicleId
     ? vehicles.find((vehicle) => vehicle.guestSourceId === draft.car.sourceVehicleId)
     : null;
@@ -211,7 +241,7 @@ export function TenantSettingsForm({
             No guest vehicle is configured.
           </div>
         )}
-        {vehiclesHydrated && vehicles.some((vehicle) => vehicle.status === "active") ? (
+        {vehiclesHydrated && activeVehicles.length > 0 ? (
           <label className="block text-sm font-medium text-ink">
             Use a fleet vehicle
             <select
@@ -223,7 +253,7 @@ export function TenantSettingsForm({
               {draft.car.sourceVehicleId && !linkedVehicleActive ? (
                 <option value="unavailable">Linked vehicle unavailable</option>
               ) : null}
-              {vehicles.filter((vehicle) => vehicle.status === "active").map((vehicle) => (
+              {activeVehicles.map((vehicle) => (
                 <option key={vehicle.id} value={vehicle.id}>
                   {vehicle.displayName} — {vehicle.year} {vehicle.model} {vehicle.trim}
                 </option>
@@ -238,7 +268,9 @@ export function TenantSettingsForm({
               : linkedVehicleCurrent
                 ? `Linked to ${linkedVehicle?.displayName ?? "the selected vehicle"}. Guest and owner surfaces use the same exact-spec snapshot.`
                 : `Linked to ${linkedVehicle?.displayName ?? "the selected vehicle"}. Its fleet details changed; saving will publish the latest exact-spec snapshot.`
-            : "Guest onboarding is paused. Link an active workspace fleet vehicle before publishing so owner and guest details cannot drift."}
+            : activeVehicles.length > 1
+              ? "Choose which imported fleet vehicle guests will use. Multiple active vehicles are never selected automatically."
+              : "Guest onboarding is paused. Link an active workspace fleet vehicle before publishing so owner and guest details cannot drift."}
         </div>
         <Field label="Model" value={draft.car.model} onChange={(model) => patchCar({ model })} />
         <Field label="Trim" value={draft.car.trim} onChange={(trim) => patchCar({ trim })} />

@@ -31,6 +31,44 @@ export function tenantCarMatchesVehicle(
     .every((key) => Object.is(car[key], current[key]));
 }
 
+function hasGuestVehicleDetails(car: TenantCarConfig): boolean {
+  return Boolean(
+    car.model.trim()
+    || car.trim.trim()
+    || car.year
+    || car.color.trim()
+    || car.wheelType?.trim()
+    || car.interior?.trim()
+    || car.teslaInteriorCode?.trim()
+    || car.teslaPaintCode?.trim(),
+  );
+}
+
+/**
+ * Resolve the guest-vehicle snapshot shown when the settings form first
+ * opens. A linked active fleet record is authoritative and should display
+ * its latest imported Tesla spec. A completely empty first-run draft can
+ * safely select the sole active fleet vehicle. Multiple active vehicles are
+ * intentionally left unselected because guessing would publish the wrong car
+ * to a renter. Existing custom drafts are never overwritten.
+ */
+export function tenantCarForSettingsDraft(
+  car: TenantCarConfig,
+  vehicles: Vehicle[],
+): TenantCarConfig {
+  if (car.sourceVehicleId) {
+    const linked = vehicles.find((vehicle) =>
+      vehicle.guestSourceId === car.sourceVehicleId && vehicle.status === "active"
+    );
+    return linked ? tenantCarFromVehicle(linked) : car;
+  }
+
+  if (hasGuestVehicleDetails(car)) return car;
+
+  const active = vehicles.filter((vehicle) => vehicle.status === "active");
+  return active.length === 1 ? tenantCarFromVehicle(active[0]) : car;
+}
+
 /** Manual edits are explicit custom configuration, not a claim that the
  * snapshot still represents the previously selected fleet record. */
 export function customTenantCar(

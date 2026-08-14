@@ -16,6 +16,7 @@ import {
 } from "../lib/tenant-config.ts";
 import {
   customTenantCar,
+  tenantCarForSettingsDraft,
   tenantCarFromVehicle,
   tenantCarMatchesVehicle,
 } from "../lib/tenant-vehicle.ts";
@@ -52,6 +53,37 @@ assert.equal("licensePlate" in snapshot, false);
 assert.equal("notes" in snapshot, false);
 assert.equal(tenantCarMatchesVehicle(snapshot, vehicle), true);
 assert.equal(tenantCarMatchesVehicle(snapshot, { ...vehicle, wheelType: '18" Photon Wheels' }), false);
+
+const emptyCar = DEFAULT_TENANT_CONFIG.car;
+assert.deepEqual(
+  tenantCarForSettingsDraft(emptyCar, [vehicle]),
+  snapshot,
+  "the sole active imported vehicle should fill the first-run settings draft",
+);
+assert.equal(
+  tenantCarForSettingsDraft(emptyCar, [vehicle, { ...vehicle, id: "veh-08", guestSourceId: "other" }]),
+  emptyCar,
+  "multiple active fleet vehicles must require an explicit owner choice",
+);
+assert.equal(
+  tenantCarForSettingsDraft(emptyCar, [{ ...vehicle, status: "archived" }]),
+  emptyCar,
+  "archived vehicles must not fill the guest settings draft",
+);
+
+const staleLinked = { ...snapshot, color: "Old Fleet Paint", sourceVehicleUpdatedAt: 100 };
+assert.deepEqual(
+  tenantCarForSettingsDraft(staleLinked, [vehicle]),
+  snapshot,
+  "a linked draft should display the latest authoritative imported spec",
+);
+
+const customDraft = customTenantCar(snapshot, { color: "Owner Custom Paint" });
+assert.equal(
+  tenantCarForSettingsDraft(customDraft, [vehicle]),
+  customDraft,
+  "an owner-authored custom draft must not be overwritten by import",
+);
 
 const custom = customTenantCar(snapshot, { color: "Ultra Red" });
 assert.equal(custom.color, "Ultra Red");
