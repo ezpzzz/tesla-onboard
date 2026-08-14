@@ -1,5 +1,34 @@
 begin;
-select plan(10);
+select plan(17);
+
+select ok(
+  not has_function_privilege('anon', 'public.create_onlyevs_manual_trip(uuid,text,uuid,text,text,text,timestamptz,timestamptz,text,timestamptz)', 'execute'),
+  'anonymous callers cannot create owner trips'
+);
+select ok(
+  not has_function_privilege('anon', 'public.update_onlyevs_guest_onboarding_progress(text,jsonb)', 'execute'),
+  'anonymous callers cannot write guest progress'
+);
+select ok(
+  not has_function_privilege('anon', 'public.get_onlyevs_workspace_trip_snapshot(uuid,text)', 'execute'),
+  'anonymous callers cannot read manager trip snapshots'
+);
+select ok(
+  not has_function_privilege('anon', 'public.rotate_onlyevs_trip_public_token(uuid,text,timestamptz)', 'execute'),
+  'anonymous callers cannot rotate private links'
+);
+select ok(
+  not has_function_privilege('anon', 'public.bind_onlyevs_trip_guest(text)', 'execute'),
+  'anonymous callers cannot bind a guest identity'
+);
+select ok(
+  has_function_privilege('anon', 'public.get_onlyevs_trip_invitation(text)', 'execute'),
+  'anonymous guests can resolve a high-entropy invitation'
+);
+select ok(
+  has_function_privilege('anon', 'public.onlyevs_trip_email_matches(text,text)', 'execute'),
+  'anonymous guests can submit the booking email proof'
+);
 
 insert into auth.users (id)
 values

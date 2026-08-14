@@ -441,13 +441,19 @@ $$;
 
 revoke all on function public.create_onlyevs_manual_trip(
   uuid, text, uuid, text, text, text, timestamptz, timestamptz, text, timestamptz
-) from public;
-revoke all on function public.update_onlyevs_guest_onboarding_progress(text, jsonb) from public;
-revoke all on function public.get_onlyevs_workspace_trip_snapshot(uuid, text) from public;
-revoke all on function public.rotate_onlyevs_trip_public_token(uuid, text, timestamptz) from public;
-revoke all on function public.get_onlyevs_trip_invitation(text) from public;
-revoke all on function public.onlyevs_trip_email_matches(text, text) from public;
-revoke all on function public.bind_onlyevs_trip_guest(text) from public;
+) from public, anon, authenticated;
+revoke all on function public.update_onlyevs_guest_onboarding_progress(text, jsonb)
+  from public, anon, authenticated;
+revoke all on function public.get_onlyevs_workspace_trip_snapshot(uuid, text)
+  from public, anon, authenticated;
+revoke all on function public.rotate_onlyevs_trip_public_token(uuid, text, timestamptz)
+  from public, anon, authenticated;
+revoke all on function public.get_onlyevs_trip_invitation(text)
+  from public, anon, authenticated;
+revoke all on function public.onlyevs_trip_email_matches(text, text)
+  from public, anon, authenticated;
+revoke all on function public.bind_onlyevs_trip_guest(text)
+  from public, anon, authenticated;
 
 grant execute on function public.create_onlyevs_manual_trip(
   uuid, text, uuid, text, text, text, timestamptz, timestamptz, text, timestamptz
