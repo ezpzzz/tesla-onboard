@@ -57,7 +57,7 @@ export function GuestTripGate({
             Verify your booking email.
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-muted">
-            {companyName} requires the exact email on the confirmed booking before this walkthrough can schedule Tesla app access.
+            {companyName} requires the exact email on the confirmed booking before this private walkthrough can begin.
           </p>
         </div>
         <Card className="divide-y divide-line">
@@ -79,7 +79,7 @@ export function GuestTripGate({
           </form>
         )}
         <p className="text-xs leading-relaxed text-muted">
-          The link proves booking identity. Tesla sign-in later proves the account that receives vehicle access; evhost.app never asks for a Tesla password.
+          The link proves booking identity. Tesla sign-in, when requested during onboarding, is separate; evhost.app never asks for a Tesla password.
         </p>
       </main>
     </div>

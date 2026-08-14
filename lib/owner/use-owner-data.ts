@@ -13,7 +13,10 @@ import { useVehicleState } from "./vehicle-state";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useGuestProgress } from "@/lib/progress-bridge";
 import type { Driver, OwnerSnapshot, Trip } from "./types";
-import { fetchWorkspaceOperationalSnapshot } from "./trip-repository";
+import {
+  fetchWorkspaceOperationalSnapshot,
+  OWNER_TRIPS_CHANGED_EVENT,
+} from "./trip-repository";
 import { vehicleWorkspaceScope } from "./vehicle-repository";
 import { fetchWorkspaceVehicleStats } from "./vehicle-stats-repository";
 import type { VehicleStatsCurrent } from "./access-types";
@@ -30,6 +33,7 @@ export function useOwnerData() {
   const [dataHydrated, setDataHydrated] = useState(false);
   const [operationalError, setOperationalError] = useState<string | null>(null);
   const [vehicleTelemetry, setVehicleTelemetry] = useState<Record<string, VehicleStatsCurrent>>({});
+  const [tripRefresh, setTripRefresh] = useState(0);
   const guestProgress = useGuestProgress();
   const {
     vehicles: vehicleStateVehicles,
@@ -38,15 +42,34 @@ export function useOwnerData() {
   } = useVehicleState();
 
   useEffect(() => {
+    const refresh = () => setTripRefresh((value) => value + 1);
+    window.addEventListener(OWNER_TRIPS_CHANGED_EVENT, refresh);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 30_000);
+    return () => {
+      window.removeEventListener(OWNER_TRIPS_CHANGED_EVENT, refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     setDataHydrated(false);
     setOperationalError(null);
     setSnapshot(INITIAL_SNAPSHOT);
     setVehicleTelemetry({});
     const scope = vehicleWorkspaceScope(tenantSlug);
-    const request = scope && ONLYEVS_OPERATIONS_ENABLED
-      ? Promise.all([fetchWorkspaceOperationalSnapshot(scope), fetchWorkspaceVehicleStats(scope)])
-          .then(([snap, telemetry]) => ({ snap, telemetry }))
+    const request = scope
+      ? Promise.all([
+          fetchWorkspaceOperationalSnapshot(scope),
+          ONLYEVS_OPERATIONS_ENABLED ? fetchWorkspaceVehicleStats(scope) : Promise.resolve({}),
+        ]).then(([snap, telemetry]) => ({ snap, telemetry }))
       : getOwnerDataSource().getSnapshot().then((snap) => ({ snap, telemetry: {} }));
     request
       .then(({ snap, telemetry }) => {
@@ -65,7 +88,7 @@ export function useOwnerData() {
     return () => {
       cancelled = true;
     };
-  }, [tenantSlug]);
+  }, [tenantSlug, tripRefresh]);
 
   const policyPct = useMemo(
     () => parseReturnPolicyPct(config.rental.returnChargeLevel),
@@ -75,7 +98,7 @@ export function useOwnerData() {
   const merged = useMemo<OwnerSnapshot>(() => {
     let next = snapshot;
 
-    if (dataHydrated && guestProgress) {
+    if (dataHydrated && guestProgress && !vehicleWorkspaceScope(tenantSlug)) {
       const guestDriver: Driver = {
         id: "guest-local",
         name: guestProgress.guestName ?? "Guest (this browser)",
@@ -106,7 +129,7 @@ export function useOwnerData() {
     }
 
     return next;
-  }, [snapshot, dataHydrated, guestProgress, vehicleHydrated, vehicleStateVehicles]);
+  }, [snapshot, dataHydrated, guestProgress, tenantSlug, vehicleHydrated, vehicleStateVehicles]);
 
   const stats = useMemo(() => fleetStats(merged, policyPct), [merged, policyPct]);
 

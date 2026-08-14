@@ -52,10 +52,12 @@ Welcome → Connect with Tesla → Your plan → [tutorial modules] → Readines
 - **All set** — a personalized finish with a downloadable quick-reference card,
   one-tap host call, and roadside info.
 
-Progress is saved to `localStorage`, so a guest can close the tab at the
-Supercharger and pick up exactly where they left off. Browser state is scoped
-by workspace slug, so switching rental companies never reuses another tenant's
-walkthrough, setup, vehicle, or trip-progress records.
+Progress is saved locally so a guest can close the tab at the Supercharger and
+pick up exactly where they left off. Guests who enter through an owner-generated
+private trip link also publish a bounded progress snapshot to the trip record,
+so the owner can follow onboarding from another device. Browser state is scoped
+by both workspace and private trip token, so tenants and separate bookings never
+reuse one another's walkthrough state.
 
 ### Owner dashboard
 
@@ -64,9 +66,12 @@ onboarding progress in one place, separate from the guest flow. It shows:
 
 - **Drivers & trips** — who's renting, which car, trip dates, and a per-trip
   return checklist (charged to policy, keys returned, cleaned, no damage).
-- **Live onboarding progress** — if a guest opened their onboarding link in the
-  same browser, the matching trip shows their real-time progress (path chosen,
-  modules completed, readiness score) as they move through the flow.
+- **New guest onboarding** — a prominent overview action creates a scheduled,
+  vehicle-linked trip and returns a one-time private guest URL. The database
+  stores only a SHA-256 token hash; regenerating a link invalidates the old one.
+- **Live onboarding progress** — after the guest proves the booking email and
+  opens the private link, the matching trip shows their path, completed modules,
+  readiness score, and last update across devices.
 - **Charging sessions**, driver history, and alerts, ready for a persistent
   bookings/charging adapter; until one is connected these surfaces render
   explicit empty states rather than sample activity.
@@ -121,9 +126,10 @@ vehicles appear after Tesla import or manual add. The temporary data-source
 seam in `lib/owner/data-source.ts` returns empty collections until a persistent
 bookings/charging backend replaces it.
 
-The browser-local guest-progress bridge remains available for real progress
-created in the same browser, but it never invents a booking or fixture trip.
-See [`lib/progress-bridge.ts`](lib/progress-bridge.ts) for that boundary.
+The browser-local bridge remains as a demo/fallback path, but durable workspaces
+use the owner-created trip, email-bound guest session, and server progress RPC.
+Neither path invents a booking or fixture trip. See
+[`lib/progress-bridge.ts`](lib/progress-bridge.ts) for that boundary.
 
 ### Owner login (Supabase Auth)
 
