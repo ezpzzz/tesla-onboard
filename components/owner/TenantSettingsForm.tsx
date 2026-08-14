@@ -34,7 +34,7 @@ function Field({
   publicationRequired?: boolean;
 }) {
   const className =
-    "mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15 sm:text-[15px]";
+    "mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
   return (
     <label className="block text-sm font-medium text-ink">
       <span className="flex items-center justify-between gap-3">
@@ -201,7 +201,7 @@ export function TenantSettingsForm({
           <select
             value={workspace.key}
             onChange={(event) => setWorkspace(event.target.value)}
-            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15 sm:text-[15px]"
+            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
           >
             {workspaces.map((item) => (
               <option key={item.key} value={item.key}>{item.name}</option>
@@ -257,7 +257,7 @@ export function TenantSettingsForm({
             <select
               value={linkedVehicle?.id ?? (draft.car.sourceVehicleId ? "unavailable" : "")}
               onChange={(event) => useFleetVehicle(event.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15 sm:text-[15px]"
+              className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
             >
               <option value="">Custom / unlinked guest vehicle</option>
               {draft.car.sourceVehicleId && !linkedVehicleActive ? (
@@ -300,7 +300,7 @@ export function TenantSettingsForm({
                 shifter: value === "stalk" || value === "console" ? value : "screen",
               });
             }}
-            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15 sm:text-[15px]"
+            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
           >
             <option value="screen">Touchscreen</option>
             <option value="stalk">Steering-column stalk</option>
