@@ -24,33 +24,36 @@ function Field({
   onChange,
   type = "text",
   multiline = false,
-  required = true,
+  publicationRequired = true,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: "text" | "email" | "tel" | "number";
   multiline?: boolean;
-  required?: boolean;
+  publicationRequired?: boolean;
 }) {
   const className =
-    "mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
+    "mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
   return (
     <label className="block text-sm font-medium text-ink">
-      {label}
+      <span className="flex items-center justify-between gap-3">
+        <span>{label}</span>
+        <span className={publicationRequired ? "shrink-0 text-xs font-semibold text-brand" : "shrink-0 text-xs font-normal text-muted"}>
+          {publicationRequired ? "Required" : "Optional"}
+        </span>
+      </span>
       {multiline ? (
         <textarea
           value={value}
           onChange={(event) => onChange(event.target.value)}
           rows={3}
-          required={required}
           className={`${className} resize-y leading-relaxed`}
         />
       ) : (
         <input
           type={type}
           value={value}
-          required={required}
           onChange={(event) => onChange(event.target.value)}
           className={className}
         />
@@ -198,7 +201,7 @@ export function TenantSettingsForm({
           <select
             value={workspace.key}
             onChange={(event) => setWorkspace(event.target.value)}
-            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
           >
             {workspaces.map((item) => (
               <option key={item.key} value={item.key}>{item.name}</option>
@@ -207,13 +210,17 @@ export function TenantSettingsForm({
         </label>
       ) : null}
 
+      <div className="rounded-xl border border-brand/20 bg-brand/[0.04] px-3.5 py-3 text-sm leading-relaxed text-ink-soft">
+        Fields marked <span className="font-semibold text-brand">Required</span> must be complete before guests can use the walkthrough. You can save a draft at any time; optional details can stay blank.
+      </div>
+
       <SettingsSection title="Brand & contact">
         <Field label="Company name" value={draft.companyName} onChange={(companyName) => patchRoot({ companyName })} />
-        <Field label="Tagline" value={draft.tagline} onChange={(tagline) => patchRoot({ tagline })} />
+        <Field publicationRequired={false} label="Tagline" value={draft.tagline} onChange={(tagline) => patchRoot({ tagline })} />
         <Field label="Host name" value={draft.hostName} onChange={(hostName) => patchRoot({ hostName })} />
         <Field label="Host phone" type="tel" value={draft.hostPhone} onChange={(hostPhone) => patchRoot({ hostPhone })} />
-        <Field label="Support email" type="email" value={draft.supportEmail} onChange={(supportEmail) => patchRoot({ supportEmail })} />
-        <Field label="Roadside phone" type="tel" value={draft.roadsidePhone} onChange={(roadsidePhone) => patchRoot({ roadsidePhone })} />
+        <Field publicationRequired={false} label="Support email" type="email" value={draft.supportEmail} onChange={(supportEmail) => patchRoot({ supportEmail })} />
+        <Field publicationRequired={false} label="Roadside phone" type="tel" value={draft.roadsidePhone} onChange={(roadsidePhone) => patchRoot({ roadsidePhone })} />
       </SettingsSection>
 
       <SettingsSection title="Guest vehicle">
@@ -243,11 +250,14 @@ export function TenantSettingsForm({
         )}
         {vehiclesHydrated && activeVehicles.length > 0 ? (
           <label className="block text-sm font-medium text-ink">
-            Use a fleet vehicle
+            <span className="flex items-center justify-between gap-3">
+              <span>Use a fleet vehicle</span>
+              <span className="shrink-0 text-xs font-semibold text-brand">Required</span>
+            </span>
             <select
               value={linkedVehicle?.id ?? (draft.car.sourceVehicleId ? "unavailable" : "")}
               onChange={(event) => useFleetVehicle(event.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+              className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
             >
               <option value="">Custom / unlinked guest vehicle</option>
               {draft.car.sourceVehicleId && !linkedVehicleActive ? (
@@ -276,10 +286,10 @@ export function TenantSettingsForm({
         <Field label="Trim" value={draft.car.trim} onChange={(trim) => patchCar({ trim })} />
         <Field label="Year" type="number" value={draft.car.year ? String(draft.car.year) : ""} onChange={(value) => patchCar({ year: Number(value) })} />
         <Field label="Exterior color" value={draft.car.color} onChange={(color) => patchCar({ color })} />
-        <Field required={false} label="Interior" value={draft.car.interior ?? ""} onChange={(interior) => patchCar({ interior: interior || null })} />
-        <Field required={false} label="Wheel package or Tesla code" value={draft.car.wheelType ?? ""} onChange={(wheelType) => patchCar({ wheelType: wheelType || null })} />
-        <Field required={false} label="Tesla paint option code" value={draft.car.teslaPaintCode ?? ""} onChange={(teslaPaintCode) => patchCar({ teslaPaintCode: teslaPaintCode || null })} />
-        <Field required={false} label="Tesla interior option code" value={draft.car.teslaInteriorCode ?? ""} onChange={(teslaInteriorCode) => patchCar({ teslaInteriorCode: teslaInteriorCode || null })} />
+        <Field publicationRequired={false} label="Interior" value={draft.car.interior ?? ""} onChange={(interior) => patchCar({ interior: interior || null })} />
+        <Field publicationRequired={false} label="Wheel package or Tesla code" value={draft.car.wheelType ?? ""} onChange={(wheelType) => patchCar({ wheelType: wheelType || null })} />
+        <Field publicationRequired={false} label="Tesla paint option code" value={draft.car.teslaPaintCode ?? ""} onChange={(teslaPaintCode) => patchCar({ teslaPaintCode: teslaPaintCode || null })} />
+        <Field publicationRequired={false} label="Tesla interior option code" value={draft.car.teslaInteriorCode ?? ""} onChange={(teslaInteriorCode) => patchCar({ teslaInteriorCode: teslaInteriorCode || null })} />
         <label className="block text-sm font-medium text-ink">
           Shifter
           <select
@@ -290,7 +300,7 @@ export function TenantSettingsForm({
                 shifter: value === "stalk" || value === "console" ? value : "screen",
               });
             }}
-            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
           >
             <option value="screen">Touchscreen</option>
             <option value="stalk">Steering-column stalk</option>
@@ -304,10 +314,10 @@ export function TenantSettingsForm({
         <Field multiline label="Charge access" value={draft.rental.chargeAccess} onChange={(chargeAccess) => patchRoot({ rental: { ...draft.rental, chargeAccess } })} />
         <Field multiline label="Charging policy" value={draft.rental.chargingPolicy} onChange={(chargingPolicy) => patchRoot({ rental: { ...draft.rental, chargingPolicy } })} />
         <Field label="Return charge level" value={draft.rental.returnChargeLevel} onChange={(returnChargeLevel) => patchRoot({ rental: { ...draft.rental, returnChargeLevel } })} />
-        <Field multiline label="Skip-charge option" value={draft.rental.skipChargeOption} onChange={(skipChargeOption) => patchRoot({ rental: { ...draft.rental, skipChargeOption } })} />
-        <Field multiline label="Pickup note" value={draft.rental.pickupNote} onChange={(pickupNote) => patchRoot({ rental: { ...draft.rental, pickupNote } })} />
-        <Field multiline label="Return note" value={draft.rental.returnNote} onChange={(returnNote) => patchRoot({ rental: { ...draft.rental, returnNote } })} />
-        <Field multiline label="Parking note" value={draft.rental.parkingNote} onChange={(parkingNote) => patchRoot({ rental: { ...draft.rental, parkingNote } })} />
+        <Field publicationRequired={false} multiline label="Skip-charge option" value={draft.rental.skipChargeOption} onChange={(skipChargeOption) => patchRoot({ rental: { ...draft.rental, skipChargeOption } })} />
+        <Field publicationRequired={false} multiline label="Pickup note" value={draft.rental.pickupNote} onChange={(pickupNote) => patchRoot({ rental: { ...draft.rental, pickupNote } })} />
+        <Field publicationRequired={false} multiline label="Return note" value={draft.rental.returnNote} onChange={(returnNote) => patchRoot({ rental: { ...draft.rental, returnNote } })} />
+        <Field publicationRequired={false} multiline label="Parking note" value={draft.rental.parkingNote} onChange={(parkingNote) => patchRoot({ rental: { ...draft.rental, parkingNote } })} />
       </SettingsSection>
 
       <SettingsSection title="House rules">

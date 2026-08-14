@@ -73,7 +73,7 @@ export function WelcomeStep({ nav, update, state }: StepProps) {
         Welcome aboard. Let&apos;s get you driving.
       </h1>
       <p className="mt-3 text-[15px] leading-relaxed text-muted">
-        {tagline} This quick guide makes your Tesla rental feel second-nature —
+        {tagline ? `${tagline} ` : ""}This quick guide makes your Tesla rental feel second-nature —
         whether it&apos;s your hundredth EV or your very first.
       </p>
 

@@ -11,6 +11,8 @@ function replacePoint(module: Module, heading: string, detail: string): Module {
 
 export function modulesForTenant(config: TenantConfig): Module[] {
   const { car, rental } = config;
+  const returnChargeDetail = `Please bring the car back with ${rental.returnChargeLevel} charge so the next guest is ready to go.${rental.skipChargeOption ? ` ${rental.skipChargeOption}` : ""}`;
+  const shortReturnChargeDetail = `Bring it back with ${rental.returnChargeLevel} charge.${rental.skipChargeOption ? ` ${rental.skipChargeOption}` : ""}`;
   const shifterHowTo = car.shifter === "screen"
     ? "This Tesla has no gear stalk — swipe up on the left edge of the screen for Drive, down for Reverse. Press the brake first."
     : car.shifter === "console"
@@ -40,7 +42,7 @@ export function modulesForTenant(config: TenantConfig): Module[] {
             { heading: "Who pays for charging", detail: rental.chargingPolicy },
             {
               heading: "Return charge level",
-              detail: `Please bring the car back with ${rental.returnChargeLevel} charge so the next guest is ready to go. ${rental.skipChargeOption}`,
+              detail: returnChargeDetail,
             },
           ],
           rentalNote: rental.chargeAccess,
@@ -54,12 +56,12 @@ export function modulesForTenant(config: TenantConfig): Module[] {
         return {
           ...module,
           points: [
-            { heading: "Charge", detail: `Bring it back with ${rental.returnChargeLevel} charge. ${rental.skipChargeOption}` },
-            { heading: "Park", detail: rental.parkingNote },
+            { heading: "Charge", detail: shortReturnChargeDetail },
+            ...(rental.parkingNote ? [{ heading: "Park", detail: rental.parkingNote }] : []),
             { heading: "Belongings", detail: "Grab everything — check the frunk, trunk, and door pockets." },
-            { heading: "Lock up", detail: rental.returnNote },
+            ...(rental.returnNote ? [{ heading: "Lock up", detail: rental.returnNote }] : []),
           ],
-          rentalNote: rental.returnNote,
+          rentalNote: rental.returnNote || undefined,
         };
       case "help":
         return {
@@ -69,7 +71,12 @@ export function modulesForTenant(config: TenantConfig): Module[] {
               return { ...point, detail: `${config.hostName}: ${config.hostPhone}. Message your host first for anything non-urgent.` };
             }
             if (point.heading === "Roadside assistance") {
-              return { ...point, detail: `Roadside assistance is available at **${config.roadsidePhone}** — save it now. They can help with flat tires, lockouts, tows, or if you ever run out of charge.` };
+              return {
+                ...point,
+                detail: config.roadsidePhone
+                  ? `Roadside assistance is available at **${config.roadsidePhone}** — save it now. They can help with flat tires, lockouts, tows, or if you ever run out of charge.`
+                  : "Open your Turo trip details to contact 24/7 roadside assistance for flat tires, lockouts, towing, or an empty battery.",
+              };
             }
             return point;
           }),

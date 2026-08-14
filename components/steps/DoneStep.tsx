@@ -8,6 +8,10 @@ import type { StepProps } from "../step-types";
 function buildReference(config: ReturnType<typeof useTenantConfig>["config"]): string {
   const { companyName, car, rental, hostName, hostPhone, roadsidePhone, supportEmail, houseRules } =
     config;
+  const optionalContacts = [
+    roadsidePhone ? `Roadside (Turo, 24/7): ${roadsidePhone}` : null,
+    supportEmail ? `Support: ${supportEmail}` : null,
+  ].filter((line): line is string => Boolean(line));
   return [
     "Quick Reference",
     companyName,
@@ -20,15 +24,14 @@ function buildReference(config: ReturnType<typeof useTenantConfig>["config"]): s
     "",
     "CHARGING",
     rental.chargeAccess,
-    `Return with ${rental.returnChargeLevel} charge. ${rental.skipChargeOption}`,
+    `Return with ${rental.returnChargeLevel} charge.${rental.skipChargeOption ? ` ${rental.skipChargeOption}` : ""}`,
     "",
     "HOUSE RULES",
     ...houseRules.map((r) => `• ${r}`),
     "",
     "CONTACTS",
     `Host: ${hostName} — ${hostPhone}`,
-    `Roadside (Turo, 24/7): ${roadsidePhone}`,
-    `Support: ${supportEmail}`,
+    ...optionalContacts,
   ].join("\n");
 }
 
@@ -57,7 +60,7 @@ export function DoneStep({ state, nav }: StepProps) {
     { label: "Vehicle", value: `${car.year} ${car.model} ${car.trim}` },
     { label: "Return charge", value: `${rental.returnChargeLevel}` },
     { label: "Host", value: `${hostName} · ${hostPhone}` },
-    { label: "Roadside (Turo)", value: roadsidePhone },
+    ...(roadsidePhone ? [{ label: "Roadside (Turo)", value: roadsidePhone }] : []),
   ];
 
   return (
