@@ -4,6 +4,7 @@ import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { Button, Card, StepFrame, cn } from "../ui";
 import { IconCheck, IconDownload, IconExternal, IconSparkle } from "../icons";
 import type { StepProps } from "../step-types";
+import { TripAccessCompletion } from "@/components/guest/TripAccessCompletion";
 
 function buildReference(config: ReturnType<typeof useTenantConfig>["config"]): string {
   const { companyName, car, rental, hostName, hostPhone, roadsidePhone, supportEmail, houseRules } =
@@ -108,6 +109,8 @@ export function DoneStep({ state, nav }: StepProps) {
           </div>
         ))}
       </Card>
+
+      <TripAccessCompletion />
 
       <a
         href={`tel:${hostPhone.replace(/[^+\d]/g, "")}`}

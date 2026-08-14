@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Playwright serves the local app on 127.0.0.1. Next 16 blocks cross-origin
+  // development chunks unless the test host is explicitly trusted.
+  allowedDevOrigins: ["127.0.0.1"],
   // Retired single-tenant public variables must never be inlined into client
   // chunks through the untouched legacy config/content modules. Runtime tenant
   // settings now come from workspace_branding.features.onlyevs.

@@ -13,6 +13,11 @@ import { useVehicleState } from "./vehicle-state";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useGuestProgress } from "@/lib/progress-bridge";
 import type { Driver, OwnerSnapshot, Trip } from "./types";
+import { fetchWorkspaceOperationalSnapshot } from "./trip-repository";
+import { vehicleWorkspaceScope } from "./vehicle-repository";
+import { fetchWorkspaceVehicleStats } from "./vehicle-stats-repository";
+import type { VehicleStatsCurrent } from "./access-types";
+import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 
 // Synchronous and deterministic so SSR and the first client paint match.
 // getSnapshot() still runs after mount so a future live adapter remains a
@@ -20,9 +25,11 @@ import type { Driver, OwnerSnapshot, Trip } from "./types";
 const INITIAL_SNAPSHOT: OwnerSnapshot = EMPTY_OWNER_SNAPSHOT;
 
 export function useOwnerData() {
-  const { config } = useTenantConfig();
+  const { config, tenantSlug } = useTenantConfig();
   const [snapshot, setSnapshot] = useState<OwnerSnapshot>(INITIAL_SNAPSHOT);
   const [dataHydrated, setDataHydrated] = useState(false);
+  const [operationalError, setOperationalError] = useState<string | null>(null);
+  const [vehicleTelemetry, setVehicleTelemetry] = useState<Record<string, VehicleStatsCurrent>>({});
   const guestProgress = useGuestProgress();
   const {
     vehicles: vehicleStateVehicles,
@@ -32,18 +39,33 @@ export function useOwnerData() {
 
   useEffect(() => {
     let cancelled = false;
-    getOwnerDataSource()
-      .getSnapshot()
-      .then((snap) => {
+    setDataHydrated(false);
+    setOperationalError(null);
+    setSnapshot(INITIAL_SNAPSHOT);
+    setVehicleTelemetry({});
+    const scope = vehicleWorkspaceScope(tenantSlug);
+    const request = scope && ONLYEVS_OPERATIONS_ENABLED
+      ? Promise.all([fetchWorkspaceOperationalSnapshot(scope), fetchWorkspaceVehicleStats(scope)])
+          .then(([snap, telemetry]) => ({ snap, telemetry }))
+      : getOwnerDataSource().getSnapshot().then((snap) => ({ snap, telemetry: {} }));
+    request
+      .then(({ snap, telemetry }) => {
         if (!cancelled) {
           setSnapshot(snap);
+          setVehicleTelemetry(telemetry);
+          setDataHydrated(true);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setOperationalError(error instanceof Error ? error.message : "Operational data is unavailable.");
           setDataHydrated(true);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tenantSlug]);
 
   const policyPct = useMemo(
     () => parseReturnPolicyPct(config.rental.returnChargeLevel),
@@ -99,5 +121,7 @@ export function useOwnerData() {
     policyPct,
     hydrated,
     vehicleError,
+    operationalError,
+    vehicleTelemetry,
   };
 }

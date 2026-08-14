@@ -6,8 +6,11 @@ import { Badge, Button, Card, StepFrame } from "@/components/ui";
 import { IconArrowRight, IconBolt, IconCheck } from "@/components/icons";
 import { indexOfSetupStep } from "@/lib/owner/setup-flow";
 import type { SetupStepProps } from "./types";
+import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
+import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 
 export function ConnectStep({ state, update, nav }: SetupStepProps) {
+  const { workspace } = useOwnerTenant();
   const { authError, linking, useDifferentAccount } = useOwnerTeslaConnect(
     state.teslaProfile,
     update,
@@ -93,8 +96,13 @@ export function ConnectStep({ state, update, nav }: SetupStepProps) {
           <Button
             fullWidth
             onClick={() => {
-              window.location.href = connectHref();
+              if (!workspace) return;
+              window.location.href = connectHref({
+                workspaceId: workspace.id,
+                shopSlug: workspace.shopSlug,
+              });
             }}
+            disabled={!workspace}
           >
             <IconBolt className="h-4 w-4" /> Connect with Tesla
           </Button>
@@ -117,8 +125,9 @@ export function ConnectStep({ state, update, nav }: SetupStepProps) {
         Connect your Tesla account.
       </h1>
       <p className="mt-3 text-[15px] leading-relaxed text-muted">
-        We&apos;ll read your name and which Teslas are on your account, so importing your
-        fleet is one tap instead of typing everything by hand.
+        {ONLYEVS_OPERATIONS_ENABLED
+          ? "We'll import your fleet, keep last-known operating stats current, and issue time-limited Tesla driver access for confirmed trips."
+          : "We'll read your Tesla account and import the vehicles you choose into this workspace."}
       </p>
 
       <Card className="mt-6 p-4">
@@ -129,8 +138,9 @@ export function ConnectStep({ state, update, nav }: SetupStepProps) {
           <div>
             <div className="text-sm font-medium">Why connect?</div>
             <p className="mt-0.5 text-sm leading-relaxed text-muted">
-              We only read identity and your vehicle list — never vehicle control. Takes a
-              few seconds.
+              {ONLYEVS_OPERATIONS_ENABLED
+                ? "Tesla will ask for vehicle data, location, and command access. evhost.app uses commands solely to create and revoke trip-bound driver access; it never sends driving controls on a guest's behalf."
+                : "Tesla will ask for vehicle data access so evhost.app can identify and import the vehicles on your account. No vehicle commands are requested."}
             </p>
           </div>
         </div>

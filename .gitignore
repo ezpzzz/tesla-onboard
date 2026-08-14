@@ -30,6 +30,8 @@ yarn-error.log*
 
 # local QA artifacts
 /.qa-shots/
+/test-results/
+/playwright-report/
 
 # Tesla partner private key — NEVER commit
 /tesla-private-key.pem

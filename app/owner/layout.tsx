@@ -16,7 +16,7 @@ export default async function OwnerLayout({ children }: { children: ReactNode })
     );
   }
 
-  // Defense-in-depth: middleware.ts already gates /owner on a verified email.
+  // Defense-in-depth: proxy.ts already gates /owner on a verified email.
   // This is the second independent layer in case a
   // request ever reaches this layout without passing through middleware.
   const supabase = await createClient();

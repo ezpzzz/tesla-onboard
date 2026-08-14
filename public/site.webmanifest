@@ -1,7 +1,7 @@
 {
-  "name": "Tesla Rental Onboarding",
-  "short_name": "Onboarding",
-  "description": "A guided walkthrough that gets you confident behind the wheel of your Tesla rental in minutes.",
+  "name": "evhost.app",
+  "short_name": "evhost",
+  "description": "Workspace-branded guest onboarding, fleet access, and operations for Tesla rental hosts.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

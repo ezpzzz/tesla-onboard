@@ -6,7 +6,7 @@
  * AppShell but for a host who is usually at a desk, sometimes on a phone at
  * the curb during a handoff.
  *
- * AUTH: gating for /owner lives in middleware.ts (edge, cookie-based
+ * AUTH: gating for /owner lives in proxy.ts (edge, cookie-based
  * session check) and lib/owner-auth.ts (config helpers), with a
  * second defense-in-depth check in app/owner/layout.tsx. When Supabase auth
  * env vars are unset, the app runs in demo mode — /owner stays open exactly
@@ -23,20 +23,22 @@ import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
 import { tenantGuestHref } from "@/lib/tenant-config";
 import { Badge, cn } from "../ui";
 import {
-  IconBattery,
-  IconBolt,
-  IconCar,
+  IconDrivers,
   IconExternal,
+  IconOverview,
   IconSettings,
+  IconTrips,
   IconUser,
+  IconVehicle,
 } from "../icons";
 import { OwnerIdentity } from "./OwnerIdentity";
+import { TenantBrandMark } from "@/components/TenantBrandMark";
 
 const NAV_ITEMS = [
-  { href: "/owner", label: "Overview", icon: IconBolt },
-  { href: "/owner/drivers", label: "Drivers", icon: IconUser },
-  { href: "/owner/trips", label: "Trips", icon: IconCar },
-  { href: "/owner/vehicles", label: "Vehicles", icon: IconBattery },
+  { href: "/owner", label: "Overview", icon: IconOverview },
+  { href: "/owner/drivers", label: "Drivers", icon: IconDrivers },
+  { href: "/owner/trips", label: "Trips", icon: IconTrips },
+  { href: "/owner/vehicles", label: "Vehicles", icon: IconVehicle },
   { href: "/owner/settings", label: "Settings", icon: IconSettings },
 ] as const;
 
@@ -59,18 +61,18 @@ export function OwnerShell({
   const accountActive = isActive(pathname, "/owner/account");
   const ownerInitial = ownerEmail?.trim().charAt(0).toUpperCase();
   const tenantName = loading
-    ? "Onboarding"
+    ? "evhost.app"
     : config.companyName || workspace?.name || "Owner portal";
 
   return (
-    <div className="min-h-dvh bg-surface">
-      <div className="mx-auto flex min-h-dvh w-full max-w-[1400px] md:items-start">
+    <div className="h-dvh overflow-hidden bg-surface md:h-auto md:min-h-dvh md:overflow-visible">
+      <div className="mx-auto flex h-full w-full max-w-[1400px] md:min-h-dvh md:items-start">
         {/* Desktop / tablet sidebar */}
         <aside className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col border-r border-line bg-card md:flex">
           <div className="px-5 pt-6 pb-4">
-            <span className="text-base font-semibold tracking-tight text-ink">
-              {tenantName}
-            </span>
+            {config.companyName ? <TenantBrandMark config={config} className="text-base" /> : (
+              <span className="text-base font-semibold tracking-tight text-ink">{tenantName}</span>
+            )}
             <div className="mt-2">
               <Badge>Host view</Badge>
             </div>
@@ -92,7 +94,7 @@ export function OwnerShell({
               </select>
             ) : null}
           </div>
-          <nav className="flex-1 space-y-1 px-3">
+          <nav aria-label="Owner navigation" className="flex-1 space-y-1 px-3">
             {NAV_ITEMS.map((item) => {
               const active = isActive(pathname, item.href);
               const Icon = item.icon;
@@ -125,21 +127,22 @@ export function OwnerShell({
         </aside>
 
         {/* Main column */}
-        <div className="flex min-h-dvh w-full min-w-0 flex-col">
-          <header className="sticky top-0 z-20 border-b border-line/80 bg-card/90 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl md:hidden">
+        <div className="flex h-dvh w-full min-w-0 flex-col overflow-hidden md:h-auto md:min-h-dvh md:overflow-visible">
+          <header className="z-20 shrink-0 border-b border-line/80 bg-card/90 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl md:hidden">
             <div className="mx-auto flex h-14 w-full max-w-[1100px] items-center justify-between">
               <Link
                 href="/owner"
                 aria-label={`${tenantName} overview`}
                 className="flex min-w-0 flex-1 items-center gap-2.5 pr-3 text-ink"
               >
-                <span
-                  aria-hidden="true"
-                  className="h-2 w-2 shrink-0 rounded-full bg-brand shadow-[0_0_0_4px_rgba(2,135,216,0.10)]"
-                />
-                <span className="truncate text-[15px] font-semibold tracking-tight">
-                  {tenantName}
-                </span>
+                {config.brand.logoPath ? (
+                  <TenantBrandMark config={config} className="max-w-full text-[15px]" />
+                ) : (
+                  <>
+                    <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-brand shadow-[0_0_0_4px] shadow-brand/10" />
+                    <span className="truncate text-[15px] font-semibold tracking-tight">{tenantName}</span>
+                  </>
+                )}
               </Link>
 
               <div className="flex shrink-0 items-center gap-1.5">
@@ -147,7 +150,7 @@ export function OwnerShell({
                   href={guestHref}
                   aria-label="Open guest walkthrough"
                   title="Guest walkthrough"
-                  className="flex h-10 w-10 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface hover:text-ink"
+                  className="flex h-11 w-11 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface hover:text-ink"
                 >
                   <IconExternal aria-hidden="true" className="h-[18px] w-[18px]" />
                 </Link>
@@ -156,7 +159,7 @@ export function OwnerShell({
                   aria-label={ownerEmail ? `Account for ${ownerEmail}` : "Account"}
                   aria-current={accountActive ? "page" : undefined}
                   className={cn(
-                    "flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition-colors",
+                    "flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold transition-colors",
                     accountActive
                       ? "bg-ink text-white"
                       : "bg-surface text-ink hover:bg-line",
@@ -173,13 +176,16 @@ export function OwnerShell({
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-[1100px] flex-1 px-4 pb-20 pt-6 md:px-8 md:py-6 md:pb-6">
+          <main className="mx-auto min-h-0 w-full max-w-[1100px] flex-1 overflow-y-auto overscroll-y-contain px-4 pb-6 pt-6 [-webkit-overflow-scrolling:touch] md:overflow-visible md:px-8 md:py-6 md:pb-6">
             {children}
           </main>
 
           {/* Mobile bottom tab bar */}
-          <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-line bg-card/95 backdrop-blur md:hidden">
-            <div className="mx-auto flex max-w-[1100px]">
+          <nav
+            aria-label="Owner tabs"
+            className="z-20 shrink-0 border-t border-line bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+          >
+            <div className="mx-auto flex max-w-[1100px] touch-manipulation select-none">
               {NAV_ITEMS.map((item) => {
                 const active = isActive(pathname, item.href);
                 const Icon = item.icon;
@@ -189,11 +195,18 @@ export function OwnerShell({
                     href={item.href}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors",
+                      "relative flex min-h-[58px] flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors",
                       active ? "text-brand" : "text-muted hover:text-ink",
                     )}
                   >
-                    <Icon aria-hidden="true" className="h-5 w-5" />
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute top-0 h-0.5 w-7 rounded-b-full bg-transparent transition-colors",
+                        active && "bg-brand",
+                      )}
+                    />
+                    <Icon aria-hidden="true" className="h-[22px] w-[22px]" />
                     {item.label}
                   </Link>
                 );

@@ -17,6 +17,8 @@ import {
 } from "@/lib/tenant-vehicle";
 import { Button, Card } from "@/components/ui";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
+import { BrandMediaField } from "@/components/owner/BrandMediaField";
+import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 
 function Field({
   label,
@@ -33,6 +35,7 @@ function Field({
   multiline?: boolean;
   publicationRequired?: boolean;
 }) {
+  const fieldName = `onlyevs-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
   const className =
     "mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
   return (
@@ -45,6 +48,7 @@ function Field({
       </span>
       {multiline ? (
         <textarea
+          name={fieldName}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           rows={3}
@@ -52,6 +56,7 @@ function Field({
         />
       ) : (
         <input
+          name={fieldName}
           type={type}
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -199,6 +204,7 @@ export function TenantSettingsForm({
         <label className="block text-sm font-medium text-ink">
           Sophosic workspace
           <select
+            name="onlyevs-workspace"
             value={workspace.key}
             onChange={(event) => setWorkspace(event.target.value)}
             className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
@@ -217,6 +223,40 @@ export function TenantSettingsForm({
       <SettingsSection title="Brand & contact">
         <Field label="Company name" value={draft.companyName} onChange={(companyName) => patchRoot({ companyName })} />
         <Field publicationRequired={false} label="Tagline" value={draft.tagline} onChange={(tagline) => patchRoot({ tagline })} />
+        {ONLYEVS_OPERATIONS_ENABLED ? <div>
+          <div className="mb-1.5 flex items-center justify-between gap-3 text-sm font-medium text-ink">
+            <span>Brand media</span><span className="text-xs font-normal text-muted">Optional</span>
+          </div>
+          <BrandMediaField
+            brand={draft.brand}
+            companyName={draft.companyName}
+            onChange={(brand) => patchRoot({ brand })}
+          />
+        </div> : null}
+        <Field publicationRequired={false} label="Logo description" value={draft.brand.logoAlt ?? ""} onChange={(logoAlt) => patchRoot({ brand: { ...draft.brand, logoAlt: logoAlt || null } })} />
+        <label className="block text-sm font-medium text-ink">
+          <span className="flex items-center justify-between gap-3">
+            <span>Accent color</span><span className="text-xs font-normal text-muted">Optional</span>
+          </span>
+          <span className="mt-1.5 flex items-center gap-3 rounded-xl border border-line bg-white px-3.5 py-2.5">
+            <input
+              aria-label="Accent color picker"
+              name="onlyevs-accent-color-picker"
+              type="color"
+              value={draft.brand.accentColor}
+              onChange={(event) => patchRoot({ brand: { ...draft.brand, accentColor: event.target.value.toUpperCase() } })}
+              className="h-9 w-12 cursor-pointer rounded border-0 bg-transparent p-0"
+            />
+            <input
+              aria-label="Accent color hex value"
+              name="onlyevs-accent-color"
+              value={draft.brand.accentColor}
+              pattern="#[0-9A-Fa-f]{6}"
+              onChange={(event) => patchRoot({ brand: { ...draft.brand, accentColor: event.target.value } })}
+              className="min-w-0 flex-1 text-base uppercase text-ink outline-none"
+            />
+          </span>
+        </label>
         <Field label="Host name" value={draft.hostName} onChange={(hostName) => patchRoot({ hostName })} />
         <Field label="Host phone" type="tel" value={draft.hostPhone} onChange={(hostPhone) => patchRoot({ hostPhone })} />
         <Field publicationRequired={false} label="Support email" type="email" value={draft.supportEmail} onChange={(supportEmail) => patchRoot({ supportEmail })} />
@@ -255,6 +295,7 @@ export function TenantSettingsForm({
               <span className="shrink-0 text-xs font-semibold text-brand">Required</span>
             </span>
             <select
+              name="onlyevs-guest-vehicle"
               value={linkedVehicle?.id ?? (draft.car.sourceVehicleId ? "unavailable" : "")}
               onChange={(event) => useFleetVehicle(event.target.value)}
               className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
@@ -293,6 +334,7 @@ export function TenantSettingsForm({
         <label className="block text-sm font-medium text-ink">
           Shifter
           <select
+            name="onlyevs-shifter"
             value={draft.car.shifter}
             onChange={(event) => {
               const value = event.target.value;

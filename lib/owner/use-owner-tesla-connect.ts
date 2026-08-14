@@ -14,9 +14,19 @@ import type { TeslaProfile } from "@/lib/tesla";
 import type { OwnerSetupUpdater } from "./setup-state";
 
 /** Where the Connect step's "Connect with Tesla" button sends the browser. */
-export function connectHref(): string {
+export function connectHref(scope?: {
+  workspaceId: string;
+  shopSlug: string;
+  returnPath?: string;
+}): string {
+  const live = new URLSearchParams();
+  if (scope) {
+    live.set("workspace", scope.workspaceId);
+    live.set("shop", scope.shopSlug);
+    live.set("return", scope.returnPath ?? "/owner/setup");
+  }
   return AUTH_MODE === "live"
-    ? "/api/owner/tesla/login"
+    ? `/api/owner/tesla/login?${live.toString()}`
     : "/auth/tesla?mode=owner&return=/owner/setup";
 }
 
@@ -38,7 +48,11 @@ export function ownerAuthErrorMessage(code: string): string {
     case "origin_mismatch":
       return "Sign-in was started from a different address than the configured redirect URL. Open the app at its configured domain and try again.";
     case "exchange_failed":
-      return "We couldn't reach Tesla just now. Try again, or add vehicles manually.";
+      return "We couldn't securely save the Tesla connection. Try again, or add vehicles manually.";
+    case "workspace_access":
+      return "This workspace requires an administrator to connect its Tesla account.";
+    case "persistent_grant_missing":
+      return "Tesla did not return the long-lived permission this workspace needs. Reconnect and approve every requested permission.";
     case "vehicles_unavailable":
       return "You're signed in, but we couldn't read your vehicles right now. Try again, or add vehicles manually.";
     case "session":
@@ -54,7 +68,7 @@ export function useOwnerTeslaConnect(teslaProfile: TeslaProfile | null, update: 
 
   // Complete the round-trip from either mode. mock: the reused consent screen
   // redirected back with ?owner_connected=1&owner_persona=<key>. live: the
-  // server callback sealed a session cookie and redirected with
+    // server callback stored an opaque import-session handle and redirected with
   // ?owner_connected=1 alone. Either way, or on ?owner_tesla_error=<code>,
   // this runs once on mount reading the URL the redirect landed on.
   useEffect(() => {

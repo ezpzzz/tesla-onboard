@@ -17,8 +17,10 @@ import {
 } from "./tesla";
 import type { TeslaProfile } from "./tesla";
 import type { OnboardingState, Updater } from "./store";
+import { useTenantConfig } from "@/components/TenantConfigProvider";
 
 export function useTeslaConnect(state: OnboardingState, update: Updater) {
+  const { tenantSlug } = useTenantConfig();
   const connected = !!(state.profile && state.profile.id !== "u_new");
   const [authError, setAuthError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
@@ -31,8 +33,17 @@ export function useTeslaConnect(state: OnboardingState, update: Updater) {
     const errorCode = params.get("tesla_error");
     const justConnected = params.get("connected") === "1";
     // Strip the OAuth query params but keep the step-history tag on the entry.
-    const cleanUrl = () =>
-      window.history.replaceState(window.history.state, "", window.location.pathname);
+    const cleanUrl = () => {
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete("connected");
+      clean.searchParams.delete("tesla_error");
+      clean.searchParams.delete("missing");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${clean.pathname}${clean.search}${clean.hash}`,
+      );
+    };
 
     if (errorCode) {
       setAuthError(authErrorMessage(errorCode));
@@ -70,7 +81,10 @@ export function useTeslaConnect(state: OnboardingState, update: Updater) {
 
   function connectWithTesla() {
     setLinking(true);
-    window.location.href = teslaAuthorizeUrl();
+    window.location.href = teslaAuthorizeUrl(
+      `${window.location.pathname}${window.location.search}`,
+      tenantSlug,
+    );
   }
 
   function useDifferentAccount() {

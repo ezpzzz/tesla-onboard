@@ -13,7 +13,7 @@ import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { driverStatus } from "@/lib/owner/derive";
 import type { DriverStatus } from "@/lib/owner/types";
 import { DriverTable } from "@/components/owner/owner-ui";
-import { Segmented } from "@/components/ui";
+import { Card, Segmented } from "@/components/ui";
 
 type Filter = "all" | DriverStatus;
 
@@ -32,7 +32,7 @@ const FILTER_OPTIONS: { value: Filter; label: string }[] = [
 const SSR_FALLBACK_NOW = 0;
 
 export default function DriversPage() {
-  const { drivers, trips } = useOwnerData();
+  const { drivers, trips, operationalError } = useOwnerData();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [now, setNow] = useState(SSR_FALLBACK_NOW);
@@ -61,6 +61,12 @@ export default function DriversPage() {
         </p>
       </div>
 
+      {operationalError ? (
+        <Card role="alert" className="border-danger/20 bg-danger/[0.04] p-4 text-sm text-danger">
+          Driver data is unavailable: {operationalError}
+        </Card>
+      ) : null}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {/* 5 options is more than Segmented's only other usage (PlanStep's 2
          * short labels) was built for — "Not started"/"In progress" don't
@@ -80,7 +86,7 @@ export default function DriversPage() {
         />
       </div>
 
-      <DriverTable drivers={filtered} trips={trips} now={now} />
+      {!operationalError ? <DriverTable drivers={filtered} trips={trips} now={now} /> : null}
     </div>
   );
 }

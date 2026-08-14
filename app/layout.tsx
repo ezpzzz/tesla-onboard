@@ -11,15 +11,15 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Onboarding — Your Tesla rental, made easy",
+  title: "evhost.app — Tesla rental hosting",
   description:
-    "A guided walkthrough that gets you confident behind the wheel of your Tesla rental in minutes.",
-  applicationName: "Tesla Rental Onboarding",
+    "Workspace-branded guest onboarding, fleet access, and operations for Tesla rental hosts.",
+  applicationName: "evhost.app",
   manifest: "/site.webmanifest",
   openGraph: {
-    title: "Onboarding — Your Tesla rental, made easy",
+    title: "evhost.app — Tesla rental hosting",
     description:
-      "A guided walkthrough that gets you confident behind the wheel of your Tesla rental in minutes.",
+      "Workspace-branded guest onboarding, fleet access, and operations for Tesla rental hosts.",
   },
 };
 

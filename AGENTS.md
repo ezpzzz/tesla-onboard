@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository.
 
 ## What this is
 
-An adaptive onboarding web app for Turo Tesla rental guests (user-facing name **"Onboarding"**, formerly "Ready to Roll"). It walks a guest from "never touched a Tesla" to "keys in hand" — and adapts how much it shows based on the guest's actual Tesla experience. Next.js 15 (App Router) + React 19 + TypeScript + Tailwind v4. Package manager is **pnpm**.
+An adaptive onboarding web app for Turo Tesla rental guests (platform name **"evhost.app"**). It walks a guest from "never touched a Tesla" to "keys in hand" — and adapts how much it shows based on the guest's actual Tesla experience. Next.js 16 (App Router) + React 19 + TypeScript + Tailwind v4. Package manager is **pnpm**.
 
 ## Commands
 
@@ -73,3 +73,13 @@ curl -s "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/
 - Components are organized as `components/OnboardingApp.tsx` (controller), `components/steps/*` (one per step kind), `components/ui.tsx` (shared primitives — Button, Card, ProgressBar, AppShell…), `components/icons.tsx` (inline SVG, no icon dependency). `StepProps`/`StepNav` are defined in `components/step-types.ts`.
 - Dependencies are deliberately minimal (next, react, react-dom only) — prefer inline solutions over adding packages.
 - Design tokens (Tesla palette) live in `app/globals.css`. Mobile-first / phone-width shell; keep large tap targets, visible focus rings, keyboard operability.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

@@ -13,6 +13,8 @@ import { useOwnerState } from "@/lib/owner/owner-state";
 import { TripTable } from "@/components/owner/owner-ui";
 import { Card, Segmented } from "@/components/ui";
 import type { TripStatus } from "@/lib/owner/types";
+import { CalendarReviewQueue } from "@/components/owner/CalendarReviewQueue";
+import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 
 type Filter = "all" | TripStatus;
 
@@ -24,7 +26,7 @@ const FILTERS: { value: Filter; label: string }[] = [
 ];
 
 export default function TripsPage() {
-  const { trips, drivers, vehicles, chargingSessions, policyPct, hydrated } = useOwnerData();
+  const { trips, drivers, vehicles, chargingSessions, policyPct, hydrated, operationalError } = useOwnerData();
   const { state: ownerState } = useOwnerState();
   const [filter, setFilter] = useState<Filter>("all");
   const [vehicleFilter, setVehicleFilter] = useState<string>("all");
@@ -69,7 +71,13 @@ export default function TripsPage() {
         />
       )}
 
-      {!hydrated ? (
+      {ONLYEVS_OPERATIONS_ENABLED ? <CalendarReviewQueue vehicles={vehicles} /> : null}
+
+      {operationalError ? (
+        <Card role="alert" className="border-danger/20 bg-danger/[0.04] p-6 text-center text-sm text-danger">
+          Trip data is unavailable: {operationalError}
+        </Card>
+      ) : !hydrated ? (
         <Card className="p-6 text-center text-sm text-muted">Loading trips…</Card>
       ) : (
         <TripTable

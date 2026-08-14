@@ -1,5 +1,5 @@
 /**
- * Public, guest-facing settings for one OnlyEVs tenant. Infrastructure
+ * Public, guest-facing settings for one evhost.app tenant. Infrastructure
  * credentials (Supabase/Tesla client secrets, cookie encryption keys, etc.)
  * deliberately do not belong here.
  */
@@ -28,6 +28,16 @@ export interface TenantConfig {
   version: 2;
   companyName: string;
   tagline: string;
+  brand: {
+    /** Validated object path in the workspace-owned brand asset bucket. */
+    logoPath: string | null;
+    /** Optional square browser/PWA icon from the same workspace-owned bucket. */
+    faviconPath: string | null;
+    /** Optional accessible override; companyName is used when omitted. */
+    logoAlt: string | null;
+    /** Six-digit sRGB accent used for links, progress, and active controls. */
+    accentColor: string;
+  };
   hostName: string;
   hostPhone: string;
   supportEmail: string;
@@ -50,6 +60,12 @@ export const DEFAULT_TENANT_CONFIG: TenantConfig = {
   version: 2,
   companyName: "",
   tagline: "",
+  brand: {
+    logoPath: null,
+    faviconPath: null,
+    logoAlt: null,
+    accentColor: "#0287D8",
+  },
   hostName: "",
   hostPhone: "",
   supportEmail: "",
@@ -111,11 +127,71 @@ function year(value: unknown, fallback: number): number {
     : fallback;
 }
 
+export interface TenantConfigScope {
+  workspaceId?: string | null;
+  shopSlug?: string | null;
+}
+
+function brandAssetPath(
+  value: unknown,
+  scope: TenantConfigScope = {},
+  purpose?: "logo" | "hero" | "favicon",
+): string | null {
+  if (typeof value !== "string") return null;
+  const path = value.trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/[a-z0-9][a-z0-9-]{0,62}\/(?:logo|hero|favicon)-[0-9a-f-]{36}\.(?:png|jpg|webp)$/i.test(path)) return null;
+  const [workspaceId, shopSlug] = path.split("/");
+  if (scope.workspaceId && workspaceId.toLowerCase() !== scope.workspaceId.toLowerCase()) return null;
+  if (scope.shopSlug && shopSlug !== scope.shopSlug) return null;
+  if (purpose && !path.split("/").at(-1)?.toLowerCase().startsWith(`${purpose}-`)) return null;
+  return path;
+}
+
+export function tenantBrandAssetUrl(path: string | null): string | null {
+  const safePath = brandAssetPath(path);
+  const origin = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
+  if (!safePath || !origin) return null;
+  return `${origin}/storage/v1/object/public/onlyevs-brand-assets/${safePath
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+}
+
+function accentColor(value: unknown, fallback: string): string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim())
+    ? value.trim().toUpperCase()
+    : fallback;
+}
+
+function relativeLuminance(hex: string): number {
+  const channels = [1, 3, 5].map((offset) => {
+    const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+/** Preserve the selected hue where possible while guaranteeing readable
+ * white text and a visible focus indicator on white surfaces. */
+export function accessibleAccentColor(value: string): string {
+  let hex = accentColor(value, DEFAULT_TENANT_CONFIG.brand.accentColor);
+  for (let attempts = 0; attempts < 20; attempts += 1) {
+    const contrastWithWhite = 1.05 / (relativeLuminance(hex) + 0.05);
+    if (contrastWithWhite >= 4.5) return hex;
+    const channels = [1, 3, 5].map((offset) =>
+      Math.max(0, Math.round(Number.parseInt(hex.slice(offset, offset + 2), 16) * 0.9)),
+    );
+    hex = `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+  }
+  return "#005A97";
+}
+
 /** Runtime validation keeps malformed public JSON from breaking the guest app. */
-export function normalizeTenantConfig(value: unknown): TenantConfig {
+export function normalizeTenantConfig(value: unknown, scope: TenantConfigScope = {}): TenantConfig {
   const root = record(value);
   const car = record(root.car);
   const rental = record(root.rental);
+  const brand = record(root.brand);
   const d = DEFAULT_TENANT_CONFIG;
   const rules = Array.isArray(root.houseRules)
     ? root.houseRules.filter((item): item is string => typeof item === "string" && !!item.trim())
@@ -126,6 +202,12 @@ export function normalizeTenantConfig(value: unknown): TenantConfig {
     version: 2,
     companyName: text(root.companyName, d.companyName),
     tagline: text(root.tagline, d.tagline),
+    brand: {
+      logoPath: brandAssetPath(brand.logoPath, scope, "logo"),
+      faviconPath: brandAssetPath(brand.faviconPath, scope, "favicon"),
+      logoAlt: nullableText(brand.logoAlt, null),
+      accentColor: accentColor(brand.accentColor, d.brand.accentColor),
+    },
     hostName: text(root.hostName, d.hostName),
     hostPhone: text(root.hostPhone, d.hostPhone),
     supportEmail: text(root.supportEmail, d.supportEmail),
@@ -161,12 +243,12 @@ export function normalizeTenantConfig(value: unknown): TenantConfig {
   };
 }
 
-export function tenantConfigFromFeatures(features: unknown): TenantConfig | null {
+export function tenantConfigFromFeatures(features: unknown, scope: TenantConfigScope = {}): TenantConfig | null {
   const candidate = record(features)[ONLYEVS_FEATURE_KEY];
   if (!candidate || typeof candidate !== "object") return null;
   const onlyevs = record(candidate);
   if (onlyevs.enabled !== true) return null;
-  return normalizeTenantConfig(onlyevs.config);
+  return normalizeTenantConfig(onlyevs.config, scope);
 }
 
 export function tenantSetupCompletedAt(features: unknown): number | null {
@@ -205,8 +287,8 @@ export function tenantConfigPublicationIssues(config: TenantConfig): string[] {
 /** Guest reads are stricter than owner draft reads. A workspace configuration
  * is public only after the owner explicitly completes setup with a fully
  * populated snapshot linked to an active durable fleet record. */
-export function publishedTenantConfigFromFeatures(features: unknown): TenantConfig | null {
-  const config = tenantConfigFromFeatures(features);
+export function publishedTenantConfigFromFeatures(features: unknown, scope: TenantConfigScope = {}): TenantConfig | null {
+  const config = tenantConfigFromFeatures(features, scope);
   if (!config || !tenantSetupCompletedAt(features)) return null;
   return tenantConfigPublicationIssues(config).length === 0 ? config : null;
 }

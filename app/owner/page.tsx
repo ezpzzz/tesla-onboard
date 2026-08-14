@@ -71,6 +71,7 @@ export default function OwnerOverviewPage() {
     stats,
     policyPct,
     vehicleError,
+    operationalError,
   } = useOwnerData();
   const { state: ownerState, hydrated: ownerHydrated } = useOwnerState();
   const { state: setupState, hydrated: setupHydrated, update: updateSetup } = useOwnerSetupState();
@@ -119,9 +120,9 @@ export default function OwnerOverviewPage() {
         </Link>
       </div>
 
-      {vehicleError ? (
+      {vehicleError || operationalError ? (
         <Card role="alert" className="border-danger/20 bg-danger/[0.04] p-4 text-sm text-danger">
-          Fleet data is unavailable: {vehicleError}
+          Fleet data is unavailable: {vehicleError ?? operationalError}
         </Card>
       ) : null}
 

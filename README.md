@@ -1,10 +1,14 @@
-# Onboarding 🚗⚡
+# evhost.app 🚗⚡
 
 An adaptive onboarding web app for **Turo Tesla rental guests**. It gets a guest
 from "I've never touched a Tesla" to "keys in hand, confident to drive" in a few
 minutes — and gets an experienced owner there in under two.
 
-Built with **Next.js 15 (App Router) + TypeScript + Tailwind v4**.
+Built with **Next.js 16 (App Router) + TypeScript + Tailwind v4**.
+
+The tenant-facing product is `evhost.app`. Existing `onlyevs_*` database objects,
+storage buckets, and `ONLYEVS_*` environment variables remain stable internal
+compatibility identifiers; they are not displayed as the platform brand.
 
 ---
 
@@ -92,6 +96,24 @@ onboarding progress in one place, separate from the guest flow. It shows:
   and exact Tesla option codes used by the fail-closed artwork resolver. The
   selected fleet record remains the source, so later owner edits refresh the
   public guest-safe snapshot without publishing VINs, plates, or private notes.
+- **Workspace branding & domains** — when the background control plane is enabled, managers can upload a validated raster
+  business logo and browser/PWA icon, choose an accent color, and request a
+  custom guest hostname. Media paths are workspace/shop scoped; arbitrary
+  remote URLs and SVG/HTML uploads are rejected. A scoped worker attaches and
+  verifies domains with the deploy provider, and the shared Supabase auth flow
+  always completes on the canonical evhost.app broker before returning the guest
+  to the same tenant. Platform OAuth, DNS-provider, and encryption credentials
+  remain server-managed rather than tenant-editable.
+- **Calendar, Tesla access, and fleet stats** — when the background control plane is enabled, an owner can connect Google
+  Calendar to populate a review queue that refreshes every 15 minutes,
+  explicitly confirm an event into a trip, and schedule time-bounded Tesla driver access after the guest proves the
+  booking email, connects Tesla, and consents. The background control plane
+  stores encrypted refresh tokens, reconciles non-idempotent invitation calls,
+  consumes Fleet Telemetry for last-known battery/range/odometer/lock state,
+  and requests Location only during the exact consented trip window.
+  Later provider schedule changes or cancellations are surfaced for review and
+  never silently create a duplicate trip, cancel a confirmed booking, or extend
+  an issued access window.
 
 It ships without sample owner records. A fresh owner account starts with no
 drivers, trips, charging sessions, or vehicles; real or manually entered
@@ -123,7 +145,7 @@ policies; there is no deployment-wide email allowlist.
 other products, so the only thing to add is a redirect URL — go to
 **Authentication → URL Configuration → Redirect URLs** and add this app's
 origin plus `/auth/callback` (e.g.
-`https://your-app.example.com/auth/callback`, and
+`https://evhost.app/auth/callback`, and
 `http://localhost:3000/auth/callback` for local dev). Nothing else in that
 project is touched: the email **template** is not modified, the Site URL is
 not changed, and no existing user is edited.
@@ -190,6 +212,8 @@ protect the shared Supabase project's rate limits.
 ```bash
 pnpm install
 pnpm dev          # http://localhost:3000
+pnpm test         # deterministic unit/contract tests
+pnpm build        # strict TypeScript + production build
 ```
 
 Sign-in runs in **mock mode during local development** by default — no Tesla credentials needed. The
@@ -203,7 +227,8 @@ build-time auth-mode setting is missing; the simulated consent screen is disable
 
 Owners configure everything specific to a rental company in `/owner/setup` or
 `/owner/settings`: company and host identity, contact details, the guest vehicle,
-key and charging instructions, return policy, and house rules. The settings are
+business logo, app icon, accent color, key and charging instructions, return
+policy, and house rules. The settings are
 stored as an unpublished draft in `workspace_branding.features.onlyevs` for the
 active Sophosic workspace. The final fleet-setup action publishes only after
 verifying an active linked vehicle and a complete guest configuration. Bare,
@@ -219,12 +244,22 @@ than silently allowing drift.
 Guest links carry an unambiguous `?tenant=<workspace-id>~<shop-slug>` reference
 so the public walkthrough resolves the correct branded shop at runtime—even
 when one workspace owns several shops. Legacy shop-slug-only links remain
-readable. No source edit or redeploy is required.
+readable. Verified custom domains resolve the same tenant reference from the
+serving Host and therefore require no source edit or app redeploy. Domain
+ownership, DNS, and provider attachment must all pass before a hostname
+becomes active; Vercel manages certificate issuance and TLS for attached domains.
 
 Deployment environment variables remain only for **platform infrastructure**:
 Supabase connectivity, Tesla OAuth credentials and registered callbacks, and
 the Tesla session-encryption secret. Those values are intentionally not editable
 in a browser and must never be stored in public workspace branding JSON.
+
+The additive background control plane is fail-closed behind
+`NEXT_PUBLIC_ONLYEVS_OPERATIONS_ENABLED`. Leave it `false` until the lifecycle
+migration, scoped worker, command proxy, Kafka/telemetry receiver, provider
+credentials, and live revocation/privacy canaries in `deploy/onlyevs/README.md`
+are all complete. With the flag off, the existing read-only Tesla fleet import
+continues to work and unfinished operational surfaces are not advertised.
 
 Tutorial copy and the readiness checklist live in
 **[`lib/content.ts`](lib/content.ts)**.
@@ -261,12 +296,15 @@ video: { title: "Model 3 Guide: Driving", youtubeId: "<verified-official-id>" }
 
 ## Going live with real Tesla sign-in
 
-Real **Tesla Fleet API** OAuth (third-party authorization-code flow) is fully wired
-up. Flip `NEXT_PUBLIC_TESLA_AUTH_MODE=live`, add credentials, and the same UI runs on
-real accounts — the app only ever sees a normalized `TeslaProfile`, so nothing else
-changes. The client secret never touches the browser: the token exchange and the
-one-time identity + vehicle read happen server-side, then tokens are discarded and
-only the profile is sealed into an httpOnly cookie.
+Real **Tesla Fleet API** OAuth (third-party authorization-code flow) is wired for
+two deliberately separate actors. Guest OAuth performs a one-time identity and
+vehicle-list read, discards tokens, and seals only a normalized profile in an
+httpOnly cookie. Owner OAuth uses the same read-only import scope while the
+background control plane is disabled. Once that reviewed capability is enabled,
+it requests the persistent scopes needed for trip-bound driver invitations and
+Fleet Telemetry; its refresh token is envelope-encrypted in the private
+integration store and is never returned to a browser. Both flows keep the client
+secret server-side.
 
 **What's implemented**
 
@@ -293,8 +331,10 @@ guest sign-in remains list-only.
    and allowed origin.
 2. Copy `.env.example` → `.env.local`: set `NEXT_PUBLIC_TESLA_AUTH_MODE=live`,
    `TESLA_CLIENT_ID`, `TESLA_CLIENT_SECRET`, `TESLA_REDIRECT_URI`, and
-   `TESLA_SESSION_SECRET` (`openssl rand -hex 32`). Scope defaults to the minimal
-   `openid vehicle_device_data`.
+   `TESLA_SESSION_SECRET` (`openssl rand -hex 32`). `TESLA_SCOPES` controls the
+   guest's minimal `openid vehicle_device_data` flow; the owner route uses its
+   fixed reviewed scope set (`openid offline_access vehicle_device_data
+   vehicle_cmds vehicle_location`).
 3. **Local dev:** Tesla wants HTTPS redirect URIs, so run a tunnel
    (`ngrok http 3000` / `cloudflared`) and register that HTTPS URL. On Vercel the
    deployment URL works directly.
@@ -302,22 +342,31 @@ guest sign-in remains list-only.
    `node scripts/tesla-setup.mjs genkeys` then `… register` with `TESLA_APP_DOMAIN` set.
    The public key is auto-served at the `.well-known` path.
 
-**Verified, with caveats** — the official docs pages were access-gated during research,
-so a few details (the exact `users/me` field names, whether PKCE is supported, and
-whether partner registration is mandatory for read-only OAuth) are handled defensively
-rather than confirmed. See [`lib/tesla-server.ts`](lib/tesla-server.ts) header comments;
-confirm against a live response before launch.
+**Provider boundary:** invitation creation has no provider idempotency key, so the
+worker records the invitation set before POST and reconciles exactly one new id
+afterward. It never retries an ambiguous create. After redemption, the worker
+lists the owner-visible Tesla drivers and HMAC-matches the bound guest's verified
+Tesla subject. It calls the driver-removal endpoint only when exactly one
+`share_user_id` matches; zero or multiple matches fail closed to `manual_review`.
+The raw Tesla subject is never persisted.
 
 ### Owner Tesla connect (live)
 
 The owner-side fleet setup wizard (`/owner/setup`) connects to Tesla
-independently from the guest flow — separate cookies, separate one-shot
-identity/vehicle read, and its own redirect URI. If you're going live with
-both, register a **second** redirect URI at
-<https://developer.tesla.com> — `https://<domain>/api/owner/tesla/login`'s
-callback target — and set it as `TESLA_OWNER_REDIRECT_URI` in `.env.local`,
-distinct from the guest's `TESLA_REDIRECT_URI`. In mock mode there's nothing
-to configure: the wizard reuses the guest's existing mock consent screen.
+independently from the guest flow—separate OAuth state, a fixed-size opaque
+import handle backed by a private 15-minute server session, a durable encrypted
+integration credential, and its own redirect URI. The browser cookie never
+contains VIN/fleet JSON, so large fleets do not overflow per-cookie limits. Register
+`https://<domain>/auth/owner/tesla/callback` as a **second** redirect URI in the
+Tesla developer dashboard and set it as `TESLA_OWNER_REDIRECT_URI`, distinct
+from the guest's `TESLA_REDIRECT_URI`. The owner must also pair the application's
+virtual key with each supported vehicle before command-proxy-backed Fleet
+Telemetry configuration can sync. In mock mode no durable provider integration
+is created.
+
+The complete background-service contract, scoped database role, official Tesla
+command-proxy template, telemetry collector configuration, and production gates
+are documented in [`deploy/onlyevs/README.md`](deploy/onlyevs/README.md).
 
 ---
 
@@ -361,9 +410,11 @@ scripts/
 
 ## Notes
 
-- **Privacy posture is real, not decorative.** The integration is read-only and
-  scoped to identity + vehicle data. Owner import reads vehicle configuration
-  once, never wakes or controls the car, and then discards the token.
+- **Privacy posture is real, not decorative.** Guest OAuth remains read-only.
+  The separately consented owner integration can create/revoke driver invitations
+  and configure Fleet Telemetry, but the app exposes no general vehicle-control
+  UI. Location is excluded from baseline stats and dynamically enabled only for
+  a bound, consented trip window.
 - **Accessible & mobile-first.** Phone-width app shell, large tap targets, visible
   focus rings, keyboard-operable controls — guests will use this on a phone, at the car.
 - Official Tesla videos, vehicle artwork, and the Tesla name belong to Tesla;

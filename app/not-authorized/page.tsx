@@ -59,10 +59,10 @@ export default async function NotAuthorizedPage() {
           {email ? (
             <>
               Signed in as <span className="font-medium text-ink">{email}</span> —
-              this account isn&apos;t linked to an OnlyEVs-enabled Sophosic workspace.
+              this account isn&apos;t linked to an evhost.app-enabled Sophosic workspace.
             </>
           ) : (
-            "This account isn't linked to an OnlyEVs-enabled Sophosic workspace."
+            "This account isn't linked to an evhost.app-enabled Sophosic workspace."
           )}
         </p>
         <div className="mt-6 space-y-3">

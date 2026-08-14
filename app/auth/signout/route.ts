@@ -46,7 +46,7 @@ export async function POST(request: Request) {
 
   if (!isOwnerAuthConfigured()) {
     // Demo mode: no Supabase client is ever constructed here, matching the
-    // rest of the auth surface (see lib/owner-auth.ts, middleware.ts).
+    // rest of the auth surface (see lib/owner-auth.ts, proxy.ts).
     return NextResponse.redirect(new URL("/login", origin), 303);
   }
 

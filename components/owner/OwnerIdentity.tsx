@@ -3,7 +3,7 @@
 /**
  * Signed-in owner identity: truncated email, a link to the account page,
  * and a sign-out control. Rendered only when the shell has a verified
- * `ownerEmail` (see app/owner/layout.tsx + middleware.ts) — demo mode never
+ * `ownerEmail` (see app/owner/layout.tsx + proxy.ts) — demo mode never
  * mounts this component.
  *
  * Stacked (email above the Account/Sign out row) rather than one long row —
