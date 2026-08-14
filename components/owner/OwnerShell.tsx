@@ -22,7 +22,14 @@ import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
 import { tenantGuestHref } from "@/lib/tenant-config";
 import { Badge, cn } from "../ui";
-import { IconBattery, IconBolt, IconCar, IconUser } from "../icons";
+import {
+  IconBattery,
+  IconBolt,
+  IconCar,
+  IconExternal,
+  IconSettings,
+  IconUser,
+} from "../icons";
 import { OwnerIdentity } from "./OwnerIdentity";
 
 const NAV_ITEMS = [
@@ -30,7 +37,7 @@ const NAV_ITEMS = [
   { href: "/owner/drivers", label: "Drivers", icon: IconUser },
   { href: "/owner/trips", label: "Trips", icon: IconCar },
   { href: "/owner/vehicles", label: "Vehicles", icon: IconBattery },
-  { href: "/owner/settings", label: "Settings", icon: IconUser },
+  { href: "/owner/settings", label: "Settings", icon: IconSettings },
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {
@@ -49,6 +56,8 @@ export function OwnerShell({
   const { config, tenantSlug, loading } = useTenantConfig();
   const { workspace, workspaces, setWorkspace } = useOwnerTenant();
   const guestHref = tenantGuestHref(tenantSlug);
+  const accountActive = isActive(pathname, "/owner/account");
+  const ownerInitial = ownerEmail?.trim().charAt(0).toUpperCase();
 
   return (
     <div className="min-h-dvh bg-surface">
@@ -114,21 +123,50 @@ export function OwnerShell({
 
         {/* Main column */}
         <div className="flex min-h-dvh w-full min-w-0 flex-col">
-          <header className="border-b border-line bg-card px-4 py-4 md:hidden">
-            <div className="flex items-center justify-between">
-              <span className="text-base font-semibold tracking-tight text-ink">
-                {loading ? "Onboarding" : config.companyName}
-              </span>
-              <Badge>Host view</Badge>
-            </div>
-            <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+          <header className="sticky top-0 z-20 border-b border-line/80 bg-card/90 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl md:hidden">
+            <div className="mx-auto flex h-14 w-full max-w-[1100px] items-center justify-between">
               <Link
-                href={guestHref}
-                className="inline-block shrink-0 text-xs font-medium text-muted transition-colors hover:text-ink"
+                href="/owner"
+                aria-label={`${loading ? "Onboarding" : config.companyName} overview`}
+                className="flex min-w-0 flex-1 items-center gap-2.5 pr-3 text-ink"
               >
-                Guest walkthrough →
+                <span
+                  aria-hidden="true"
+                  className="h-2 w-2 shrink-0 rounded-full bg-brand shadow-[0_0_0_4px_rgba(2,135,216,0.10)]"
+                />
+                <span className="truncate text-[15px] font-semibold tracking-tight">
+                  {loading ? "Onboarding" : config.companyName}
+                </span>
               </Link>
-              {ownerEmail ? <OwnerIdentity email={ownerEmail} align="end" /> : null}
+
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Link
+                  href={guestHref}
+                  aria-label="Open guest walkthrough"
+                  title="Guest walkthrough"
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface hover:text-ink"
+                >
+                  <IconExternal aria-hidden="true" className="h-[18px] w-[18px]" />
+                </Link>
+                <Link
+                  href="/owner/account"
+                  aria-label={ownerEmail ? `Account for ${ownerEmail}` : "Account"}
+                  aria-current={accountActive ? "page" : undefined}
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition-colors",
+                    accountActive
+                      ? "bg-ink text-white"
+                      : "bg-surface text-ink hover:bg-line",
+                  )}
+                >
+                  {ownerInitial ? (
+                    <span aria-hidden="true">{ownerInitial}</span>
+                  ) : (
+                    <IconUser aria-hidden="true" className="h-[18px] w-[18px]" />
+                  )}
+                  <span className="sr-only">Account</span>
+                </Link>
+              </div>
             </div>
           </header>
 
