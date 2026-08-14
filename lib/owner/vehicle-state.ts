@@ -95,7 +95,11 @@ function isLegacyMockVehicle(vehicle: Vehicle): boolean {
     && vehicle.updatedAt === LEGACY_MOCK_SEED_EPOCH
     && vehicle.vin === null
     && !vehicle.teslaImportKey;
-  const isMockTeslaPersonaImport = vehicle.teslaImportKey === "v1";
+  // Old persona imports predate Tesla-import provenance. Current local-dev
+  // imports intentionally reuse the persona id, but carry teslaImportedSpec
+  // and must survive navigation to the settings step.
+  const isMockTeslaPersonaImport = vehicle.teslaImportKey === "v1"
+    && !vehicle.teslaImportedSpec;
   return isUntouchedListingSeed || isMockTeslaPersonaImport;
 }
 

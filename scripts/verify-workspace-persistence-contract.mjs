@@ -28,6 +28,11 @@ assert.ok(remoteLoad >= 0 && migrationCompletion > remoteLoad);
 assert.doesNotMatch(state, /await migrateBrowserVehicles\(/);
 assert.match(state, /localStorage\.removeItem\(scopedStorageKey\(VEHICLE_KEY, tenantSlug\)\)/);
 assert.match(state, /persistence: scope \? "workspace" as const : "browser" as const/);
+assert.match(
+  state,
+  /vehicle\.teslaImportKey === "v1"\s*&& !vehicle\.teslaImportedSpec/,
+  "current mock imports with Tesla provenance must survive the legacy-data cleanup",
+);
 
 assert.match(
   tenantProvider,
