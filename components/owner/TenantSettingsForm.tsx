@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
-import { normalizeTenantConfig, type TenantConfig } from "@/lib/tenant-config";
+import {
+  normalizeTenantConfig,
+  tenantSetupCompletedAt,
+  type TenantConfig,
+} from "@/lib/tenant-config";
 import { useVehicleState } from "@/lib/owner/vehicle-state";
 import {
   customTenantCar,
@@ -19,12 +23,14 @@ function Field({
   onChange,
   type = "text",
   multiline = false,
+  required = true,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: "text" | "email" | "tel" | "number";
   multiline?: boolean;
+  required?: boolean;
 }) {
   const className =
     "mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
@@ -36,12 +42,14 @@ function Field({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           rows={3}
+          required={required}
           className={`${className} resize-y leading-relaxed`}
         />
       ) : (
         <input
           type={type}
           value={value}
+          required={required}
           onChange={(event) => onChange(event.target.value)}
           className={className}
         />
@@ -126,7 +134,9 @@ export function TenantSettingsForm({
       setRules(next.houseRules.join("\n"));
       setMessage(
         persistence === "workspace"
-          ? "Saved. Guest links now use these workspace settings."
+          ? tenantSetupCompletedAt(workspace?.features) && next.car.sourceVehicleId
+            ? "Saved. The published guest walkthrough now uses these workspace settings."
+            : "Saved as a workspace draft. Finish fleet setup with an active linked vehicle to publish it for guests."
           : "Saved to this browser for local preview.",
       );
       onSaved?.();
@@ -182,19 +192,25 @@ export function TenantSettingsForm({
             {vehicleError}
           </div>
         ) : null}
-        <VehicleArtwork
-          model={draft.car.model}
-          color={draft.car.color}
-          trim={draft.car.trim}
-          wheelType={draft.car.wheelType}
-          interior={draft.car.interior}
-          interiorCode={draft.car.teslaInteriorCode}
-          paintCode={draft.car.teslaPaintCode}
-          year={draft.car.year}
-          configurationVerified={Boolean(draft.car.sourceVehicleId)}
-          decorative
-          className="h-44 rounded-xl border border-line"
-        />
+        {draft.car.model ? (
+          <VehicleArtwork
+            model={draft.car.model}
+            color={draft.car.color}
+            trim={draft.car.trim}
+            wheelType={draft.car.wheelType}
+            interior={draft.car.interior}
+            interiorCode={draft.car.teslaInteriorCode}
+            paintCode={draft.car.teslaPaintCode}
+            year={draft.car.year}
+            configurationVerified={Boolean(draft.car.sourceVehicleId)}
+            decorative
+            className="h-44 rounded-xl border border-line"
+          />
+        ) : (
+          <div className="rounded-xl border border-dashed border-line bg-surface px-4 py-8 text-center text-sm text-muted">
+            No guest vehicle is configured.
+          </div>
+        )}
         {vehiclesHydrated && vehicles.some((vehicle) => vehicle.status === "active") ? (
           <label className="block text-sm font-medium text-ink">
             Use a fleet vehicle
@@ -222,16 +238,16 @@ export function TenantSettingsForm({
               : linkedVehicleCurrent
                 ? `Linked to ${linkedVehicle?.displayName ?? "the selected vehicle"}. Guest and owner surfaces use the same exact-spec snapshot.`
                 : `Linked to ${linkedVehicle?.displayName ?? "the selected vehicle"}. Its fleet details changed; saving will publish the latest exact-spec snapshot.`
-            : "This is a standalone guest profile. Link an active fleet vehicle so its owner and guest imagery cannot drift."}
+            : "Guest onboarding is paused. Link an active workspace fleet vehicle before publishing so owner and guest details cannot drift."}
         </div>
         <Field label="Model" value={draft.car.model} onChange={(model) => patchCar({ model })} />
         <Field label="Trim" value={draft.car.trim} onChange={(trim) => patchCar({ trim })} />
-        <Field label="Year" type="number" value={String(draft.car.year)} onChange={(value) => patchCar({ year: Number(value) })} />
+        <Field label="Year" type="number" value={draft.car.year ? String(draft.car.year) : ""} onChange={(value) => patchCar({ year: Number(value) })} />
         <Field label="Exterior color" value={draft.car.color} onChange={(color) => patchCar({ color })} />
-        <Field label="Interior" value={draft.car.interior ?? ""} onChange={(interior) => patchCar({ interior: interior || null })} />
-        <Field label="Wheel package or Tesla code" value={draft.car.wheelType ?? ""} onChange={(wheelType) => patchCar({ wheelType: wheelType || null })} />
-        <Field label="Tesla paint option code" value={draft.car.teslaPaintCode ?? ""} onChange={(teslaPaintCode) => patchCar({ teslaPaintCode: teslaPaintCode || null })} />
-        <Field label="Tesla interior option code" value={draft.car.teslaInteriorCode ?? ""} onChange={(teslaInteriorCode) => patchCar({ teslaInteriorCode: teslaInteriorCode || null })} />
+        <Field required={false} label="Interior" value={draft.car.interior ?? ""} onChange={(interior) => patchCar({ interior: interior || null })} />
+        <Field required={false} label="Wheel package or Tesla code" value={draft.car.wheelType ?? ""} onChange={(wheelType) => patchCar({ wheelType: wheelType || null })} />
+        <Field required={false} label="Tesla paint option code" value={draft.car.teslaPaintCode ?? ""} onChange={(teslaPaintCode) => patchCar({ teslaPaintCode: teslaPaintCode || null })} />
+        <Field required={false} label="Tesla interior option code" value={draft.car.teslaInteriorCode ?? ""} onChange={(teslaInteriorCode) => patchCar({ teslaInteriorCode: teslaInteriorCode || null })} />
         <label className="block text-sm font-medium text-ink">
           Shifter
           <select

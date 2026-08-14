@@ -181,7 +181,7 @@ protect the shared Supabase project's rate limits.
   </tr>
 </table>
 
-> Demo uses placeholder branding and contact details; signed-in owners configure real values per workspace in the setup wizard or `/owner/settings`.
+> Fresh workspaces are empty and guest onboarding remains closed until an owner links an active vehicle, completes the rental settings, and explicitly publishes setup.
 
 ---
 
@@ -192,9 +192,10 @@ pnpm install
 pnpm dev          # http://localhost:3000
 ```
 
-Sign-in runs in **mock mode** by default — no Tesla credentials needed. The
+Sign-in runs in **mock mode during local development** by default — no Tesla credentials needed. The
 consent screen lets you simulate signing in as an owner or a fresh account so you
-can watch the flow adapt.
+can watch the flow adapt. Production builds fail safe to live OAuth if the
+build-time auth-mode setting is missing; the simulated consent screen is disabled.
 
 ---
 
@@ -203,13 +204,18 @@ can watch the flow adapt.
 Owners configure everything specific to a rental company in `/owner/setup` or
 `/owner/settings`: company and host identity, contact details, the guest vehicle,
 key and charging instructions, return policy, and house rules. The settings are
-stored in `workspace_branding.features.onlyevs` for the active Sophosic workspace.
+stored as an unpublished draft in `workspace_branding.features.onlyevs` for the
+active Sophosic workspace. The final fleet-setup action publishes only after
+verifying an active linked vehicle and a complete guest configuration. Bare,
+unknown, reset, incomplete, and unpublished tenant links show a setup-required
+screen instead of seeded content.
 The guest vehicle can be linked to an active fleet record so Tesla trim, paint,
 interior, and wheel option codes remain attached to the published configuration.
 Only guest-safe presentation fields are materialized in workspace branding; VIN,
 plate, notes, and operational data stay in the private owner store. When that
-linked record changes, an owner session refreshes the public snapshot. Editing a
-guest vehicle field manually clears the link rather than silently allowing drift.
+linked record changes, an owner session refreshes the public snapshot. Removing,
+archiving, or manually unlinking that record unpublishes guest onboarding rather
+than silently allowing drift.
 Guest links carry an unambiguous `?tenant=<workspace-id>~<shop-slug>` reference
 so the public walkthrough resolves the correct branded shop at runtime—even
 when one workspace owns several shops. Legacy shop-slug-only links remain

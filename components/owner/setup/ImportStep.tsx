@@ -31,7 +31,6 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
     unarchiveVehicle,
   } = useVehicleState();
   const policyPct = parseReturnPolicyPct(config.rental.returnChargeLevel);
-  const fallbackYear = config.car.year;
 
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [committed, setCommitted] = useState<string[]>([]);
@@ -98,14 +97,14 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
         if (!isChecked(tv)) continue;
 
         if (existing) {
-          const fresh = vehicleInputFromTesla(tv, fallbackYear);
+          const fresh = vehicleInputFromTesla(tv);
           await updateVehicle(existing.id, mergePreservingOwnerFields(fresh, existing));
           if (existing.status === "archived") await unarchiveVehicle(existing.id);
           touched.push(existing.id);
           continue;
         }
 
-        const input = vehicleInputFromTesla(tv, fallbackYear);
+        const input = vehicleInputFromTesla(tv);
         const id = await addVehicle(input);
         ledgerPatch[key] = id;
         touched.push(id);

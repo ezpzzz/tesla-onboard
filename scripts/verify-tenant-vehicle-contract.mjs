@@ -5,12 +5,21 @@
  */
 
 import assert from "node:assert/strict";
-import { normalizeTenantConfig } from "../lib/tenant-config.ts";
+import {
+  DEFAULT_TENANT_CONFIG,
+  featuresWithTenantConfig,
+  normalizeTenantConfig,
+  publishedTenantConfigFromFeatures,
+  tenantConfigFromFeatures,
+  tenantConfigPublicationIssues,
+  tenantSetupCompletedAt,
+} from "../lib/tenant-config.ts";
 import {
   customTenantCar,
   tenantCarFromVehicle,
   tenantCarMatchesVehicle,
 } from "../lib/tenant-vehicle.ts";
+import { vehicleInputFromTesla } from "../lib/owner/import-mapping.ts";
 
 const vehicle = {
   id: "veh-07",
@@ -62,5 +71,65 @@ const migrated = normalizeTenantConfig({
 assert.equal(migrated.version, 2);
 assert.equal(migrated.car.sourceVehicleId, null);
 assert.equal(migrated.car.sourceVehicleUpdatedAt, null);
+
+assert.equal(DEFAULT_TENANT_CONFIG.companyName, "");
+assert.equal(DEFAULT_TENANT_CONFIG.car.model, "");
+assert.equal(DEFAULT_TENANT_CONFIG.car.trim, "");
+assert.equal(DEFAULT_TENANT_CONFIG.car.year, 0);
+assert.equal(DEFAULT_TENANT_CONFIG.car.color, "");
+assert.equal(DEFAULT_TENANT_CONFIG.car.interior, null);
+assert.deepEqual(DEFAULT_TENANT_CONFIG.houseRules, []);
+
+const publishable = normalizeTenantConfig({
+  version: 2,
+  companyName: "Real Rentals",
+  tagline: "A real workspace listing.",
+  hostName: "Alex",
+  hostPhone: "555-0101",
+  supportEmail: "support@example.test",
+  roadsidePhone: "555-0199",
+  car: snapshot,
+  rental: {
+    keyAccess: "Phone key invitation before pickup.",
+    chargeAccess: "Tesla Supercharging account.",
+    chargingPolicy: "Guest pays actual charging cost.",
+    returnChargeLevel: "80%",
+    skipChargeOption: "Contact the host.",
+    pickupNote: "Meet at the pickup location.",
+    returnNote: "Lock the vehicle after return.",
+    parkingNote: "Use the assigned space.",
+  },
+  houseRules: ["No smoking."],
+});
+assert.deepEqual(tenantConfigPublicationIssues(publishable), []);
+
+const draftFeatures = featuresWithTenantConfig({}, publishable);
+assert.ok(tenantConfigFromFeatures(draftFeatures));
+assert.equal(tenantSetupCompletedAt(draftFeatures), null);
+assert.equal(publishedTenantConfigFromFeatures(draftFeatures), null);
+
+const publishedAt = 1_787_000_000_000;
+const publishedFeatures = featuresWithTenantConfig(draftFeatures, publishable, { publishedAt });
+assert.equal(tenantSetupCompletedAt(publishedFeatures), publishedAt);
+assert.deepEqual(publishedTenantConfigFromFeatures(publishedFeatures), publishable);
+
+const preservedFeatures = featuresWithTenantConfig(publishedFeatures, publishable);
+assert.equal(tenantSetupCompletedAt(preservedFeatures), publishedAt);
+
+const unlinked = { ...publishable, car: customTenantCar(publishable.car, {}) };
+const invalidatedFeatures = featuresWithTenantConfig(publishedFeatures, unlinked);
+assert.equal(tenantSetupCompletedAt(invalidatedFeatures), null);
+assert.equal(publishedTenantConfigFromFeatures(invalidatedFeatures), null);
+
+const legacyEnabledOnly = {
+  onlyevs: { enabled: true, config: publishable },
+};
+assert.ok(tenantConfigFromFeatures(legacyEnabledOnly));
+assert.equal(publishedTenantConfigFromFeatures(legacyEnabledOnly), null);
+
+assert.throws(
+  () => vehicleInputFromTesla({ id: "missing-year", model: "Model 3", source: "live" }),
+  /did not provide a model year/,
+);
 
 console.log("tenant vehicle contract: pass");

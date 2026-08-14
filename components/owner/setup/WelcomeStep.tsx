@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
 import { Button, StepFrame } from "@/components/ui";
 import { IconArrowRight, IconBolt, IconCar, IconSparkle } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
@@ -25,6 +26,7 @@ const highlights = [
 export function WelcomeStep({ nav, update }: SetupStepProps) {
   const router = useRouter();
   const { config } = useTenantConfig();
+  const { workspace } = useOwnerTenant();
 
   return (
     <StepFrame
@@ -49,23 +51,29 @@ export function WelcomeStep({ nav, update }: SetupStepProps) {
       <div className="relative mb-7">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
-            {config.companyName}
+            {config.companyName || workspace?.name || "Fleet setup"}
           </span>
           <span className="h-3 w-3 rounded-full bg-brand shadow-[0_0_12px_2px] shadow-brand/50" />
         </div>
-        <VehicleArtwork
-          model={config.car.model}
-          color={config.car.color}
-          trim={config.car.trim}
-          wheelType={config.car.wheelType}
-          interior={config.car.interior}
-          interiorCode={config.car.teslaInteriorCode}
-          paintCode={config.car.teslaPaintCode}
-          year={config.car.year}
-          configurationVerified={Boolean(config.car.sourceVehicleId)}
-          eager
-          className="mt-2 h-48 sm:h-64"
-        />
+        {config.car.model ? (
+          <VehicleArtwork
+            model={config.car.model}
+            color={config.car.color}
+            trim={config.car.trim}
+            wheelType={config.car.wheelType}
+            interior={config.car.interior}
+            interiorCode={config.car.teslaInteriorCode}
+            paintCode={config.car.teslaPaintCode}
+            year={config.car.year}
+            configurationVerified={Boolean(config.car.sourceVehicleId)}
+            eager
+            className="mt-2 h-48 sm:h-64"
+          />
+        ) : (
+          <div className="mt-4 flex h-40 items-center justify-center rounded-2xl border border-dashed border-line bg-surface px-6 text-center text-sm text-muted sm:h-52">
+            Your imported or manually added fleet vehicle will appear here.
+          </div>
+        )}
         <div className="mt-1">
           <div className="text-2xl font-semibold tracking-tight text-ink">Set up your fleet</div>
           <div className="text-sm text-muted">A quick pass before your first guest arrives</div>

@@ -165,12 +165,12 @@ export default function VehiclesPage() {
 
       {!config.car.sourceVehicleId ? (
         <Card className="border-brand/20 bg-brand/[0.04] p-4 text-sm leading-relaxed text-muted">
-          The guest walkthrough uses a standalone vehicle profile, so its specs and imagery can
-          drift from this fleet. <Link href="/owner/settings" className="font-medium text-brand hover:underline">Link a fleet vehicle in Settings.</Link>
+          Guest onboarding is paused until an active workspace vehicle is linked and fleet setup
+          is published. <Link href="/owner/settings" className="font-medium text-brand hover:underline">Link a fleet vehicle in Settings.</Link>
         </Card>
       ) : !guestVehicle || guestVehicle.status !== "active" ? (
         <Card className="border-warn/20 bg-warn/[0.04] p-4 text-sm leading-relaxed text-muted">
-          The vehicle linked to the guest walkthrough is unavailable in this workspace fleet.
+          Guest onboarding is paused because its linked vehicle is unavailable in this workspace fleet.
           <Link href="/owner/settings" className="ml-1 font-medium text-ink hover:underline">Choose an active source vehicle.</Link>
         </Card>
       ) : null}

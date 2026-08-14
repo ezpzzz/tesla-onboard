@@ -5,7 +5,7 @@
  * lib/owner/owner-state.ts's load/save/hook pattern exactly (localStorage,
  * spread-merge on load, try/catch around every access), but keyed separately
  * so it never collides with `rtr:owner:v1`, `rtr:vehicles:v1`, or the guest's
- * `rtr:state:v1`.
+ * `rtr:state:v2`.
  *
  * `reset()` clears ONLY this key — it never touches `rtr:vehicles:v1`, so
  * "start setup over" can't accidentally delete a host's fleet.
@@ -17,7 +17,8 @@ import { migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
 import type { TeslaProfile } from "@/lib/tesla";
 import type { SetupStepId } from "./setup-flow";
 
-export const OWNER_SETUP_KEY = "rtr:owner-setup:v1";
+export const OWNER_SETUP_KEY = "rtr:owner-setup:v2";
+const LEGACY_OWNER_SETUP_KEY = "rtr:owner-setup:v1";
 
 export interface OwnerSetupState {
   version: 1;
@@ -49,6 +50,8 @@ export function needsSetup(s: OwnerSetupState): boolean {
 export function loadOwnerSetupState(tenantSlug?: string | null): OwnerSetupState {
   if (typeof window === "undefined") return initialOwnerSetupState;
   try {
+    window.localStorage.removeItem(scopedStorageKey(LEGACY_OWNER_SETUP_KEY, tenantSlug));
+    window.localStorage.removeItem(LEGACY_OWNER_SETUP_KEY);
     const key = migrateLegacyStorage(OWNER_SETUP_KEY, tenantSlug);
     const raw = window.localStorage.getItem(key);
     if (!raw) return initialOwnerSetupState;

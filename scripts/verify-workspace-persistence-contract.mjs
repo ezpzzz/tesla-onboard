@@ -31,9 +31,11 @@ assert.match(state, /persistence: scope \? "workspace" as const : "browser" as c
 
 assert.match(
   tenantProvider,
-  /\.update\(\{ features, display_name: config\.companyName \}\)/,
+  /\.update\(\{ features, display_name: displayName \}\)/,
 );
-assert.match(tenantProvider, /if \(!workspace \|\| !hydrated \|\| error \|\| !sourceId\) return/);
+assert.match(tenantProvider, /if \(!workspace \|\| !hydrated \|\| error\) return/);
+assert.match(tenantProvider, /saveConfig\(config, \{ publishedAt: null \}\)/);
+assert.match(tenantProvider, /tenantSetupCompletedAt\(workspace\.features\)/);
 
 const projectionBody = publicProjection.match(
   /export function tenantCarFromVehicle[\s\S]*?\n}\n/,
