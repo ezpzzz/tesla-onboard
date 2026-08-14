@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesla-command-proxy
+  namespace: onlyevs
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: tesla-command-proxy }
+  template:
+    metadata:
+      labels: { app: tesla-command-proxy }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: proxy
+          # Pin an audited tesla/vehicle-command image by immutable digest.
+          image: REPLACE_WITH_IMMUTABLE_TESLA_VEHICLE_COMMAND_IMAGE
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: https, containerPort: 4443 }
+          env:
+            - { name: TESLA_HTTP_PROXY_TLS_CERT, value: /etc/tls/tls.crt }
+            - { name: TESLA_HTTP_PROXY_TLS_KEY, value: /etc/tls/tls.key }
+            - { name: TESLA_HTTP_PROXY_HOST, value: 0.0.0.0 }
+            - { name: TESLA_HTTP_PROXY_PORT, value: "4443" }
+            - { name: TESLA_HTTP_PROXY_TIMEOUT, value: 10s }
+            - { name: TESLA_KEY_FILE, value: /etc/tesla/fleet-key.pem }
+            - { name: TESLA_CACHE_FILE, value: /var/cache/tesla/session-cache.json }
+          volumeMounts:
+            - { name: proxy-tls, mountPath: /etc/tls, readOnly: true }
+            - { name: fleet-signing-key, mountPath: /etc/tesla, readOnly: true }
+            - { name: session-cache, mountPath: /var/cache/tesla }
+          resources:
+            requests: { cpu: 100m, memory: 96Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          readinessProbe:
+            tcpSocket: { port: https }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: https }
+            periodSeconds: 30
+      volumes:
+        - name: proxy-tls
+          secret: { secretName: tesla-command-proxy-tls }
+        - name: fleet-signing-key
+          secret: { secretName: tesla-fleet-signing-key }
+        - name: session-cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tesla-command-proxy
+  namespace: onlyevs
+spec:
+  selector: { app: tesla-command-proxy }
+  ports:
+    - { name: https, port: 443, targetPort: https }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tesla-command-proxy
+  namespace: onlyevs
+spec:
+  podSelector:
+    matchLabels: { app: tesla-command-proxy }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: onlyevs-worker } }
+      ports:
+        - { protocol: TCP, port: 4443 }
+  egress:
+    - to:
+        - ipBlock: { cidr: 0.0.0.0/0 }
+      ports:
+        - { protocol: TCP, port: 443 }

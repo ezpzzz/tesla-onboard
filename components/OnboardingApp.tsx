@@ -129,7 +129,7 @@ function GuestUnavailable({
       <main className="w-full max-w-[480px] rounded-3xl border border-line bg-white px-6 py-10 text-center shadow-[0_0_80px_rgba(23,26,32,0.08)]">
         <span className="mx-auto block h-3 w-3 rounded-full bg-brand shadow-[0_0_12px_2px] shadow-brand/40" />
         <p className="mt-6 text-xs font-semibold uppercase tracking-[0.2em] text-brand">
-          Onboarding
+          evhost.app
         </p>
         <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">
           {content.title}
@@ -171,7 +171,7 @@ function Splash() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-surface">
       <span className="text-lg font-semibold tracking-tight text-ink opacity-90">
-        Onboarding
+        evhost.app
       </span>
     </div>
   );

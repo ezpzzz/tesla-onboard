@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onlyevs-worker
+  namespace: onlyevs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: onlyevs-worker
+  template:
+    metadata:
+      labels:
+        app: onlyevs-worker
+    spec:
+      serviceAccountName: onlyevs-worker
+      containers:
+        - name: worker
+          image: REPLACE_WITH_IMMUTABLE_ONLYEVS_WORKER_IMAGE
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+          envFrom:
+            - secretRef: { name: onlyevs-worker-secrets }
+          env:
+            - name: ONLYEVS_KAFKA_VEHICLE_TOPIC
+              value: onlyevs_V
+            - name: ONLYEVS_KAFKA_CONNECTIVITY_TOPIC
+              value: onlyevs_connectivity
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: onlyevs-worker
+  namespace: onlyevs
+automountServiceAccountToken: false
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: onlyevs-worker-egress
+  namespace: onlyevs
+spec:
+  podSelector:
+    matchLabels: { app: onlyevs-worker }
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 9093 }
+    - to:
+        - ipBlock: { cidr: 0.0.0.0/0 }
+      ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 9093 }

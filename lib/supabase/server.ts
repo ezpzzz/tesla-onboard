@@ -32,3 +32,26 @@ export async function createClient() {
     },
   );
 }
+
+/**
+ * Cookie-free server client for deliberately public, RLS-limited reads. Never
+ * use this for owner data: its purpose is to prevent an unrelated signed-in
+ * user cookie from changing a public resolver query from `anon` to
+ * `authenticated`.
+ */
+export function createAnonymousClient() {
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "",
+    {
+      cookies: {
+        getAll() {
+          return [];
+        },
+        setAll() {
+          // Public resolver calls never establish or refresh sessions.
+        },
+      },
+    },
+  );
+}

@@ -5,6 +5,7 @@ import { Button, StepFrame } from "../ui";
 import { IconArrowRight, IconBolt, IconCheck, IconSparkle } from "../icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { StepProps } from "../step-types";
+import { TenantBrandMark } from "@/components/TenantBrandMark";
 
 export function WelcomeStep({ nav, update, state }: StepProps) {
   const { config } = useTenantConfig();
@@ -41,9 +42,13 @@ export function WelcomeStep({ nav, update, state }: StepProps) {
     >
       <div className="relative mb-7">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
-            {companyName}
-          </span>
+          {config.brand.logoPath ? (
+            <TenantBrandMark config={config} />
+          ) : (
+            <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
+              {companyName}
+            </span>
+          )}
           <span className="h-3 w-3 rounded-full bg-brand shadow-[0_0_12px_2px] shadow-brand/50" />
         </div>
         <VehicleArtwork

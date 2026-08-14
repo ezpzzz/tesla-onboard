@@ -1,0 +1,36 @@
+{
+  "host": "0.0.0.0",
+  "port": 8443,
+  "status_port": 8080,
+  "log_level": "info",
+  "json_log_enable": true,
+  "namespace": "onlyevs",
+  "reliable_ack": true,
+  "reliable_ack_sources": {
+    "V": "kafka",
+    "connectivity": "kafka"
+  },
+  "transmit_decoded_records": true,
+  "monitoring": {
+    "prometheus_metrics_port": 9273
+  },
+  "rate_limit": {
+    "enabled": true,
+    "message_interval_time": 30,
+    "message_limit": 1000
+  },
+  "kafka": {
+    "bootstrap.servers": "REPLACE_WITH_PRIVATE_KAFKA:9093",
+    "security.protocol": "SASL_SSL"
+  },
+  "records": {
+    "alerts": ["kafka"],
+    "errors": ["kafka"],
+    "V": ["kafka"],
+    "connectivity": ["kafka"]
+  },
+  "tls": {
+    "server_cert": "/etc/certs/server/tls.crt",
+    "server_key": "/etc/certs/server/tls.key"
+  }
+}

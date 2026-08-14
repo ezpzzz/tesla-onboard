@@ -36,7 +36,11 @@ export const config = {
     "/owner/:path*",
     "/login",
     "/api/owner/tesla/:path*",
+    "/api/owner/google/:path*",
+    "/api/owner/trips/:path*",
+    "/api/owner/branding/:path*",
     "/auth/owner/:path*",
+    "/trip/:path*",
   ],
 };
 
@@ -57,7 +61,17 @@ function redirectWithSession(base: NextResponse, url: URL): NextResponse {
   return redirect;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
+  const canonicalOrigin = process.env.ONLYEVS_CANONICAL_ORIGIN?.replace(/\/$/, "");
+  const isOwnerSurface = request.nextUrl.pathname === "/login"
+    || request.nextUrl.pathname.startsWith("/owner")
+    || request.nextUrl.pathname.startsWith("/api/owner")
+    || request.nextUrl.pathname.startsWith("/auth/owner");
+  if (canonicalOrigin && isOwnerSurface && request.nextUrl.origin !== canonicalOrigin) {
+    const canonical = new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, canonicalOrigin);
+    return NextResponse.redirect(canonical, 308);
+  }
+
   if (!isOwnerAuthConfigured()) {
     warnOwnerAuthDisabledOnce();
     return NextResponse.next();
@@ -71,6 +85,9 @@ export async function middleware(request: NextRequest) {
   const isOwnerGated =
     pathname.startsWith("/owner") ||
     pathname.startsWith("/api/owner/tesla") ||
+    pathname.startsWith("/api/owner/google") ||
+    pathname.startsWith("/api/owner/trips") ||
+    pathname.startsWith("/api/owner/branding") ||
     pathname.startsWith("/auth/owner");
 
   if (isOwnerGated) {

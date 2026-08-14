@@ -4,9 +4,10 @@ import "server-only";
  * Tesla Fleet API — server-only OAuth (authorization-code, confidential client).
  *
  * This module never reaches the browser. It holds the client secret, performs
- * the token exchange, reads the user's identity + vehicle list once, and
- * normalizes everything to the same `TeslaProfile` the mock flow produces — so
- * the rest of the app is identical whether sign-in is mock or live.
+ * the token exchange and normalizes identity + vehicles to the same
+ * `TeslaProfile` the mock flow produces. Guest callers discard tokens after a
+ * single read; the owner callback separately persists an encrypted refresh
+ * credential for invitation and telemetry workers.
  *
  * Verified against Tesla Fleet API docs (third-party token flow). Notes on the
  * deliberately defensive bits:
@@ -20,14 +21,15 @@ import "server-only";
  *     The owner import then makes one best-effort vehicle_config read per car
  *     for trim, exterior/interior colors and wheels. It never wakes or polls
  *     a vehicle.
- *   - We do a single read then discard tokens — no session, no refresh, so we
- *     request the minimal scope and skip offline_access.
+ *   - The guest route does a single read then discards tokens, requests the
+ *     minimal scope, and skips offline_access. Owner scope is fixed separately.
  */
 
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
+import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import type { TeslaProfile, TeslaVehicle } from "./tesla";
 import {
   displayTeslaColor,
@@ -41,6 +43,18 @@ import {
 export const AUTHORIZE_URL = "https://auth.tesla.com/oauth2/v3/authorize";
 export const TOKEN_URL =
   "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
+export const TESLA_ID_TOKEN_ISSUER = "https://auth.tesla.com/oauth2/v3/nts";
+export const TESLA_ID_TOKEN_JWKS =
+  "https://auth.tesla.com/oauth2/v3/discovery/thirdparty/keys";
+export const OWNER_PERSISTENT_SCOPES = [
+  "openid",
+  "offline_access",
+  "vehicle_device_data",
+  "vehicle_cmds",
+  "vehicle_location",
+] as const;
+
+const teslaIdTokenKeys = createRemoteJWKSet(new URL(TESLA_ID_TOKEN_JWKS));
 
 const REGION_BASES = {
   na: "https://fleet-api.prd.na.vn.cloud.tesla.com",
@@ -86,7 +100,11 @@ export function safeEqual(a: string, b: string): boolean {
   return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
 }
 
-export function buildAuthorizeUrl(c: TeslaServerConfig, state: string): string {
+export function buildAuthorizeUrl(
+  c: TeslaServerConfig,
+  state: string,
+  options: { nonce?: string } = {},
+): string {
   const p = new URLSearchParams({
     client_id: c.clientId,
     redirect_uri: c.redirectUri,
@@ -99,15 +117,17 @@ export function buildAuthorizeUrl(c: TeslaServerConfig, state: string): string {
     // would otherwise be reused and silently drop them.
     prompt: "login consent",
   });
+  if (options.nonce) p.set("nonce", options.nonce);
   return `${AUTHORIZE_URL}?${p.toString()}`;
 }
 
-interface TokenResponse {
+export interface TokenResponse {
   access_token: string;
   refresh_token?: string;
   id_token?: string;
   expires_in?: number;
   token_type?: string;
+  scope?: string;
 }
 
 export async function exchangeCode(
@@ -133,6 +153,53 @@ export async function exchangeCode(
     throw new Error(`token_exchange ${res.status}: ${detail.slice(0, 300)}`);
   }
   return (await res.json()) as TokenResponse;
+}
+
+export async function refreshTeslaToken(
+  c: TeslaServerConfig,
+  refreshToken: string,
+): Promise<TokenResponse> {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: c.clientId,
+    client_secret: c.clientSecret,
+    refresh_token: refreshToken,
+  });
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`token_refresh ${res.status}: ${detail.slice(0, 300)}`);
+  }
+  return (await res.json()) as TokenResponse;
+}
+
+/**
+ * Persistent owner grants must cryptographically validate identity. Decoding
+ * claims without signature verification is never sufficient for a credential
+ * binding, even though the short-lived guest profile can tolerate it as UI
+ * fallback data.
+ */
+export async function verifyTeslaIdToken(
+  idToken: string,
+  clientId: string,
+  nonce?: string,
+): Promise<JWTPayload> {
+  const { payload } = await jwtVerify(idToken, teslaIdTokenKeys, {
+    issuer: TESLA_ID_TOKEN_ISSUER,
+    audience: clientId,
+    algorithms: ["RS256"],
+    clockTolerance: 30,
+  });
+  if (nonce && (!payload.nonce || !safeEqual(String(payload.nonce), nonce))) {
+    throw new Error("id_token_nonce_mismatch");
+  }
+  if (!payload.sub) throw new Error("id_token_subject_missing");
+  return payload;
 }
 
 function authHeaders(token: string): HeadersInit {
@@ -413,7 +480,7 @@ export interface ProfileResult {
 export async function fetchProfile(
   c: TeslaServerConfig,
   token: TokenResponse,
-  options: { includeVehicleConfig?: boolean } = {},
+  options: { includeVehicleConfig?: boolean; verifiedSubject?: string } = {},
 ): Promise<ProfileResult> {
   const base = await resolveRegionBase(c.audience, token.access_token);
   const [identity, vehiclesRes] = await Promise.all([
@@ -424,7 +491,7 @@ export async function fetchProfile(
     options.includeVehicleConfig && vehiclesRes.ok
       ? await enrichOwnerVehicleConfigs(base, token.access_token, vehiclesRes.vehicles)
       : vehiclesRes.vehicles;
-  const sub = decodeJwt(token.access_token)?.sub;
+  const sub = options.verifiedSubject ?? decodeJwt(token.access_token)?.sub;
   return {
     profile: {
       id: `live_${typeof sub === "string" ? sub : crypto.randomUUID()}`,
@@ -438,10 +505,11 @@ export async function fetchProfile(
   };
 }
 
-/* ── Sealed session cookie (AES-256-GCM) ──────────────────────────────────
-   We store only the normalized profile (low-sensitivity), never tokens, which
-   are discarded after the one-time read. Sealing keeps the profile opaque and
-   tamper-evident in the browser.
+/* ── Sealed transient values (AES-256-GCM) ────────────────────────────────
+   Guest sessions store only the normalized one-shot profile, never tokens.
+   Owner/provider OAuth state also uses this primitive. Live owner fleet
+   profiles use a private server-side import session instead of a profile
+   cookie. Sealing keeps each remaining value opaque and tamper-evident.
 
    `context` is bound in as AES-GCM additional authenticated data (AAD) — it's
    not secret, it's a label (e.g. "rtr_tesla" vs "rtr_owner_tesla") baked into
@@ -463,10 +531,9 @@ export function seal(value: unknown, secret: string, context: string): string {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", keyFrom(secret), iv);
   cipher.setAAD(Buffer.from(context, "utf8"));
-  // Version 1 compresses the profile before encryption. Owner imports can
-  // include ten enriched vehicles, which otherwise exceeds browsers' ~4 KiB
-  // per-cookie limit. The version byte keeps unseal backward-compatible with
-  // the pre-compression JSON format already present in production.
+  // Version 1 compresses before encryption so multi-vehicle guest profiles and
+  // OAuth state stay within browsers' ~4 KiB per-cookie limit. The version byte
+  // keeps unseal backward-compatible with the pre-compression JSON format.
   const encoded = Buffer.concat([
     Buffer.from([1]),
     deflateRawSync(Buffer.from(JSON.stringify(value), "utf8")),

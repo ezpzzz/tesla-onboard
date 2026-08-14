@@ -20,6 +20,7 @@ import { Badge, Button, Card } from "@/components/ui";
 import { IconChevronRight } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { ChargingSession, Trip, Vehicle } from "@/lib/owner/types";
+import type { VehicleStatsCurrent } from "@/lib/owner/access-types";
 import { tenantCarMatchesVehicle } from "@/lib/tenant-vehicle";
 
 function VehicleStatCell({ label, value }: { label: string; value: string }) {
@@ -37,12 +38,14 @@ function VehicleCard({
   chargingSessions,
   isGuestVehicle,
   guestSnapshotCurrent,
+  telemetry,
 }: {
   vehicle: Vehicle;
   trips: Trip[];
   chargingSessions: ChargingSession[];
   isGuestVehicle: boolean;
   guestSnapshotCurrent: boolean;
+  telemetry?: VehicleStatsCurrent;
 }) {
   const stats = vehicleStats(vehicle.id, trips, chargingSessions);
   return (
@@ -86,6 +89,14 @@ function VehicleCard({
               className="h-4 w-4 shrink-0 text-muted transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-ink"
             />
           </div>
+          {telemetry ? (
+            <div className="mt-4 grid grid-cols-4 gap-2 rounded-xl bg-surface p-3">
+              <VehicleStatCell label="Battery" value={telemetry.batteryPct === null ? "—" : `${Math.round(telemetry.batteryPct)}%`} />
+              <VehicleStatCell label="Range" value={telemetry.estimatedRangeMi === null ? "—" : `${Math.round(telemetry.estimatedRangeMi)} mi`} />
+              <VehicleStatCell label="Odometer" value={telemetry.odometerMi === null ? "—" : `${Math.round(telemetry.odometerMi).toLocaleString()} mi`} />
+              <VehicleStatCell label="State" value={telemetry.connectivity === "connected" ? telemetry.locked === null ? "Online" : telemetry.locked ? "Locked" : "Unlocked" : telemetry.connectivity} />
+            </div>
+          ) : null}
           <div className="mt-4 grid grid-cols-4 gap-2">
             <VehicleStatCell label="Trips" value={String(stats.tripCount)} />
             <VehicleStatCell label="Miles" value={formatMiles(stats.milesRented)} />
@@ -111,7 +122,7 @@ export default function VehiclesPage() {
     unarchiveVehicle,
   } = useVehicleState();
   const [mutationError, setMutationError] = useState<string | null>(null);
-  const { trips, chargingSessions, hydrated: dataHydrated } = useOwnerData();
+  const { trips, chargingSessions, vehicleTelemetry, hydrated: dataHydrated, operationalError } = useOwnerData();
   const { hydrated: setupHydrated, update: updateSetupState } = useOwnerSetupState();
   const ready = vehicleHydrated && dataHydrated;
 
@@ -121,6 +132,10 @@ export default function VehiclesPage() {
 
   if (vehicleError) {
     return <Card role="alert" className="border-danger/20 p-6 text-center text-sm text-danger">{vehicleError}</Card>;
+  }
+
+  if (operationalError) {
+    return <Card role="alert" className="border-danger/20 p-6 text-center text-sm text-danger">Vehicle statistics are unavailable: {operationalError}</Card>;
   }
 
   const active = vehicles.filter((v) => v.status === "active");
@@ -187,6 +202,7 @@ export default function VehiclesPage() {
               chargingSessions={chargingSessions}
               isGuestVehicle={config.car.sourceVehicleId === vehicle.guestSourceId}
               guestSnapshotCurrent={tenantCarMatchesVehicle(config.car, vehicle)}
+              telemetry={vehicleTelemetry[vehicle.id]}
             />
           ))}
         </div>

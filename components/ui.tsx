@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode, Ref } from "react";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
+import { TenantBrandMark } from "@/components/TenantBrandMark";
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -224,9 +225,7 @@ export function AppShell({
       <div className="relative flex min-h-dvh w-full max-w-[480px] flex-col bg-white shadow-[0_0_80px_rgba(23,26,32,0.08)]">
         <header className="shrink-0 px-5 pt-5 pb-3">
           <div className="flex items-center justify-between">
-            <span className="text-base font-semibold tracking-tight text-ink">
-              {config.companyName}
-            </span>
+            <TenantBrandMark config={config} className="text-base" />
             {onRestart && (
               <button
                 onClick={onRestart}

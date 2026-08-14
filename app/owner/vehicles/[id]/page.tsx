@@ -46,7 +46,7 @@ export default function VehicleDetailPage() {
     archiveVehicle,
     unarchiveVehicle,
   } = useVehicleState();
-  const { trips, chargingSessions, hydrated: dataHydrated } = useOwnerData();
+  const { trips, chargingSessions, vehicleTelemetry, hydrated: dataHydrated } = useOwnerData();
   const [saved, setSaved] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
@@ -119,6 +119,7 @@ export default function VehicleDetailPage() {
   }
 
   const stats = vehicleStats(vehicle.id, trips, chargingSessions);
+  const live = vehicleTelemetry[vehicle.id];
   const linkedTrips = trips.filter((t) => t.vehicleId === vehicle.id);
   const activeOrUpcomingTrips = linkedTrips.filter(
     (t) => t.status === "upcoming" || t.status === "active",
@@ -217,6 +218,30 @@ export default function VehicleDetailPage() {
           value={stats.avgReturnChargePct === null ? "—" : formatPct(stats.avgReturnChargePct)}
         />
       </div>
+
+      {live ? (
+        <Card className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">Tesla vehicle stats</div>
+            <Badge tone={live.connectivity === "connected" ? "good" : "neutral"}>{live.connectivity}</Badge>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <StatTile label="Battery" value={live.batteryPct === null ? "—" : `${Math.round(live.batteryPct)}%`} />
+            <StatTile label="Estimated range" value={live.estimatedRangeMi === null ? "—" : `${Math.round(live.estimatedRangeMi)} mi`} />
+            <StatTile label="Odometer" value={live.odometerMi === null ? "—" : `${Math.round(live.odometerMi).toLocaleString()} mi`} />
+            <StatTile label="Security" value={live.locked === null ? "—" : live.locked ? "Locked" : "Unlocked"} />
+          </div>
+          <p className="mt-3 text-xs text-muted">
+            {live.observedAt ? `Latest signal ${new Date(live.observedAt).toLocaleString()}.` : "Waiting for the first vehicle signal."}
+            {live.chargingState ? ` ${live.chargingState.replace(/^DetailedChargeState/, "Charge: ")}.` : ""}
+          </p>
+          {Object.values(live.fieldObservedAt).some((value) => value !== null) ? (
+            <p className="mt-1 text-xs text-muted">
+              Each value retains its own Tesla observation time; a newer lock or connectivity signal never refreshes older battery, range, or odometer data.
+            </p>
+          ) : null}
+        </Card>
+      ) : null}
 
       <Card className="p-4">
         <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">

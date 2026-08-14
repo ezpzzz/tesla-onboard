@@ -136,8 +136,12 @@ export function personaByKey(key: string): TeslaPersona | undefined {
  *       real authorize page. The token exchange happens server-side in
  *       `lib/tesla-server.ts` (the client secret never reaches the browser).
  */
-export function teslaAuthorizeUrl(): string {
-  return AUTH_MODE === "live" ? "/api/tesla/login" : "/auth/tesla";
+export function teslaAuthorizeUrl(returnTo?: string, tenant?: string | null): string {
+  if (AUTH_MODE !== "live") return "/auth/tesla";
+  const params = new URLSearchParams();
+  if (returnTo) params.set("return", returnTo);
+  if (tenant) params.set("tenant", tenant);
+  return `/api/tesla/login${params.size ? `?${params.toString()}` : ""}`;
 }
 
 /** Human-readable copy for the `?tesla_error=` codes the OAuth routes redirect with. */

@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { assertConfigured, buildAuthorizeUrl, getConfig } from "@/lib/tesla-server";
+import {
+  assertConfigured,
+  buildAuthorizeUrl,
+  getConfig,
+  OWNER_PERSISTENT_SCOPES,
+  seal,
+} from "@/lib/tesla-server";
+import { requireOwnerWorkspace } from "@/lib/owner/server-auth";
+import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +21,25 @@ export const dynamic = "force-dynamic";
  * never cross.
  */
 export async function GET(request: Request) {
-  const origin = new URL(request.url).origin;
+  const requestUrl = new URL(request.url);
+  const origin = requestUrl.origin;
+  const workspaceId = requestUrl.searchParams.get("workspace") ?? "";
+  const shopSlug = requestUrl.searchParams.get("shop") ?? "";
+  const requestedReturn = requestUrl.searchParams.get("return") ?? "/owner/setup";
+  const returnPath = requestedReturn.startsWith("/owner/") && !requestedReturn.startsWith("//")
+    ? requestedReturn
+    : "/owner/setup";
+
+  try {
+    await requireOwnerWorkspace(workspaceId, shopSlug, "admin");
+  } catch (error) {
+    const reason = error instanceof Error && error.message === "unauthenticated"
+      ? "session"
+      : "workspace_access";
+    return NextResponse.redirect(
+      new URL(`${returnPath}?owner_tesla_error=${reason}`, origin),
+    );
+  }
 
   // TESLA_OWNER_REDIRECT_URI is owner-specific and not one of the vars
   // assertConfigured knows how to name, so it's checked here first.
@@ -27,7 +53,13 @@ export async function GET(request: Request) {
     );
   }
 
-  const c = { ...getConfig(), redirectUri: ownerRedirectUri };
+  const c = {
+    ...getConfig(),
+    redirectUri: ownerRedirectUri,
+    scope: ONLYEVS_OPERATIONS_ENABLED
+      ? OWNER_PERSISTENT_SCOPES.join(" ")
+      : "openid vehicle_device_data",
+  };
 
   const missing = assertConfigured(c);
   if (missing) {
@@ -57,8 +89,17 @@ export async function GET(request: Request) {
   }
 
   const state = crypto.randomBytes(16).toString("hex");
-  const res = NextResponse.redirect(buildAuthorizeUrl(c, state));
-  res.cookies.set("rtr_owner_state", state, {
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const res = NextResponse.redirect(buildAuthorizeUrl(c, state, { nonce }));
+  res.cookies.set("rtr_owner_integration_state", seal({
+    state,
+    nonce,
+    workspaceId,
+    shopSlug,
+    returnPath,
+    durable: ONLYEVS_OPERATIONS_ENABLED,
+    issuedAt: Date.now(),
+  }, c.sessionSecret, "rtr_owner_integration_state"), {
     httpOnly: true,
     secure: origin.startsWith("https"),
     sameSite: "lax",

@@ -6,7 +6,7 @@ import "server-only";
  * /owner has no auth at all when NEXT_PUBLIC_SUPABASE_URL /
  * NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY are unset — that's "demo mode", and it
  * must be visually and behaviorally equivalent to the app before this
- * feature existed (see middleware.ts), modulo the force-dynamic rendering
+ * feature existed (see proxy.ts), modulo the force-dynamic rendering
  * and OwnerShell markup-wrapper deltas that equivalence necessarily carries.
  * Partial config (only one of the pair set) counts as unconfigured — fail
  * toward demo mode, not toward a half-working gate.

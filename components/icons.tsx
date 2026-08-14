@@ -121,6 +121,44 @@ export const IconBattery = (p: P) => (
   </svg>
 );
 
+/** Owner navigation icons share one restrained 1.8px outline language. */
+const navBase = (props: P) => ({ ...base(props), strokeWidth: 1.8 });
+
+export const IconOverview = (p: P) => (
+  <svg {...navBase(p)}>
+    <rect x="3" y="3" width="7" height="7" rx="2" />
+    <rect x="14" y="3" width="7" height="7" rx="2" />
+    <rect x="3" y="14" width="7" height="7" rx="2" />
+    <rect x="14" y="14" width="7" height="7" rx="2" />
+  </svg>
+);
+
+export const IconDrivers = (p: P) => (
+  <svg {...navBase(p)}>
+    <circle cx="9" cy="8" r="3" />
+    <path d="M3.5 20v-1.5A5.5 5.5 0 0 1 9 13h.5a5.5 5.5 0 0 1 5.5 5.5V20" />
+    <path d="M15.5 5.3a3 3 0 0 1 0 5.4" />
+    <path d="M17 13.3a5.5 5.5 0 0 1 3.5 5.2V20" />
+  </svg>
+);
+
+export const IconTrips = (p: P) => (
+  <svg {...navBase(p)}>
+    <circle cx="6" cy="6" r="2.5" />
+    <circle cx="18" cy="18" r="2.5" />
+    <path d="M8.5 6h2.25a3.25 3.25 0 0 1 0 6.5H9.5a3.25 3.25 0 0 0 0 6.5h6" />
+  </svg>
+);
+
+export const IconVehicle = (p: P) => (
+  <svg {...navBase(p)}>
+    <path d="M3 14.5V13a2 2 0 0 1 1.4-1.9l2.1-.7 2-3A3 3 0 0 1 11 6h3.8a3 3 0 0 1 2.4 1.2l2.1 2.8 1.1.4A2.4 2.4 0 0 1 22 12.7v1.8a1.5 1.5 0 0 1-1.5 1.5h-16A1.5 1.5 0 0 1 3 14.5Z" />
+    <path d="M7 10.3h11.9" />
+    <circle cx="7" cy="16" r="2" fill="currentColor" stroke="none" />
+    <circle cx="18" cy="16" r="2" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 export const IconClock = (p: P) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="9" />
