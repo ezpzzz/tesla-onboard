@@ -59,6 +59,7 @@ export default function AccountPage() {
 
         <Link
           href={guestHref}
+          prefetch={false}
           className="mt-4 flex min-h-12 items-center justify-between rounded-lg border border-line bg-white px-4 text-sm font-medium text-ink transition-colors hover:bg-surface"
         >
           Open guest walkthrough

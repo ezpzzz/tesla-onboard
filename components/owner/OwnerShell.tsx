@@ -79,7 +79,7 @@ export function OwnerShell({
   return (
     <div style={ownerTheme} className="min-h-dvh bg-surface text-ink md:grid md:grid-cols-[224px_minmax(0,1fr)]">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 flex-col border-r border-line bg-white md:flex">
-        <Link href="/owner" aria-label="EVhost Today" className="flex h-[88px] items-center px-7">
+        <Link href="/owner" prefetch={false} aria-label="EVhost Today" className="flex h-[88px] items-center px-7">
           <EvhostWordmark />
         </Link>
         <nav aria-label="Owner navigation" className="space-y-2 px-4 pt-3">
@@ -102,7 +102,7 @@ export function OwnerShell({
 
       <div className="min-w-0 md:col-start-2">
         <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-line bg-white/95 px-5 backdrop-blur md:h-16 md:px-8">
-          <Link href="/owner" aria-label="EVhost Today" className="flex min-h-11 items-center md:hidden"><EvhostWordmark /></Link>
+          <Link href="/owner" prefetch={false} aria-label="EVhost Today" className="flex min-h-11 items-center md:hidden"><EvhostWordmark /></Link>
           <div className="hidden md:block">
             {workspace && workspaces.length > 1 ? (
               <select aria-label="Active workspace" value={workspace.key} onChange={(event) => setWorkspace(event.target.value)} className="min-h-10 rounded-md border border-line bg-white px-3 text-sm text-ink">
@@ -137,7 +137,7 @@ export function OwnerShell({
               const active = isActive(pathname, item.href);
               const Icon = item.icon;
               return (
-                <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("relative flex min-h-[68px] flex-col items-center justify-center gap-1 text-[11px] font-medium", active ? "text-brand" : "text-muted")}>
+                <Link key={item.href} href={item.href} prefetch={false} aria-current={active ? "page" : undefined} className={cn("relative flex min-h-[68px] flex-col items-center justify-center gap-1 text-[11px] font-medium", active ? "text-brand" : "text-muted")}>
                   {active ? <SignalMark className="absolute top-2 h-1.5 w-1.5" /> : null}
                   <Icon className="h-[22px] w-[22px]" />{item.label}
                 </Link>
