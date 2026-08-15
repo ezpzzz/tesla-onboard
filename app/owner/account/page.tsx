@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import { tenantGuestHref } from "@/lib/tenant-config";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconExternal } from "@/components/icons";
+import { PageHeader } from "@/components/evhost-ui";
 
 const SUPABASE_CONFIGURED =
   Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
@@ -26,10 +27,7 @@ export default function AccountPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Account</h1>
-        <p className="mt-1 text-sm text-muted">Sign-in settings for the owner dashboard.</p>
-      </div>
+      <PageHeader eyebrow="Profile & security" title="Account" description="Workspace access, guest preview, and sign-in security." />
 
       <Card className="max-w-md p-5">
         <h2 className="text-sm font-semibold text-ink">Rental workspace</h2>
@@ -60,7 +58,7 @@ export default function AccountPage() {
 
         <Link
           href={guestHref}
-          className="mt-4 flex min-h-12 items-center justify-between rounded-2xl border border-line bg-white px-4 text-sm font-medium text-ink transition-colors hover:bg-surface"
+          className="mt-4 flex min-h-12 items-center justify-between rounded-lg border border-line bg-white px-4 text-sm font-medium text-ink transition-colors hover:bg-surface"
         >
           Open guest walkthrough
           <IconExternal aria-hidden="true" className="h-4 w-4 text-muted" />
@@ -182,7 +180,7 @@ function AccountCard() {
         </div>
 
         {errorMsg && (
-          <div className="rounded-2xl border border-danger/20 bg-danger/5 px-3.5 py-3 text-sm text-danger">
+          <div className="rounded-lg border border-danger/20 bg-danger/5 px-3.5 py-3 text-sm text-danger">
             {errorMsg}
           </div>
         )}

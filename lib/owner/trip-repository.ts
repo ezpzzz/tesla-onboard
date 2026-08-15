@@ -16,6 +16,7 @@ export interface CalendarCandidate {
   status: "pending" | "needs_review";
   changeKind: "schedule" | "cancel" | null;
   sourceUpdatedAt: number | null;
+  location: string | null;
 }
 
 interface TripRow {
@@ -26,6 +27,10 @@ interface TripRow {
   status: "confirmed" | "armed" | "active" | "completed" | "cancelled" | "conflict";
   starts_at: string;
   ends_at: string;
+  pickup_location?: string | null;
+  return_location?: string | null;
+  access_status?: string | null;
+  reminder_last_sent_at?: string | null;
   onboarding_progress?: unknown;
   progress_updated_at?: string | null;
   guest_bound_at?: string | null;
@@ -41,6 +46,8 @@ export interface ManualGuestOnboardingInput {
   timezone: string;
   startsAt: string;
   endsAt: string;
+  pickupLocation?: string;
+  returnLocation?: string;
 }
 
 export interface GuestOnboardingLink {
@@ -113,6 +120,7 @@ export function parseStoredProgress(value: unknown): ProgressSummary | null {
       : null,
     pathMode: row.pathMode === "full" || row.pathMode === "essentials" ? row.pathMode : null,
     startedAt: Number.isSafeInteger(row.startedAt) ? row.startedAt as number : null,
+    newToTesla: row.newToTesla === true,
     guestName: typeof row.guestName === "string" && row.guestName.length <= 240 ? row.guestName : null,
     updatedAt: row.updatedAt as number,
   };
@@ -155,6 +163,10 @@ export async function fetchWorkspaceOperationalSnapshot(
       status,
       startAt: Date.parse(row.starts_at),
       endAt: Date.parse(row.ends_at),
+      pickupLocation: row.pickup_location ?? null,
+      returnLocation: row.return_location ?? row.pickup_location ?? null,
+      accessStatus: row.access_status ?? null,
+      reminderLastSentAt: row.reminder_last_sent_at ? Date.parse(row.reminder_last_sent_at) : null,
       odometerStartMi: null,
       odometerEndMi: null,
       batteryStartPct: null,
@@ -204,7 +216,7 @@ export async function fetchCalendarCandidates(
 ): Promise<CalendarCandidate[]> {
   const { data, error } = await createClient()
     .from("onlyevs_calendar_candidates")
-    .select("id,summary,starts_at,ends_at,timezone,status,change_kind,source_updated_at")
+    .select("id,summary,location,starts_at,ends_at,timezone,status,change_kind,source_updated_at")
     .eq("workspace_id", scope.workspaceId)
     .eq("shop_slug", scope.shopSlug)
     .in("status", ["pending", "needs_review"])
@@ -214,6 +226,7 @@ export async function fetchCalendarCandidates(
   return ((data ?? []) as Array<{
     id: string;
     summary: string;
+    location: string | null;
     starts_at: string;
     ends_at: string;
     timezone: string;
@@ -229,6 +242,7 @@ export async function fetchCalendarCandidates(
     status: row.status,
     changeKind: row.change_kind,
     sourceUpdatedAt: row.source_updated_at ? Date.parse(row.source_updated_at) : null,
+    location: row.location,
   }));
 }
 
@@ -276,4 +290,17 @@ export async function confirmCalendarCandidate(input: {
     throw new Error(result?.error ?? "The calendar event could not be confirmed.");
   }
   return { tripId: result.tripId, guestUrl: result.guestUrl };
+}
+
+export async function sendGuestReminder(tripId: string): Promise<{ recipient: string; sentAt: number }> {
+  const response = await fetch(`/api/owner/trips/${encodeURIComponent(tripId)}/reminder`, {
+    method: "POST",
+    cache: "no-store",
+  });
+  const result = await response.json().catch(() => null) as { recipient?: string; sentAt?: string; error?: string } | null;
+  if (!response.ok || !result?.recipient || !result.sentAt) {
+    throw new Error(result?.error ?? "The reminder could not be sent.");
+  }
+  notifyOwnerTripsChanged();
+  return { recipient: result.recipient, sentAt: Date.parse(result.sentAt) };
 }

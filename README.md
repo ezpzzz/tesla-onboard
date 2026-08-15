@@ -61,10 +61,12 @@ reuse one another's walkthrough state.
 
 ### Owner dashboard
 
-A host-facing companion at **`/owner`** — drivers, trips, and live guest
-onboarding progress in one place, separate from the guest flow. It shows:
+A host-facing companion at **`/owner`** — deadline-first handoffs, trips,
+guests, vehicles, insights, and live readiness in one place, separate from the
+guest flow. Desktop uses a persistent light sidebar; mobile keeps five stable
+top-level tabs. It shows:
 
-- **Drivers & trips** — who's renting, which car, trip dates, and a per-trip
+- **Guests & trips** — who's renting, which car, trip dates, and a per-trip
   return checklist (charged to policy, keys returned, cleaned, no damage).
 - **New guest onboarding** — a prominent overview action creates a scheduled,
   vehicle-linked trip and returns a one-time private guest URL. The database
@@ -72,12 +74,12 @@ onboarding progress in one place, separate from the guest flow. It shows:
 - **Live onboarding progress** — after the guest opens the private link, the
   matching trip shows their path, completed modules,
   readiness score, and last update across devices.
-- **Charging sessions**, driver history, and alerts, ready for a persistent
+- **Charging sessions**, guest history, and alerts, ready for a persistent
   bookings/charging adapter; until one is connected these surfaces render
   explicit empty states rather than sample activity.
 - **Vehicle management** — add, edit, remove, and restore cars on the account, with
   a single policy-percentage calculation shared everywhere it's shown. Removed
-  vehicles are hidden with a reversible archive, so past trips and drivers stay intact.
+  vehicles are hidden with a reversible archive, so past trips and guests stay intact.
 - **Richer Tesla imports** — the owner connect performs one optional, no-wake
   `vehicle_config` read for each of the first 10 cars to fill trim, exterior
   and interior color, and wheel type.
@@ -127,7 +129,8 @@ seam in `lib/owner/data-source.ts` returns empty collections until a persistent
 bookings/charging backend replaces it.
 
 The browser-local bridge remains as a demo/fallback path, but durable workspaces
-use the owner-created trip, email-bound guest session, and server progress RPC.
+use the owner-created private trip capability and server progress RPC without a
+guest account or booking-email validation.
 Neither path invents a booking or fixture trip. See
 [`lib/progress-bridge.ts`](lib/progress-bridge.ts) for that boundary.
 
@@ -177,7 +180,7 @@ sign-in or recovery token before the owner opens the message.
 the owner email on the magic-link tab. A verified first-time identity creates
 an EVhost auth account. The first owner request atomically claims a staged
 migrated workspace by email hash or creates a new workspace; no service-role
-key is used by the web app. `/forgot-password` sends the dedicated recovery
+key participates in identity or workspace claims. `/forgot-password` sends the dedicated recovery
 template and `/reset-password` updates the password inside the verified
 recovery session.
 
@@ -262,6 +265,23 @@ readable. Verified custom domains resolve the same tenant reference from the
 serving Host and therefore require no source edit or app redeploy. Domain
 ownership, DNS, and provider attachment must all pass before a hostname
 becomes active; Vercel manages certificate issuance and TLS for attached domains.
+
+Confirmed bookings also receive a 256-bit private trip capability at
+`/trip/<token>`. That link opens a no-store guest portal with Home, Guide,
+Vehicle, and Help surfaces; it expires 24 hours after trip end and does not
+create a guest account. Only the token hash is usable from public tables. A
+server-only AES-256-GCM envelope is retained in `private` storage so an owner
+can resend the current link without rotating it, and is destroyed after expiry.
+Reminder delivery is separately gated by `EVHOST_REMINDERS_ENABLED` and uses
+SendGrid with database-enforced cooldown and daily attempt limits. Do not enable
+it until the configured sender and delivered CTA have passed a controlled
+mailbox canary.
+
+The reminder route also requires `SUPABASE_SERVICE_ROLE_KEY`. It is used only
+after the cookie-scoped owner RPC has authorized a manager and reserved a
+rate-limited attempt; a service-role-only RPC then returns the unmasked
+recipient and encrypted link material to server code. Authenticated browser
+clients cannot execute that material RPC.
 
 Deployment environment variables remain only for **platform infrastructure**:
 Supabase connectivity, Tesla OAuth credentials and registered callbacks, and

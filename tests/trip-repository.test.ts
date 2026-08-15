@@ -15,6 +15,7 @@ const valid = {
   experience: "new",
   pathMode: "full",
   startedAt: 1_700_000_000_000,
+  newToTesla: false,
   guestName: "Guest Driver",
   updatedAt: 1_700_000_100_000,
 };

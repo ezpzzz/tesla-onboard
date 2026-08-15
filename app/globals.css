@@ -1,18 +1,17 @@
 @import "tailwindcss";
 
-/* ── Design tokens ─────────────────────────────────────────────────────────
-   Near-black "ink" + a blue accent (gradient #11B7F7 → #0AA3EE → #0287D8),
-   calm grays.
-   Tailwind v4 turns these --color-* vars into utilities (bg-ink, text-brand…). */
+/* Precision hospitality: quiet product surfaces, one operational signal
+   color, hairline structure, and restrained geometry. Tailwind v4 turns the
+   --color-* variables into utilities (bg-ink, text-brand, and so on). */
 @theme {
-  --color-ink: #171a20;
-  --color-ink-soft: #393c41;
-  --color-muted: #5c5e62;
-  --color-line: #e6e7e8;
-  --color-surface: #f4f4f5;
+  --color-ink: #161a1f;
+  --color-ink-soft: #343c45;
+  --color-muted: #56616d;
+  --color-line: #d8dee4;
+  --color-surface: #f6f8fa;
   --color-card: #ffffff;
-  --color-brand: #0287d8;
-  --color-brand-dark: #0269a8;
+  --color-brand: #087fd1;
+  --color-brand-dark: #0669ae;
   --color-good: #1b8a5a;
   --color-warn: #b45309;
   --color-danger: #c0362c;
@@ -47,6 +46,10 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+::selection {
+  background: color-mix(in srgb, var(--color-brand) 20%, white);
+}
+
 /* Soft entrance used when steps change */
 @keyframes rise {
   from {
@@ -59,7 +62,7 @@ body {
   }
 }
 .animate-rise {
-  animation: rise 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes fade {
@@ -86,10 +89,28 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ── Form field ─────────────────────────────────────────────────────────
    Text input styling for the owner auth forms (login, account/password).
    Vertical padding matches Button's py-3.5 scale; focus ring comes from the
    global *:focus-visible rule above, so no focus styles here. */
 .field {
-  @apply w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-base text-ink placeholder:text-muted;
+  @apply min-h-12 w-full rounded-md border border-line bg-white px-4 py-3 text-base text-ink placeholder:text-muted;
 }

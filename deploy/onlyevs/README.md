@@ -1,8 +1,10 @@
 # evhost.app background services
 
-The web deployment does not possess a Supabase service-role key. Durable Tesla
-access, custom-domain activation, and telemetry ingestion run as the scoped
-`onlyevs_worker` database role created by the migration.
+The web deployment uses its Supabase service-role key only in the server-only
+reminder route, and only to call the narrow reminder-material and delivery RPCs.
+It never sends that key or reminder ciphertext to client code. Durable Tesla
+access, custom-domain activation, and telemetry ingestion run separately as the
+scoped `onlyevs_worker` database role created by the migration.
 
 Production topology:
 

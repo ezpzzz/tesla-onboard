@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useMemo } from "react";
-import { indexOfStep, type Step } from "@/lib/flow";
+import { indexOfStep, type ProgressSummary, type Step } from "@/lib/flow";
 import { buildTenantFlow } from "@/lib/tenant-flow";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useOnboarding } from "@/lib/store";
@@ -18,17 +18,17 @@ import { ChecklistStep } from "./steps/ChecklistStep";
 import { DoneStep } from "./steps/DoneStep";
 import type { StepNav, StepProps } from "./step-types";
 
-export default function OnboardingApp() {
+export default function OnboardingApp({ embedded = false, initialProgress = null }: { embedded?: boolean; initialProgress?: ProgressSummary | null }) {
   const { loading, readiness } = useTenantConfig();
 
   if (loading || readiness === "loading") return <Splash />;
   if (readiness !== "ready") return <GuestUnavailable readiness={readiness} />;
-  return <ReadyOnboardingApp />;
+  return <ReadyOnboardingApp embedded={embedded} initialProgress={initialProgress} />;
 }
 
-function ReadyOnboardingApp() {
+function ReadyOnboardingApp({ embedded, initialProgress }: { embedded: boolean; initialProgress: ProgressSummary | null }) {
   const { config } = useTenantConfig();
-  const { state, hydrated, update, reset } = useOnboarding();
+  const { state, hydrated, update, reset } = useOnboarding(initialProgress);
   usePublishProgress(state, hydrated);
   const flow = useMemo(
     () => buildTenantFlow(state.pathMode, config, { newToTesla: state.newToTesla }),
@@ -96,6 +96,7 @@ function ReadyOnboardingApp() {
       stepLabel={stepLabel}
       showProgress={showProgress}
       onRestart={onRestart}
+      embedded={embedded}
     >
       <div key={step.id} className="flex min-h-0 flex-1 flex-col">
         {renderStep(step, props)}

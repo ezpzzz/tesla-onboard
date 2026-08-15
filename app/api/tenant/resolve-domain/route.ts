@@ -27,7 +27,6 @@ export async function GET(request: NextRequest) {
   }
   if (!ONLYEVS_OPERATIONS_ENABLED) {
     return NextResponse.json({ kind: "unknown", tenant: null }, {
-      status: 404,
       headers: { "Cache-Control": "public, max-age=30", Vary: "Host" },
     });
   }
@@ -40,7 +39,6 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
   if (error || !data) {
     return NextResponse.json({ kind: "unknown", tenant: null }, {
-      status: 404,
       headers: { "Cache-Control": "public, max-age=30, stale-while-revalidate=60", Vary: "Host" },
     });
   }

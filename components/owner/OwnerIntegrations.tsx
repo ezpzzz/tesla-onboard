@@ -121,7 +121,7 @@ export function OwnerIntegrations() {
           Credentials are encrypted per workspace and never exposed to the browser after OAuth.
         </p>
       </div>
-      {message ? <div role="status" className="rounded-xl border border-line bg-white p-3 text-sm text-ink-soft">{message}</div> : null}
+      {message ? <div role="status" className="rounded-md border border-line bg-white p-3 text-sm text-ink-soft">{message}</div> : null}
       {(["tesla", "google_calendar"] as const).map((provider) => {
         const integration = integrations.find((item) => item.provider === provider);
         const connected = integration?.status === "connected";

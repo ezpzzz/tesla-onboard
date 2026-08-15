@@ -14,6 +14,7 @@ import { driverStatus } from "@/lib/owner/derive";
 import type { DriverStatus } from "@/lib/owner/types";
 import { DriverTable } from "@/components/owner/owner-ui";
 import { Card, Segmented } from "@/components/ui";
+import { PageHeader } from "@/components/evhost-ui";
 
 type Filter = "all" | DriverStatus;
 
@@ -54,16 +55,11 @@ export default function DriversPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Drivers</h1>
-        <p className="mt-1 text-sm text-muted">
-          Every guest with a booked trip or an in-progress onboarding.
-        </p>
-      </div>
+      <PageHeader eyebrow="Readiness" title="Guests" description="Readiness, trip context, and private-link follow-up for every guest." />
 
       {operationalError ? (
         <Card role="alert" className="border-danger/20 bg-danger/[0.04] p-4 text-sm text-danger">
-          Driver data is unavailable: {operationalError}
+          Guest data is unavailable: {operationalError}
         </Card>
       ) : null}
 
@@ -82,7 +78,7 @@ export default function DriversPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search name or email…"
-          className="min-h-[44px] w-full rounded-full border border-line bg-white px-4 text-[14px] text-ink placeholder:text-muted sm:w-64"
+          className="field min-h-[44px] w-full px-4 text-[16px] sm:w-64 sm:text-[14px]"
         />
       </div>
 

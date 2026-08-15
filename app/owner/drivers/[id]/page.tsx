@@ -17,6 +17,7 @@ import { CHECKLIST, moduleById } from "@/lib/content";
 import { Badge, Card, ProgressBar } from "@/components/ui";
 import { IconCheck, IconChevronRight } from "@/components/icons";
 import { StatusPill, TripStatusBadge, EmptyState } from "@/components/owner/owner-ui";
+import { PageHeader } from "@/components/evhost-ui";
 
 const STEP_LABELS: Record<string, string> = {
   welcome: "Welcome",
@@ -79,7 +80,16 @@ const SSR_FALLBACK_NOW = 0;
 
 export default function DriverDetailPage() {
   const params = useParams<{ id: string }>();
-  const id = params.id;
+  // Next may preserve an encoded dynamic segment during client navigation.
+  // Normalize once so roster links containing the synthetic `trip-guest:`
+  // prefix resolve identically after a hard load and an in-app transition.
+  const id = (() => {
+    try {
+      return decodeURIComponent(params.id);
+    } catch {
+      return params.id;
+    }
+  })();
   const { drivers, trips, hydrated } = useOwnerData();
   const [now, setNow] = useState(SSR_FALLBACK_NOW);
 
@@ -96,7 +106,7 @@ export default function DriverDetailPage() {
   if (!driver) {
     return (
       <EmptyState
-        title="Driver not found."
+        title="Guest not found."
         detail="This guest may not have a trip booked yet, or the link is out of date."
       >
         <Link
@@ -119,13 +129,18 @@ export default function DriverDetailPage() {
 
   return (
     <div className="space-y-5">
-      <div>
+      <div className="space-y-4">
         <Link
           href="/owner/drivers"
           className="text-xs font-medium text-muted transition-colors hover:text-ink"
         >
-          ← Drivers
+          ← Guests
         </Link>
+        <PageHeader
+          eyebrow="Guest readiness"
+          title={driver.name || "Unnamed guest"}
+          description="Walkthrough progress, required readiness items, and linked trip context."
+        />
       </div>
 
       {/* Identity */}
@@ -133,9 +148,7 @@ export default function DriverDetailPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-lg font-semibold tracking-tight text-ink">
-                {driver.name || "Unnamed guest"}
-              </span>
+              <span className="text-sm font-semibold text-ink">Guest profile</span>
               {driver.source === "guest-local" && (
                 <Badge tone="brand">This browser&apos;s guest</Badge>
               )}
@@ -182,7 +195,7 @@ export default function DriverDetailPage() {
         </div>
         <div className="mt-3 space-y-1.5">
           {completedModules.map((m) => (
-            <div key={m.id} className="flex items-center gap-3 rounded-xl bg-good/5 px-3 py-2.5">
+            <div key={m.id} className="flex items-center gap-3 rounded-md bg-good/5 px-3 py-2.5">
               <span className="text-xl leading-none">{m.emoji}</span>
               <span className="min-w-0 flex-1 text-[14px] font-medium text-ink">{m.title}</span>
               <span className="shrink-0 text-xs text-muted">{m.minutes} min</span>
@@ -190,7 +203,7 @@ export default function DriverDetailPage() {
             </div>
           ))}
           {pendingModules.map((m) => (
-            <div key={m.id} className="flex items-center gap-3 rounded-xl bg-surface px-3 py-2.5">
+            <div key={m.id} className="flex items-center gap-3 rounded-md bg-surface px-3 py-2.5">
               <span className="text-xl leading-none opacity-60">{m.emoji}</span>
               <span className="min-w-0 flex-1 text-[14px] font-medium text-ink-soft">
                 {m.title}
@@ -212,7 +225,7 @@ export default function DriverDetailPage() {
             return (
               <div
                 key={item.id}
-                className="flex items-center gap-3 rounded-xl border border-line bg-white px-3 py-2.5"
+                className="flex items-center gap-3 rounded-md border border-line bg-white px-3 py-2.5"
               >
                 <span
                   className={
@@ -244,7 +257,7 @@ export default function DriverDetailPage() {
               <li key={trip.id}>
                 <Link
                   href={`/owner/trips/${trip.id}`}
-                  className="flex min-h-[44px] items-center gap-3 rounded-xl border border-line bg-white px-3.5 py-2.5 transition-colors hover:bg-surface"
+                  className="flex min-h-[44px] items-center gap-3 rounded-md border border-line bg-white px-3.5 py-2.5 transition-colors hover:bg-surface"
                 >
                   <TripStatusBadge status={trip.status} />
                   <span className="min-w-0 flex-1 text-[14px] font-medium text-ink">

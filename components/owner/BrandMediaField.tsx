@@ -31,13 +31,13 @@ function BrandAssetControl({
 }) {
   const input = useRef<HTMLInputElement>(null);
   return (
-    <div className="space-y-3 rounded-xl border border-line p-3.5">
+    <div className="space-y-3 rounded-md border border-line p-3.5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-ink">{label}</p>
           <p className="mt-0.5 text-xs leading-relaxed text-muted">{description}</p>
         </div>
-        <div className={`flex shrink-0 items-center justify-center overflow-hidden border border-dashed border-line bg-surface ${compact ? "h-14 w-14 rounded-xl" : "h-16 w-28 rounded-xl"}`}>
+        <div className={`flex shrink-0 items-center justify-center overflow-hidden border border-dashed border-line bg-surface ${compact ? "h-14 w-14 rounded-md" : "h-16 w-28 rounded-md"}`}>
           {imageUrl ? (
             // Validated raster upload; SVG and arbitrary HTML are rejected server-side.
             // eslint-disable-next-line @next/next/no-img-element

@@ -176,11 +176,11 @@ select has_function('public', 'resolve_onlyevs_calendar_candidate_change', array
 select has_function(
   'public',
   'create_onlyevs_manual_trip',
-  array['uuid', 'text', 'uuid', 'text', 'text', 'text', 'timestamp with time zone', 'timestamp with time zone', 'text', 'timestamp with time zone']
+  array['uuid', 'uuid', 'text', 'uuid', 'text', 'text', 'text', 'timestamp with time zone', 'timestamp with time zone', 'text', 'text', 'text', 'timestamp with time zone', 'text', 'smallint']
 );
 select has_function('public', 'update_onlyevs_guest_onboarding_progress', array['text', 'jsonb']);
 select has_function('public', 'get_onlyevs_workspace_trip_snapshot', array['uuid', 'text']);
-select has_function('public', 'rotate_onlyevs_trip_public_token', array['uuid', 'text', 'timestamp with time zone']);
+select has_function('public', 'rotate_onlyevs_trip_public_token', array['uuid', 'text', 'timestamp with time zone', 'text', 'smallint']);
 select has_column(
   'public'::name,
   'onlyevs_access_grants'::name,

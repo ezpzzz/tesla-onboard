@@ -11,8 +11,12 @@ export interface CredentialKeyring {
 export interface CredentialAad {
   workspaceId: string;
   shopSlug: string;
-  provider: IntegrationProvider;
-  field: "provider_subject" | "refresh_token" | "invite_url" | "driver_id" | "location";
+  provider: IntegrationProvider | "evhost";
+  field: "provider_subject" | "refresh_token" | "invite_url" | "driver_id" | "location" | "trip_link";
+  /** Adds record-level binding for secrets that are not already scoped by a
+   * provider-owned identifier. Omitted for legacy envelopes so existing
+   * integration credentials retain byte-for-byte AAD compatibility. */
+  entityId?: string;
 }
 
 function invalidKeyring(): never {
@@ -39,7 +43,9 @@ export function parseCredentialKeyring(raw: string): CredentialKeyring {
 
 function aadBytes(context: CredentialAad): Buffer {
   return Buffer.from(
-    [FORMAT, context.workspaceId, context.shopSlug, context.provider, context.field].join("\u001f"),
+    [FORMAT, context.workspaceId, context.shopSlug, context.provider, context.field, context.entityId]
+      .filter((value): value is string => value !== undefined)
+      .join("\u001f"),
     "utf8",
   );
 }

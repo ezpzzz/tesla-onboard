@@ -186,3 +186,86 @@ export const IconChevronRight = (p: P) => (
     <path d="m9 6 6 6-6 6" />
   </svg>
 );
+
+export const IconHome = (p: P) => (
+  <svg {...navBase(p)}>
+    <path d="m3 11 9-8 9 8" />
+    <path d="M5 10v10h14V10" />
+    <path d="M9 20v-6h6v6" />
+  </svg>
+);
+
+export const IconInsights = (p: P) => (
+  <svg {...navBase(p)}>
+    <path d="M4 20V10" />
+    <path d="M10 20V4" />
+    <path d="M16 20v-7" />
+    <path d="M22 20V7" />
+    <path d="M2 20h22" />
+  </svg>
+);
+
+export const IconPlug = (p: P) => (
+  <svg {...navBase(p)}>
+    <path d="M8 3v5" />
+    <path d="M16 3v5" />
+    <path d="M6 8h12v2a6 6 0 0 1-6 6v5" />
+  </svg>
+);
+
+export const IconHelp = (p: P) => (
+  <svg {...navBase(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.8 9a2.4 2.4 0 1 1 3.6 2.08c-.9.52-1.4 1-1.4 2.42" />
+    <path d="M12 17h.01" />
+  </svg>
+);
+
+export const IconLock = (p: P) => (
+  <svg {...navBase(p)}>
+    <rect x="5" y="10" width="14" height="11" rx="2" />
+    <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+  </svg>
+);
+
+export const IconGuide = (p: P) => (
+  <svg {...navBase(p)}>
+    <path d="M5 4h13a1 1 0 0 1 1 1v15H6a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1Z" />
+    <path d="M8 8h7M8 12h7M8 16h4" />
+  </svg>
+);
+
+export const IconCalendar = (p: P) => (
+  <svg {...navBase(p)}>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M8 3v4M16 3v4M3 10h18" />
+    <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+  </svg>
+);
+
+export const IconMapPin = (p: P) => (
+  <svg {...navBase(p)}>
+    <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
+    <circle cx="12" cy="10" r="2.5" />
+  </svg>
+);
+
+export const IconPhone = (p: P) => (
+  <svg {...navBase(p)}>
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.63a2 2 0 0 1-.45 2.11L8 9.73a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0 1 22 16.92Z" />
+  </svg>
+);
+
+export const IconMail = (p: P) => (
+  <svg {...navBase(p)}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="m3 7 9 6 9-6" />
+  </svg>
+);
+
+export const IconKey = (p: P) => (
+  <svg {...navBase(p)}>
+    <circle cx="8" cy="15" r="4" />
+    <path d="m11 12 8-8M16 7l3 3M13 10l3 3" />
+  </svg>
+);

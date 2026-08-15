@@ -25,6 +25,17 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    return [{
+      source: "/trip/:path*",
+      headers: [
+        { key: "Cache-Control", value: "no-store, private" },
+        { key: "Pragma", value: "no-cache" },
+        { key: "Referrer-Policy", value: "no-referrer" },
+        { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+      ],
+    }];
+  },
 };
 
 export default nextConfig;

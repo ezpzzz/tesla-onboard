@@ -1,8 +1,9 @@
-import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { canonicalOnlyEvsOrigin } from "@/lib/onlyevs-origin";
 import { createClient } from "@/lib/supabase/server";
 import { allowRequest } from "@/lib/owner-throttle";
+import { createEncryptedTripLink } from "@/lib/owner/trip-link-secret";
+import { isSameOriginRequest } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ function validTimezone(timezone: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  if (request.headers.get("origin") !== request.nextUrl.origin) {
+  if (!isSameOriginRequest(request)) {
     return reply({ error: "Cross-origin onboarding creation was rejected." }, 403);
   }
   const body = (await request.json().catch(() => null)) as {
@@ -39,6 +40,8 @@ export async function POST(request: NextRequest) {
     timezone?: string;
     startsAt?: string;
     endsAt?: string;
+    pickupLocation?: string;
+    returnLocation?: string;
   } | null;
   const workspaceId = body?.workspaceId?.trim() ?? "";
   const shopSlug = body?.shopSlug?.trim() ?? "";
@@ -48,6 +51,8 @@ export async function POST(request: NextRequest) {
   const timezone = body?.timezone?.trim() ?? "";
   const startsAt = Date.parse(body?.startsAt ?? "");
   const endsAt = Date.parse(body?.endsAt ?? "");
+  const pickupLocation = body?.pickupLocation?.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim() ?? "";
+  const returnLocation = body?.returnLocation?.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim() || pickupLocation;
   const now = Date.now();
   if (
     !UUID_PATTERN.test(workspaceId) ||
@@ -65,7 +70,9 @@ export async function POST(request: NextRequest) {
     startsAt < now - 24 * 60 * 60 * 1_000 ||
     startsAt > now + 2 * 365 * 24 * 60 * 60 * 1_000 ||
     endsAt <= startsAt ||
-    endsAt > startsAt + 90 * 24 * 60 * 60 * 1_000
+    endsAt > startsAt + 90 * 24 * 60 * 60 * 1_000 ||
+    pickupLocation.length > 500 ||
+    returnLocation.length > 500
   ) {
     return reply({ error: "Enter a valid guest, vehicle, pickup time, and return time." }, 400);
   }
@@ -77,10 +84,15 @@ export async function POST(request: NextRequest) {
     return reply({ error: "Too many onboarding links were created. Try again later." }, 429);
   }
 
-  const token = crypto.randomBytes(32).toString("base64url");
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  let link: ReturnType<typeof createEncryptedTripLink>;
+  try {
+    link = createEncryptedTripLink({ workspaceId, shopSlug });
+  } catch {
+    return reply({ error: "Private trip links are not configured on this deployment." }, 503);
+  }
   const tokenExpiresAt = new Date(endsAt + 24 * 60 * 60 * 1_000).toISOString();
   const { data, error } = await supabase.rpc("create_onlyevs_manual_trip", {
+    p_trip_id: link.tripId,
     p_workspace_id: workspaceId,
     p_shop_slug: shopSlug,
     p_vehicle_id: vehicleId,
@@ -89,8 +101,12 @@ export async function POST(request: NextRequest) {
     p_timezone: timezone,
     p_starts_at: new Date(startsAt).toISOString(),
     p_ends_at: new Date(endsAt).toISOString(),
-    p_public_token_hash: tokenHash,
+    p_pickup_location: pickupLocation || null,
+    p_return_location: returnLocation || null,
+    p_public_token_hash: link.tokenHash,
     p_token_expires_at: tokenExpiresAt,
+    p_token_ciphertext: link.tokenCiphertext,
+    p_key_version: link.keyVersion,
   });
   if (error) {
     const message = error.message.includes("vehicle_schedule_conflict")
@@ -109,6 +125,6 @@ export async function POST(request: NextRequest) {
 
   return reply({
     tripId: trip.id,
-    guestUrl: `${canonicalOnlyEvsOrigin(request)}/trip/${token}`,
+    guestUrl: `${canonicalOnlyEvsOrigin(request)}/trip/${link.token}`,
   }, 201);
 }

@@ -1,11 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-08-15
 
+- Rebuild the owner experience around a light desktop sidebar, five stable mobile tabs, deadline-first handoffs, Guests, Vehicles, Insights, Integrations, and responsive detail surfaces.
+- Add the link-only guest trip portal with Home, Guide, Vehicle, Help, and trip-detail destinations across upcoming, active, and completed phases.
 - Add a prominent owner-dashboard action for creating private, vehicle-linked guest onboarding trips.
 - Persist only hashed guest-link capabilities and sync bounded progress across devices for owner tracking.
 - Open private trip links directly without booking-email validation; the unexpired 256-bit link is the guest capability for that trip.
 - Let owners rotate a lost guest link while invalidating the previous URL immediately.
+- Retain resendable trip capabilities as server-only AES-256-GCM envelopes and add SendGrid reminder delivery with durable cooldown, retry, and daily limits.
+- Improve the readiness rail, trip schedule ribbon, detail-page hierarchy, mobile wrapping, truthful reminder audits, and rolling-deploy database compatibility.
 - Move EVhost tenants, owner membership, fleet, branding, trips, and access state into a dedicated Supabase project with first-login workspace claiming and a narrowly scoped anonymous guest-link surface.
 
 ## 0.2.0 — 2026-08-14

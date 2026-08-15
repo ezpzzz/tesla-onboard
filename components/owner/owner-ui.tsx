@@ -38,6 +38,7 @@ import {
 } from "@/lib/owner/derive";
 import { Badge, Card, ProgressBar, cn } from "../ui";
 import { IconBolt, IconCheck, IconChevronRight } from "../icons";
+import { ReminderButton } from "./ReminderButton";
 
 /* ── Date/time formatting ──────────────────────────────────────────────────
  * UTC-only on purpose: the mock fixtures are fixed epoch-ms literals, and
@@ -190,7 +191,7 @@ export function AlertsPanel({ alerts }: { alerts: OwnerAlert[] }) {
           <Link
             href={a.href}
             className={cn(
-              "flex min-h-[44px] items-center gap-3 rounded-xl border border-line border-l-4 bg-white p-3.5 transition-colors hover:bg-surface",
+      "flex min-h-[44px] items-center gap-3 rounded-md border border-line border-l-4 bg-white p-3.5 transition-colors hover:bg-surface",
               alertSeverityMeta[a.severity],
             )}
           >
@@ -271,25 +272,26 @@ export function DriverTable({
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No drivers yet."
-        detail="Drivers show up here once a trip is booked or a guest opens onboarding."
+        title="No guests yet."
+        detail="Guests show up here once a trip is booked or a private trip link is opened."
       />
     );
   }
 
   return (
     <>
-      <div className="hidden overflow-x-auto rounded-2xl border border-line bg-white md:block">
+      <div className="hidden overflow-x-auto rounded-lg border border-line bg-white md:block">
         <table className="w-full min-w-[720px] border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
-              <th scope="col" className="px-4 py-3 font-medium">Driver</th>
+              <th scope="col" className="px-4 py-3 font-medium">Guest</th>
               <th scope="col" className="px-4 py-3 font-medium">Status</th>
               <th scope="col" className="px-4 py-3 font-medium">Experience</th>
               <th scope="col" className="px-4 py-3 font-medium">Progress</th>
               <th scope="col" className="px-4 py-3 font-medium">Modules</th>
               <th scope="col" className="px-4 py-3 font-medium">Required checklist</th>
               <th scope="col" className="px-4 py-3 font-medium">Trip</th>
+              <th scope="col" className="px-4 py-3 font-medium">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -300,7 +302,7 @@ export function DriverTable({
               >
                 <td className="px-4 py-3">
                   <Link
-                    href={`/owner/drivers/${row.driver.id}`}
+                    href={`/owner/drivers/${encodeURIComponent(row.driver.id)}`}
                     className="inline-flex min-h-[28px] items-center gap-2 font-medium text-ink hover:text-brand"
                   >
                     {row.driver.name || "Unnamed guest"}
@@ -335,6 +337,11 @@ export function DriverTable({
                     <span className="text-muted">—</span>
                   )}
                 </td>
+                <td className="px-4 py-3">
+                  {row.linkedTrip && row.linkedTrip.status !== "completed" && !row.driver.progress?.isDone ? (
+                    <ReminderButton tripId={row.linkedTrip.id} />
+                  ) : <span className="text-muted">—</span>}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -343,12 +350,11 @@ export function DriverTable({
 
       <div className="space-y-2.5 md:hidden">
         {rows.map((row) => (
-          <Link
+          <div
             key={row.driver.id}
-            href={`/owner/drivers/${row.driver.id}`}
-            className="block"
+            className="rounded-lg border border-line bg-white p-4"
           >
-            <Card className="p-4 transition-colors hover:bg-surface">
+            <Link href={`/owner/drivers/${encodeURIComponent(row.driver.id)}`} className="block">
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate font-medium text-ink">
                   {row.driver.name || "Unnamed guest"}
@@ -373,8 +379,9 @@ export function DriverTable({
                   </span>
                 )}
               </div>
-            </Card>
-          </Link>
+            </Link>
+            {row.linkedTrip && row.linkedTrip.status !== "completed" && !row.driver.progress?.isDone ? <ReminderButton tripId={row.linkedTrip.id} className="mt-4" fullWidth /> : null}
+          </div>
         ))}
       </div>
     </>
@@ -454,12 +461,12 @@ export function TripTable({
 
   return (
     <>
-      <div className="hidden overflow-x-auto rounded-2xl border border-line bg-white md:block">
+      <div className="hidden overflow-x-auto rounded-lg border border-line bg-white md:block">
         <table className="w-full min-w-[860px] border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
               <th scope="col" className="px-4 py-3 font-medium">Dates</th>
-              <th scope="col" className="px-4 py-3 font-medium">Driver</th>
+              <th scope="col" className="px-4 py-3 font-medium">Guest</th>
               <th scope="col" className="px-4 py-3 font-medium">Vehicle</th>
               <th scope="col" className="px-4 py-3 font-medium">Status</th>
               <th scope="col" className="px-4 py-3 font-medium">Miles</th>
@@ -565,7 +572,7 @@ export function ChargingSessionList({ sessions }: { sessions: ChargingSession[] 
       {sessions.map((s) => (
         <li
           key={s.id}
-          className="flex items-center gap-3 rounded-xl border border-line bg-white p-3.5"
+          className="flex items-center gap-3 rounded-md border border-line bg-white p-3.5"
         >
           <span className="min-w-0 flex-1">
             <span className="flex flex-wrap items-center gap-2">
@@ -645,7 +652,7 @@ export function ReturnChecklistCard({ tripId }: { tripId: string }) {
               aria-checked={checked}
               onClick={() => toggle(row.key)}
               className={cn(
-                "flex min-h-[44px] w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-[15px] font-medium transition-colors",
+                "flex min-h-[44px] w-full items-center justify-between gap-3 rounded-md border px-4 py-3 text-left text-[15px] font-medium transition-colors",
                 checked
                   ? "border-good/30 bg-good/5 text-ink"
                   : "border-line bg-white text-ink-soft hover:bg-surface",
@@ -674,7 +681,7 @@ export function ReturnChecklistCard({ tripId }: { tripId: string }) {
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
           placeholder="Anything the next host should know…"
-          className="mt-1.5 w-full resize-none rounded-xl border border-line bg-white px-3.5 py-3 text-[14px] text-ink placeholder:text-muted"
+          className="mt-1.5 w-full resize-none rounded-md border border-line bg-white px-3.5 py-3 text-[14px] text-ink placeholder:text-muted"
         />
       </label>
     </Card>

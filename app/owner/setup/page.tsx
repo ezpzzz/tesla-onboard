@@ -84,7 +84,7 @@ export default function OwnerSetupPage() {
          * *page* scrolls instead of just the step content, taking this
          * header's progress bar off-screen with it.
          */}
-        <div className="relative flex min-h-[560px] max-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-3xl border border-line bg-white shadow-[0_0_60px_rgba(23,26,32,0.06)]">
+        <div className="relative flex min-h-[560px] max-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-lg border border-line bg-white">
           <header className="shrink-0 px-5 pt-5 pb-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
@@ -92,7 +92,7 @@ export default function OwnerSetupPage() {
                   <button
                     onClick={nav.back}
                     aria-label="Back"
-                    className="-ml-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface hover:text-ink"
+                    className="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface hover:text-ink"
                   >
                     <IconArrowLeft className="h-4 w-4" />
                   </button>
@@ -104,7 +104,7 @@ export default function OwnerSetupPage() {
               {!nav.isFirst && (
                 <button
                   onClick={handleRestart}
-                  className="shrink-0 text-xs font-medium text-muted transition-colors hover:text-ink"
+                  className="inline-flex min-h-11 shrink-0 items-center rounded-md px-2 text-xs font-medium text-muted transition-colors hover:bg-surface hover:text-ink"
                 >
                   Start over
                 </button>

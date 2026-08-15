@@ -1,7 +1,8 @@
-import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
+import { createEncryptedTripLink } from "@/lib/owner/trip-link-secret";
+import { isSameOriginRequest } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ function response(body: unknown, status = 200) {
 
 export async function POST(request: NextRequest) {
   if (!ONLYEVS_OPERATIONS_ENABLED) return response({ error: "Not available." }, 404);
-  if (request.headers.get("origin") !== new URL(request.url).origin) {
+  if (!isSameOriginRequest(request)) {
     return response({ error: "Cross-origin confirmation was rejected." }, 403);
   }
   const body = (await request.json().catch(() => null)) as {
@@ -47,25 +48,35 @@ export async function POST(request: NextRequest) {
   if (!authData.user) return response({ error: "Your owner session expired." }, 401);
   const { data: candidate, error: candidateError } = await supabase
     .from("onlyevs_calendar_candidates")
-    .select("ends_at")
+    .select("workspace_id,shop_slug,ends_at")
     .eq("id", candidateId)
     .maybeSingle();
   if (candidateError || !candidate?.ends_at) {
     return response({ error: "That calendar event is no longer available." }, 404);
   }
 
-  const token = crypto.randomBytes(32).toString("base64url");
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  let link: ReturnType<typeof createEncryptedTripLink>;
+  try {
+    link = createEncryptedTripLink({
+      workspaceId: candidate.workspace_id,
+      shopSlug: candidate.shop_slug,
+    });
+  } catch {
+    return response({ error: "Private trip links are not configured on this deployment." }, 503);
+  }
   const expiresAt = new Date(Date.parse(candidate.ends_at) + 24 * 60 * 60 * 1_000);
   const { data: tripData, error } = await supabase.rpc(
     "confirm_onlyevs_calendar_candidate",
     {
       p_candidate_id: candidateId,
+      p_trip_id: link.tripId,
       p_vehicle_id: vehicleId,
       p_guest_name: guestName,
       p_guest_email: guestEmail,
-      p_public_token_hash: tokenHash,
+      p_public_token_hash: link.tokenHash,
       p_token_expires_at: expiresAt.toISOString(),
+      p_token_ciphertext: link.tokenCiphertext,
+      p_key_version: link.keyVersion,
     },
   );
   if (error) {
@@ -82,6 +93,6 @@ export async function POST(request: NextRequest) {
   if (!trip?.id) return response({ error: "The trip confirmation returned no trip." }, 500);
   return response({
     tripId: trip.id,
-    guestUrl: `${new URL(request.url).origin}/trip/${token}`,
+    guestUrl: `${new URL(request.url).origin}/trip/${link.token}`,
   }, 201);
 }

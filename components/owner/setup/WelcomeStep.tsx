@@ -41,7 +41,7 @@ export function WelcomeStep({ nav, update }: SetupStepProps) {
               update({ dismissedAt: Date.now() });
               router.push("/owner");
             }}
-            className="block w-full text-center text-sm font-medium text-muted hover:text-ink"
+            className="flex min-h-11 w-full items-center justify-center rounded-md text-center text-sm font-medium text-muted hover:bg-surface hover:text-ink"
           >
             Skip for now
           </button>
@@ -53,7 +53,7 @@ export function WelcomeStep({ nav, update }: SetupStepProps) {
           <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
             {config.companyName || workspace?.name || "Fleet setup"}
           </span>
-          <span className="h-3 w-3 rounded-full bg-brand shadow-[0_0_12px_2px] shadow-brand/50" />
+          <span className="h-3 w-3 rounded-[3px] bg-brand" />
         </div>
         {config.car.model ? (
           <VehicleArtwork
@@ -70,7 +70,7 @@ export function WelcomeStep({ nav, update }: SetupStepProps) {
             className="mt-2 h-48 sm:h-64"
           />
         ) : (
-          <div className="mt-4 flex h-40 items-center justify-center rounded-2xl border border-dashed border-line bg-surface px-6 text-center text-sm text-muted sm:h-52">
+          <div className="mt-4 flex h-40 items-center justify-center rounded-lg border border-dashed border-line bg-surface px-6 text-center text-sm text-muted sm:h-52">
             Your imported or manually added fleet vehicle will appear here.
           </div>
         )}
