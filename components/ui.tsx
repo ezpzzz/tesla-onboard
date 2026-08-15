@@ -152,8 +152,9 @@ export function Segmented<T extends string>({
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
+          aria-pressed={value === o.value}
           className={cn(
-            "flex-1 rounded px-4 py-2 text-sm font-semibold transition-colors",
+            "min-h-11 flex-1 rounded px-3 py-2 text-sm font-semibold transition-colors sm:px-4",
             value === o.value ? "bg-ink text-white" : "text-muted hover:text-ink",
           )}
         >
@@ -231,7 +232,7 @@ export function AppShell({
             {onRestart && (
               <button
                 onClick={onRestart}
-                className="text-xs font-medium text-muted transition-colors hover:text-ink"
+                className="inline-flex min-h-11 items-center rounded-md px-2 text-xs font-medium text-muted transition-colors hover:bg-surface hover:text-ink"
               >
                 Start over
               </button>

@@ -80,7 +80,7 @@ export function OwnerShell({ children, ownerEmail }: { children: ReactNode; owne
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface text-sm font-semibold text-ink">{ownerInitial}</span>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-ink">{workspace?.name || "EVhost"}</div>
-              {ownerEmail ? <OwnerIdentity email={ownerEmail} /> : <Link href="/owner/account" className="text-xs text-muted hover:text-ink">Account</Link>}
+              {ownerEmail ? <OwnerIdentity email={ownerEmail} /> : <Link href="/owner/account" className="inline-flex min-h-11 items-center rounded-md text-xs text-muted hover:text-ink">Account</Link>}
             </div>
           </div>
         </div>

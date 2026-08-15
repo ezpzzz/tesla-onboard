@@ -63,7 +63,7 @@ export function GuestPortalLayout({ snapshot, token, children }: { snapshot: Gue
               <nav aria-label="Guest portal" className="mx-auto hidden h-full items-center gap-12 md:flex">
                 {NAV.map((item) => {
                   const active = item.segment === activeSegment;
-                  return <Link key={item.label} href={item.segment ? `${base}/${item.segment}` : base} aria-current={active ? "page" : undefined} className={cn("relative flex h-full items-center text-sm font-medium", active ? "text-brand" : "text-ink-soft hover:text-ink")}>{item.label}{active ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-brand" /> : null}</Link>;
+                  return <Link key={item.label} href={item.segment ? `${base}/${item.segment}` : base} aria-current={active ? "page" : undefined} className={cn("relative flex h-full min-w-11 items-center justify-center px-2 text-sm font-medium", active ? "text-brand" : "text-ink-soft hover:text-ink")}>{item.label}{active ? <span className="absolute inset-x-2 bottom-0 h-0.5 bg-brand" /> : null}</Link>;
                 })}
               </nav>
               <Link href={`${base}/details`} className="ml-auto hidden min-h-11 items-center gap-2 text-sm text-muted md:flex"><IconCalendar className="h-4 w-4" />{formatTripDate(snapshot.startsAt, snapshot.timezone, false)}–{formatTripDate(snapshot.endsAt, snapshot.timezone, false).replace(/^\w+\s/, "")}</Link>
