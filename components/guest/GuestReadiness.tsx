@@ -13,7 +13,7 @@ export function guestReadinessSteps(snapshot: ReturnType<typeof useGuestTripPort
       label: "Tesla",
       detail: accessComplete ? "Tesla access ready" : snapshot.accessStatus ? snapshot.accessStatus.replaceAll("_", " ") : "Access details pending",
       value: accessComplete ? "Complete" : "Pending",
-      state: accessComplete ? "complete" : progress ? "current" : "pending",
+      state: accessComplete ? "complete" : "pending",
     },
     { label: "Guide", detail: "Walkthrough progress", value: `${Math.round(progress?.pct ?? 0)}%`, state: progress?.isDone ? "complete" : progress ? "current" : "pending" },
     { label: "Pickup", detail: tripStarted ? "Trip started" : "Ready for pickup", value: tripStarted ? "Complete" : "Pending", state: tripStarted ? "complete" : "pending" },

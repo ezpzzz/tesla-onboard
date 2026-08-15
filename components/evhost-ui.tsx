@@ -46,54 +46,55 @@ export interface RailStep {
 
 export function ReadinessRail({ steps, compact = false }: { steps: RailStep[]; compact?: boolean }) {
   return (
-    <ol className={cn("relative", compact ? "space-y-0.5" : "space-y-1")}>
-      {steps.map((step, index) => (
-        <li
-          key={`${step.label}-${index}`}
-          aria-current={step.state === "current" ? "step" : undefined}
-          className={cn(
-            "relative grid min-h-14 grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-x-3 text-[14px]",
-            compact ? "py-0.5" : "py-1",
-          )}
-        >
-          {index < steps.length - 1 ? (
+    <ol className="relative">
+      {steps.map((step, index) => {
+        const previousIsComplete = index > 0 && steps[index - 1]?.state === "complete";
+        return (
+          <li
+            key={`${step.label}-${index}`}
+            aria-current={step.state === "current" ? "step" : undefined}
+            className={cn(
+              "grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-x-3 text-[14px]",
+              compact ? "min-h-[52px]" : "min-h-[60px]",
+            )}
+          >
+            <span aria-hidden="true" className="relative flex self-stretch items-center justify-center">
+              {index > 0 ? (
+                <span className={cn("absolute left-1/2 top-0 bottom-1/2 w-px -translate-x-1/2", previousIsComplete ? "bg-brand/30" : "bg-line")} />
+              ) : null}
+              {index < steps.length - 1 ? (
+                <span className={cn("absolute left-1/2 top-1/2 bottom-0 w-px -translate-x-1/2", step.state === "complete" ? "bg-brand/30" : "bg-line")} />
+              ) : null}
+              <span
+                className={cn(
+                  "relative z-10 flex h-7 w-7 items-center justify-center rounded-full border bg-white",
+                  step.state === "complete" && "border-brand/25 text-brand",
+                  step.state === "current" && "border-brand shadow-[0_0_0_3px_rgba(8,127,209,0.09)]",
+                  step.state === "pending" && "border-line text-muted",
+                )}
+              >
+                {step.state === "complete" ? <IconCheck className="h-4 w-4" strokeWidth={2.4} /> : null}
+                {step.state === "current" ? <span className="h-2 w-2 rounded-full bg-brand" /> : null}
+                {step.state === "pending" ? <span className="h-2 w-2 rounded-full border border-muted/60 bg-white" /> : null}
+              </span>
+            </span>
+            <span className="min-w-0 py-2">
+              <span className="block font-semibold leading-5 text-ink">{step.label}</span>
+              <span className="mt-0.5 block truncate text-[13px] leading-5 text-muted">{step.detail}</span>
+            </span>
             <span
-              aria-hidden="true"
               className={cn(
-                "absolute left-[15px] top-9 -bottom-3 w-px",
-                step.state === "complete" ? "bg-brand/35" : "bg-line",
+                "whitespace-nowrap text-right text-[12px] font-semibold leading-4",
+                step.state === "complete" && "text-good",
+                step.state === "current" && "text-brand",
+                step.state === "pending" && "text-muted",
               )}
-            />
-          ) : null}
-          <span
-            aria-hidden="true"
-            className={cn(
-              "relative z-10 flex h-8 w-8 items-center justify-center rounded-md border",
-              step.state === "complete" && "border-brand/20 bg-brand/10 text-brand",
-              step.state === "current" && "border-brand bg-brand text-white shadow-[0_0_0_3px_rgba(8,127,209,0.10)]",
-              step.state === "pending" && "border-line bg-white text-muted",
-            )}
-          >
-            {step.state === "complete" ? <IconCheck className="h-[18px] w-[18px]" strokeWidth={2.4} /> : null}
-            {step.state === "current" ? <span className="h-2 w-2 rounded-[2px] bg-white" /> : null}
-            {step.state === "pending" ? <span className="text-[11px] font-semibold">{index + 1}</span> : null}
-          </span>
-          <span className="min-w-0 py-1">
-            <span className="block font-semibold leading-5 text-ink">{step.label}</span>
-            <span className="mt-0.5 block truncate text-[13px] leading-5 text-muted">{step.detail}</span>
-          </span>
-          <span
-            className={cn(
-              "whitespace-nowrap rounded-md border px-2 py-1 text-right text-[12px] font-semibold leading-4",
-              step.state === "complete" && "border-good/15 bg-good/[0.06] text-good",
-              step.state === "current" && "border-brand/15 bg-brand/[0.07] text-brand",
-              step.state === "pending" && "border-line bg-surface text-muted",
-            )}
-          >
-            {step.value}
-          </span>
-        </li>
-      ))}
+            >
+              {step.value}
+            </span>
+          </li>
+        );
+      })}
     </ol>
   );
 }

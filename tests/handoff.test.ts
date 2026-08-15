@@ -27,5 +27,26 @@ describe("owner handoff projection", () => {
     expect(handoffSteps(result).map((step) => [step.label, step.value])).toEqual([
       ["Link", "Pending"], ["Tesla", "Pending"], ["Guide", "0%"], ["Pickup", "Pending"],
     ]);
+    expect(handoffSteps(result).map((step) => step.state)).toEqual([
+      "current", "pending", "pending", "pending",
+    ]);
+  });
+
+  it("keeps unfinished Tesla access pending while the guide is current", () => {
+    const next = trip("progress", "upcoming", now + 3_600_000, now + 86_400_000);
+    next.accessStatus = "scheduled";
+    const driver = {
+      id: "guest-progress",
+      name: "Maya",
+      progress: { pct: 0.5, isDone: false },
+    } as Driver;
+    const result = selectNextHandoff([next], [driver], [vehicle], now)!;
+
+    expect(handoffSteps(result).map((step) => [step.label, step.state])).toEqual([
+      ["Link", "complete"],
+      ["Tesla", "pending"],
+      ["Guide", "current"],
+      ["Pickup", "pending"],
+    ]);
   });
 });

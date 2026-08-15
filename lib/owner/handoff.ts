@@ -45,7 +45,7 @@ export function handoffSteps(handoff: OwnerHandoff) {
   const pct = Math.round(progress?.pct ?? 0);
   return [
     { label: "Link", detail: progress ? "Trip link opened" : "Waiting for first open", value: progress ? "Complete" : "Pending", state: progress ? "complete" as const : "current" as const },
-    { label: "Tesla", detail: accessComplete ? "Tesla access ready" : handoff.trip.accessStatus ? handoff.trip.accessStatus.replaceAll("_", " ") : "No access grant", value: accessComplete ? "Complete" : "Pending", state: accessComplete ? "complete" as const : progress ? "current" as const : "pending" as const },
+    { label: "Tesla", detail: accessComplete ? "Tesla access ready" : handoff.trip.accessStatus ? handoff.trip.accessStatus.replaceAll("_", " ") : "No access grant", value: accessComplete ? "Complete" : "Pending", state: accessComplete ? "complete" as const : "pending" as const },
     { label: "Guide", detail: "Walkthrough progress", value: `${pct}%`, state: progress?.isDone ? "complete" as const : progress ? "current" as const : "pending" as const },
     { label: handoff.kind === "pickup" ? "Pickup" : "Return", detail: handoff.kind === "pickup" ? "Ready for pickup" : "Ready for return", value: "Pending", state: "pending" as const },
   ];
