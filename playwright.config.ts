@@ -10,8 +10,8 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "mobile-safari", use: { ...devices["iPhone 15"] } },
+    { name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } } },
+    { name: "mobile-safari", use: { ...devices["iPhone 15"], viewport: { width: 430, height: 932 } } },
   ],
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined

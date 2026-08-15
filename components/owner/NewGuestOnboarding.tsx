@@ -38,6 +38,8 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
   const [vehicleId, setVehicleId] = useState("");
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
+  const [pickupLocation, setPickupLocation] = useState("");
+  const [returnLocation, setReturnLocation] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GuestOnboardingLink | null>(null);
@@ -72,6 +74,8 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         startsAt: new Date(startsAt).toISOString(),
         endsAt: new Date(endsAt).toISOString(),
+        pickupLocation,
+        returnLocation: returnLocation || pickupLocation,
       });
       setResult(created);
     } catch (caught) {
@@ -99,24 +103,23 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
     setGuestName("");
     setGuestEmail("");
     setVehicleId("");
+    setPickupLocation("");
+    setReturnLocation("");
     setError(null);
   }
 
   return (
     <section aria-labelledby="new-guest-heading">
-      <Card className="overflow-hidden border-brand/30 bg-gradient-to-br from-brand/[0.09] via-white to-white shadow-sm">
+      <Card className="overflow-hidden border-line bg-white">
         <div className="p-5 sm:p-6">
           {!expanded ? (
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 gap-3.5">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand text-white shadow-sm">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-brand text-white">
                   <IconUser aria-hidden="true" className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand">
-                    Guest onboarding
-                  </p>
-                  <h2 id="new-guest-heading" className="mt-1 text-lg font-semibold tracking-tight text-ink">
+                  <h2 id="new-guest-heading" className="text-lg font-semibold tracking-tight text-ink">
                     Invite your next guest
                   </h2>
                   <p className="mt-1 max-w-[48ch] text-sm leading-relaxed text-muted">
@@ -129,7 +132,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                 variant="brand"
                 onClick={openForm}
                 disabled={!ready}
-                className="min-h-12 shrink-0 px-7 text-base shadow-sm"
+                className="min-h-12 shrink-0 px-7 text-base"
               >
                 New onboarding
                 <IconArrowRight aria-hidden="true" className="h-4 w-4" />
@@ -155,7 +158,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                 id="guest-onboarding-link"
                 readOnly
                 value={result.guestUrl}
-                className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 text-base text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                className="field mt-2 w-full text-base text-ink"
               />
               <div className="mt-4 flex flex-wrap gap-2.5">
                 <Button type="button" variant="brand" onClick={() => void copyLink()}>
@@ -165,14 +168,14 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                   href={result.guestUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full border border-line bg-white px-6 py-3.5 text-[15px] font-medium text-ink hover:bg-surface"
+                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-md border border-line bg-white px-6 py-3.5 text-[15px] font-semibold text-ink hover:bg-surface"
                 >
                   Preview
                   <IconExternal aria-hidden="true" className="h-4 w-4" />
                 </a>
                 <Link
                   href={`/owner/trips/${result.tripId}`}
-                  className="inline-flex min-h-[48px] items-center justify-center rounded-full px-4 py-3.5 text-sm font-medium text-muted hover:text-ink"
+                  className="inline-flex min-h-[48px] items-center justify-center rounded-md px-4 py-3.5 text-sm font-semibold text-muted hover:text-ink"
                 >
                   Track this guest
                 </Link>
@@ -186,8 +189,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
             <form onSubmit={submit} className="space-y-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand">New guest onboarding</p>
-                  <h2 id="new-guest-heading" className="mt-1 text-lg font-semibold text-ink">Trip and guest details</h2>
+                  <h2 id="new-guest-heading" className="text-lg font-semibold text-ink">Trip and guest details</h2>
                 </div>
                 <button type="button" onClick={() => setExpanded(false)} className="min-h-[44px] px-2 text-sm font-medium text-muted hover:text-ink">
                   Cancel
@@ -202,7 +204,31 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                     autoComplete="name"
                     value={guestName}
                     onChange={(event) => setGuestName(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                    className="field mt-2 w-full text-base"
+                  />
+                </label>
+                <label className="text-sm font-medium text-ink">
+                  Pickup location
+                  <input
+                    name="pickupLocation"
+                    autoComplete="street-address"
+                    maxLength={500}
+                    value={pickupLocation}
+                    onChange={(event) => setPickupLocation(event.target.value)}
+                    placeholder="Airport garage, hotel, or address"
+                    className="mt-2 min-h-12 w-full rounded-md border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                  />
+                </label>
+                <label className="text-sm font-medium text-ink">
+                  Return location
+                  <input
+                    name="returnLocation"
+                    autoComplete="street-address"
+                    maxLength={500}
+                    value={returnLocation}
+                    onChange={(event) => setReturnLocation(event.target.value)}
+                    placeholder={pickupLocation || "Defaults to pickup"}
+                    className="mt-2 min-h-12 w-full rounded-md border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
                   />
                 </label>
                 <label className="text-sm font-medium text-ink">
@@ -215,7 +241,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                     autoComplete="email"
                     value={guestEmail}
                     onChange={(event) => setGuestEmail(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                    className="mt-2 w-full rounded-md border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
                   />
                 </label>
                 <label className="text-sm font-medium text-ink sm:col-span-2">
@@ -225,7 +251,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                     name="vehicleId"
                     value={vehicleId}
                     onChange={(event) => setVehicleId(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                    className="mt-2 w-full rounded-md border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
                   >
                     <option value="">Choose a vehicle</option>
                     {activeVehicles.map((vehicle) => (
@@ -241,7 +267,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                     type="datetime-local"
                     value={startsAt}
                     onChange={(event) => setStartsAt(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                    className="mt-2 w-full rounded-md border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
                   />
                 </label>
                 <label className="text-sm font-medium text-ink">
@@ -252,14 +278,14 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                     type="datetime-local"
                     value={endsAt}
                     onChange={(event) => setEndsAt(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                    className="mt-2 w-full rounded-md border border-line bg-white px-4 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
                   />
                 </label>
               </div>
               {error ? <p role="alert" className="text-sm font-medium text-danger">{error}</p> : null}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
                 <p className="max-w-[48ch] text-xs leading-relaxed text-muted">
-                  The raw link is shown once. evhost.app stores only its cryptographic hash and uses the private link to track this trip's onboarding progress.
+                  The link is encrypted for secure reminders and shown here for sharing. Its plaintext is never stored or logged.
                 </p>
                 <Button type="submit" variant="brand" disabled={saving} className="min-h-12 px-7">
                   {saving ? "Creating…" : "Create private link"}

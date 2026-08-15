@@ -92,6 +92,7 @@ export async function POST(request: NextRequest) {
       : null,
     pathMode: input.pathMode === "full" || input.pathMode === "essentials" ? input.pathMode : null,
     startedAt: typeof input.startedAt === "number" && Number.isSafeInteger(input.startedAt) ? input.startedAt : null,
+    newToTesla: input.newToTesla === true,
     guestName: typeof input.guestName === "string" && input.guestName.length <= 240 ? input.guestName : null,
     // Owners see the server receipt time, never a guest-controlled clock.
     updatedAt: Date.now(),

@@ -10,6 +10,7 @@ export interface GoogleCalendarEvent {
   recurringEventId?: string;
   originalStartTime?: GoogleEventDateTime;
   summary?: string;
+  location?: string;
   status?: string;
   updated?: string;
   etag?: string;
@@ -23,6 +24,7 @@ export interface CalendarCandidateInput {
   externalIcalUid: string | null;
   recurringInstanceKey: string | null;
   summary: string;
+  location: string | null;
   startsAt: string;
   endsAt: string;
   timezone: string;
@@ -42,6 +44,12 @@ function cleanSummary(value: unknown): string {
   if (typeof value !== "string") return "Untitled calendar event";
   return value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 500)
     || "Untitled calendar event";
+}
+
+function cleanLocation(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const location = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 500);
+  return location || null;
 }
 
 /**
@@ -64,6 +72,7 @@ export function normalizeGoogleCalendarEvent(
       ? `${event.recurringEventId}:${original}`
       : null,
     summary: cleanSummary(event.summary),
+    location: cleanLocation(event.location),
     startsAt,
     endsAt,
     timezone: event.start.timeZone ?? event.end.timeZone ?? "UTC",

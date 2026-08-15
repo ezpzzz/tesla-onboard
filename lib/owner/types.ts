@@ -107,6 +107,11 @@ export interface Trip {
   status: TripStatus;
   startAt: number;
   endAt: number;
+  pickupLocation?: string | null;
+  returnLocation?: string | null;
+  /** Real lifecycle state from the access worker; null means no grant exists. */
+  accessStatus?: string | null;
+  reminderLastSentAt?: number | null;
   odometerStartMi: number | null; // float, mirrors Fleet API vehicle_state.odometer; null for upcoming
   odometerEndMi: number | null; // null until completed
   batteryStartPct: number | null; // int, mirrors charge_state.battery_level

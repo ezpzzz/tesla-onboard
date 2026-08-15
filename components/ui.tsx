@@ -40,7 +40,7 @@ export function Button({
     <button
       {...rest}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-full px-6 py-3.5 text-[15px] font-medium transition-all duration-150 disabled:cursor-not-allowed",
+        "inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-5 py-2.5 text-[14px] font-semibold transition-[background-color,color,border-color,transform] duration-150 disabled:cursor-not-allowed",
         variants[variant],
         fullWidth && "w-full",
         className,
@@ -59,7 +59,7 @@ export function Card({
   ...rest
 }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div {...rest} className={cn("rounded-2xl border border-line bg-white", className)}>
+    <div {...rest} className={cn("rounded-lg border border-line bg-white", className)}>
       {children}
     </div>
   );
@@ -82,7 +82,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+        "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold",
         tones[tone],
       )}
     >
@@ -103,7 +103,7 @@ export function IconCircle({
   return (
     <div
       className={cn(
-        "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-surface text-2xl",
+        "flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-surface text-2xl",
         className,
       )}
     >
@@ -146,14 +146,14 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="flex rounded-full border border-line bg-surface p-1">
+    <div className="flex rounded-md border border-line bg-surface p-1">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
           className={cn(
-            "flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors",
+            "flex-1 rounded px-4 py-2 text-sm font-semibold transition-colors",
             value === o.value ? "bg-ink text-white" : "text-muted hover:text-ink",
           )}
         >
@@ -212,17 +212,19 @@ export function AppShell({
   stepLabel,
   showProgress,
   onRestart,
+  embedded = false,
 }: {
   children: ReactNode;
   progress: number;
   stepLabel?: string;
   showProgress?: boolean;
   onRestart?: () => void;
+  embedded?: boolean;
 }) {
   const { config } = useTenantConfig();
   return (
-    <div className="flex min-h-dvh w-full justify-center bg-surface">
-      <div className="relative flex min-h-dvh w-full max-w-[480px] flex-col bg-white shadow-[0_0_80px_rgba(23,26,32,0.08)]">
+    <div className={cn("flex w-full justify-center", embedded ? "min-h-[70vh] bg-white" : "min-h-dvh bg-surface")}>
+      <div className={cn("relative flex w-full flex-col bg-white", embedded ? "min-h-[70vh] max-w-[760px]" : "min-h-dvh max-w-[480px] shadow-[0_0_80px_rgba(23,26,32,0.08)]")}>
         <header className="shrink-0 px-5 pt-5 pb-3">
           <div className="flex items-center justify-between">
             <TenantBrandMark config={config} className="text-base" />

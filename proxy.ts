@@ -54,6 +54,16 @@ export const config = {
 // Every redirect issued after updateSession() runs must go through this.
 const SESSION_HEADERS = ["cache-control", "pragma", "expires"];
 
+function guestPrivacyResponse(): NextResponse {
+  const response = NextResponse.next();
+  response.headers.set("Cache-Control", "private, no-cache, no-store, max-age=0, must-revalidate");
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Expires", "0");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  return response;
+}
+
 function redirectWithSession(base: NextResponse, url: URL): NextResponse {
   const redirect = NextResponse.redirect(url);
   base.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
@@ -65,6 +75,10 @@ function redirectWithSession(base: NextResponse, url: URL): NextResponse {
 }
 
 export async function proxy(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith("/trip/")) {
+    return guestPrivacyResponse();
+  }
+
   const canonicalOrigin = process.env.ONLYEVS_CANONICAL_ORIGIN?.replace(/\/$/, "");
   const isOwnerSurface = request.nextUrl.pathname === "/login"
     || request.nextUrl.pathname === "/register"

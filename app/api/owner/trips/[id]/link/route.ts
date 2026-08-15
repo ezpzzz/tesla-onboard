@@ -1,8 +1,8 @@
-import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { canonicalOnlyEvsOrigin } from "@/lib/onlyevs-origin";
 import { createClient } from "@/lib/supabase/server";
 import { allowRequest } from "@/lib/owner-throttle";
+import { createEncryptedTripLink } from "@/lib/owner/trip-link-secret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +34,7 @@ export async function POST(
   }
   const { data: trip, error: tripError } = await supabase
     .from("onlyevs_trips")
-    .select("id,ends_at,status")
+    .select("id,workspace_id,shop_slug,ends_at,status")
     .eq("id", id)
     .maybeSingle();
   if (tripError || !trip?.ends_at) return reply({ error: "Trip not found." }, 404);
@@ -42,13 +42,23 @@ export async function POST(
     return reply({ error: "A new link is available only before the trip ends." }, 409);
   }
 
-  const token = crypto.randomBytes(32).toString("base64url");
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  let link: ReturnType<typeof createEncryptedTripLink>;
+  try {
+    link = createEncryptedTripLink({
+      workspaceId: trip.workspace_id,
+      shopSlug: trip.shop_slug,
+      tripId: id,
+    });
+  } catch {
+    return reply({ error: "Private trip links are not configured on this deployment." }, 503);
+  }
   const tokenExpiresAt = new Date(Date.parse(trip.ends_at) + 24 * 60 * 60 * 1_000).toISOString();
   const { error } = await supabase.rpc("rotate_onlyevs_trip_public_token", {
     p_trip_id: id,
-    p_public_token_hash: tokenHash,
+    p_public_token_hash: link.tokenHash,
     p_token_expires_at: tokenExpiresAt,
+    p_token_ciphertext: link.tokenCiphertext,
+    p_key_version: link.keyVersion,
   });
   if (error) {
     return reply({
@@ -57,5 +67,5 @@ export async function POST(
         : "A new guest link could not be generated.",
     }, error.code === "42501" ? 403 : 409);
   }
-  return reply({ guestUrl: `${canonicalOnlyEvsOrigin(request)}/trip/${token}` });
+  return reply({ guestUrl: `${canonicalOnlyEvsOrigin(request)}/trip/${link.token}` });
 }

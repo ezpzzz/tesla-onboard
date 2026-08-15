@@ -113,7 +113,7 @@ export function ConnectStep({ state, update, nav }: SetupStepProps) {
       }
     >
       {authError && (
-        <div className="mb-4 rounded-2xl border border-brand/20 bg-brand/5 p-3.5 text-sm leading-relaxed text-ink-soft">
+        <div className="mb-4 rounded-lg border border-brand/20 bg-brand/5 p-3.5 text-sm leading-relaxed text-ink-soft">
           {authError}
         </div>
       )}

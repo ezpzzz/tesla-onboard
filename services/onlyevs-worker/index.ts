@@ -704,6 +704,7 @@ function candidatePayload(candidate: CalendarCandidateInput) {
     external_ical_uid: candidate.externalIcalUid,
     recurring_instance_key: candidate.recurringInstanceKey,
     summary: candidate.summary,
+    location: candidate.location,
     starts_at: candidate.startsAt,
     ends_at: candidate.endsAt,
     timezone: candidate.timezone,
@@ -962,6 +963,7 @@ async function startTelemetryConsumer(): Promise<Consumer | null> {
 async function runOnce() {
   await Promise.all([
     pool.query("delete from private.onlyevs_vehicle_location_points where delete_after <= now()"),
+    pool.query("select public.cleanup_onlyevs_expired_trip_link_secrets()"),
     pool.query(`update public.onlyevs_vehicle_stats_current
       set connectivity = 'stale', ingested_at = now()
       where connectivity = 'connected' and observed_at < now() - interval '5 minutes'`),

@@ -18,7 +18,7 @@ export function OwnerAuthShell({ children }: { children: ReactNode }) {
             evhost.app
           </span>
         </div>
-        <Card className="p-6 shadow-[0_0_80px_rgba(23,26,32,0.08)] sm:p-8">
+        <Card className="p-6 sm:p-8">
           {children}
         </Card>
       </div>

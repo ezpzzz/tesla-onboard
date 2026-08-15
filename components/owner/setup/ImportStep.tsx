@@ -294,7 +294,7 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
       </p>
 
       {vehicleError || importError ? (
-        <div role="alert" className="mt-4 rounded-2xl border border-danger/20 bg-danger/[0.04] p-3.5 text-sm text-danger">
+        <div role="alert" className="mt-4 rounded-lg border border-danger/20 bg-danger/[0.04] p-3.5 text-sm text-danger">
           {vehicleError ?? importError}
         </div>
       ) : null}
@@ -310,7 +310,7 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
             <label
               key={key}
               className={cn(
-                "flex min-h-[44px] items-center gap-3 rounded-2xl border p-3.5",
+                "flex min-h-[44px] items-center gap-3 rounded-lg border p-3.5",
                 alreadyImported ? "border-black/10 bg-white" : "border-line bg-white",
               )}
             >

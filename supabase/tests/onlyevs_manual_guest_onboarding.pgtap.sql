@@ -1,8 +1,8 @@
 begin;
-select plan(19);
+select plan(23);
 
 select ok(
-  not has_function_privilege('anon', 'public.create_onlyevs_manual_trip(uuid,text,uuid,text,text,text,timestamptz,timestamptz,text,timestamptz)', 'execute'),
+  not has_function_privilege('anon', 'public.create_onlyevs_manual_trip(uuid,uuid,text,uuid,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,text,smallint)', 'execute'),
   'anonymous callers cannot create owner trips'
 );
 select ok(
@@ -14,8 +14,16 @@ select ok(
   'anonymous callers cannot read manager trip snapshots'
 );
 select ok(
-  not has_function_privilege('anon', 'public.rotate_onlyevs_trip_public_token(uuid,text,timestamptz)', 'execute'),
+  not has_function_privilege('anon', 'public.rotate_onlyevs_trip_public_token(uuid,text,timestamptz,text,smallint)', 'execute'),
   'anonymous callers cannot rotate private links'
+);
+select ok(
+  not has_function_privilege('authenticated', 'public.get_onlyevs_trip_reminder_material(uuid)', 'execute'),
+  'authenticated clients cannot fetch reminder ciphertext or unmasked recipients'
+);
+select ok(
+  has_function_privilege('service_role', 'public.get_onlyevs_trip_reminder_material(uuid)', 'execute'),
+  'the server service role alone can fetch reminder delivery material'
 );
 select hasnt_function(
   'public',
@@ -62,7 +70,7 @@ values (
   '72000000-0000-4000-8000-000000000001',
   'tracked-rentals',
   'Tracked Rentals',
-  '{"onlyevs":{"enabled":true,"publishedAt":1}}'::jsonb
+  '{"onlyevs":{"enabled":true,"publishedAt":1,"config":{}}}'::jsonb
 )
 on conflict (workspace_id, shop_slug) do update set features = excluded.features;
 insert into public.onlyevs_vehicles (
@@ -85,6 +93,7 @@ on conflict (id) do nothing;
 select set_config('request.jwt.claim.sub', '71000000-0000-4000-8000-000000000001', true);
 select lives_ok(
   $$select public.create_onlyevs_manual_trip(
+    '74000000-0000-4000-8000-000000000001',
     '72000000-0000-4000-8000-000000000001',
     'tracked-rentals',
     '73000000-0000-4000-8000-000000000001',
@@ -93,8 +102,12 @@ select lives_ok(
     'America/Phoenix',
     now() + interval '2 days',
     now() + interval '4 days',
+    'PHX Sky Harbor',
+    'PHX Sky Harbor',
     repeat('a', 64),
-    now() + interval '5 days'
+    now() + interval '5 days',
+    repeat('c', 64),
+    1::smallint
   )$$,
   'a manager can create one durable private guest onboarding'
 );
@@ -107,6 +120,11 @@ select is(
   (select verified_email_hash from private.onlyevs_guest_bindings where workspace_id = '72000000-0000-4000-8000-000000000001'),
   encode(extensions.digest('taylor@example.com', 'sha256'), 'hex'),
   'the private binding stores an email hash rather than another plaintext copy'
+);
+select is(
+  (select token_ciphertext from private.onlyevs_trip_link_secrets where trip_id = '74000000-0000-4000-8000-000000000001'),
+  repeat('c', 64),
+  'trip creation persists the resendable capability only as server-side ciphertext'
 );
 select is(
   (select company_name from public.get_onlyevs_trip_invitation(repeat('a', 64))),
@@ -156,7 +174,9 @@ select lives_ok(
   $$select public.rotate_onlyevs_trip_public_token(
     (select id from public.onlyevs_trips where workspace_id = '72000000-0000-4000-8000-000000000001'),
     repeat('b', 64),
-    now() + interval '5 days'
+    now() + interval '5 days',
+    repeat('d', 64),
+    1::smallint
   )$$,
   'a manager can rotate a lost guest link'
 );
@@ -167,6 +187,11 @@ select is_empty(
 select isnt_empty(
   $$select * from public.get_onlyevs_trip_invitation(repeat('b', 64))$$,
   'the replacement link resolves the same booking'
+);
+select is(
+  (select token_ciphertext from private.onlyevs_trip_link_secrets where trip_id = '74000000-0000-4000-8000-000000000001'),
+  repeat('d', 64),
+  'rotation replaces the ciphertext in the same transaction as the public hash'
 );
 
 select * from finish();

@@ -76,7 +76,7 @@ export interface ProgressInput {
   completed: string[];
   checklist: Record<string, boolean>;
   startedAt: number | null;
-  newToTesla: boolean;
+  newToTesla?: boolean;
 }
 
 export interface ProgressSummary {
@@ -94,6 +94,7 @@ export interface ProgressSummary {
   experience: ExperienceLevel | null;
   pathMode: PathMode | null;
   startedAt: number | null;
+  newToTesla: boolean;
   guestName: string | null;
   updatedAt: number;
 }
@@ -132,6 +133,7 @@ export function computeProgress(input: ProgressInput): ProgressSummary {
     experience: input.experience,
     pathMode: input.pathMode,
     startedAt: input.startedAt,
+    newToTesla: input.newToTesla === true,
     guestName: input.profile?.fullName || null,
     updatedAt: Date.now(),
   };

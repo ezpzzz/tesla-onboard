@@ -23,6 +23,13 @@ export const PROGRESS_KEY = "rtr:progress:v1";
 export const TRIP_KEY = "rtr:trip:v1";
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
+function tripTokenFromLocation(): string | null {
+  const query = new URLSearchParams(window.location.search).get("trip");
+  if (query && TOKEN_PATTERN.test(query)) return query;
+  const match = window.location.pathname.match(/^\/trip\/([A-Za-z0-9_-]{43})(?:\/|$)/);
+  return match?.[1] && TOKEN_PATTERN.test(match[1]) ? match[1] : null;
+}
+
 export type PublishedGuestProgress = ProgressSummary & { tripId: string | null };
 
 export function readPublishedProgress(tenantSlug?: string | null): PublishedGuestProgress | null {
@@ -50,8 +57,7 @@ export function readTripToken(tenantSlug?: string | null): string | null {
 /** Keep onboarding state separate for every private booking link. */
 export function guestOnboardingStorageScope(tenantSlug?: string | null): string | null {
   if (typeof window === "undefined") return tenantSlug ?? null;
-  const queryToken = new URLSearchParams(window.location.search).get("trip");
-  const token = queryToken && TOKEN_PATTERN.test(queryToken) ? queryToken : readTripToken(tenantSlug);
+  const token = tripTokenFromLocation() ?? readTripToken(tenantSlug);
   return token ? `${tenantSlug ?? "guest"}~trip-${token.slice(-16)}` : tenantSlug ?? null;
 }
 
@@ -69,7 +75,7 @@ export function usePublishProgress(state: ProgressInput, hydrated: boolean): voi
     if (!hydrated || capturedTrip.current) return;
     capturedTrip.current = true;
     try {
-      const trip = new URLSearchParams(window.location.search).get("trip");
+      const trip = tripTokenFromLocation();
       const tripKey = migrateLegacyStorage(TRIP_KEY, tenantSlug);
       if (trip && TOKEN_PATTERN.test(trip)) {
         window.localStorage.setItem(tripKey, trip);

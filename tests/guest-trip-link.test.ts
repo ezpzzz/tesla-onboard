@@ -1,47 +1,68 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { newTenantConfigDraft } from "@/lib/tenant-config";
 
 const rpc = vi.fn();
-const createClient = vi.fn();
-const redirect = vi.fn();
-const notFound = vi.fn(() => {
-  throw new Error("NEXT_NOT_FOUND");
-});
+const createAnonymousClient = vi.fn();
 
-vi.mock("@/lib/supabase/server", () => ({ createClient }));
-vi.mock("next/navigation", () => ({ redirect, notFound }));
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/supabase/server", () => ({ createAnonymousClient }));
 
-const { default: GuestTripPage } = await import("@/app/trip/[token]/page");
+const { loadGuestTripPortal } = await import("@/lib/guest-trip-portal");
 
 describe("private guest trip links", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    createClient.mockResolvedValue({ rpc });
+    createAnonymousClient.mockReturnValue({ rpc });
   });
 
-  it("opens the tenant walkthrough directly without guest email authentication", async () => {
-    rpc.mockResolvedValue({
-      data: [{
-        workspace_id: "72000000-0000-4000-8000-000000000001",
-        shop_slug: "tracked-rentals",
-      }],
-      error: null,
-    });
+  it("returns only the guest-safe portal allowlist without guest authentication", async () => {
+    const config = newTenantConfigDraft("Desert EV Hosting");
+    Object.assign(config, { hostName: "Alex", hostPhone: "+16025550148" });
+    Object.assign(config.car, { sourceVehicleId: "vehicle-public", model: "Model Y", trim: "Long Range AWD", year: 2025, color: "Quicksilver" });
+    rpc.mockResolvedValue({ data: [{
+      company_name: "Desert EV Hosting",
+      guest_first_name: "Maya",
+      guest_email: "must-not-escape@example.com",
+      vehicle_name: "2025 Model Y",
+      vehicle_model: "Model Y",
+      vehicle_trim: "Long Range AWD",
+      vehicle_year: 2025,
+      vehicle_color: "Quicksilver",
+      vehicle_shifter: "screen",
+      vehicle_vin: "must-not-escape",
+      starts_at: "2026-08-20T17:00:00.000Z",
+      ends_at: "2026-08-24T17:00:00.000Z",
+      timezone: "America/Phoenix",
+      lifecycle: "upcoming",
+      pickup_location: "PHX Sky Harbor",
+      return_location: "PHX Sky Harbor",
+      onboarding_progress: null,
+      progress_updated_at: null,
+      access_status: "invite_ready",
+      provider_identifier: "must-not-escape",
+      latitude: 33.4,
+      tenant_config: { ...config, car: { ...config.car, sourceVehicleId: null, sourceVehicleUpdatedAt: null } },
+    }], error: null });
     const token = "a".repeat(43);
 
-    await GuestTripPage({ params: Promise.resolve({ token }) });
+    const snapshot = await loadGuestTripPortal(token);
 
     expect(rpc).toHaveBeenCalledOnce();
     expect(rpc).toHaveBeenCalledWith("get_onlyevs_trip_invitation", {
       p_public_token_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
-    expect(redirect).toHaveBeenCalledWith(
-      `/?tenant=72000000-0000-4000-8000-000000000001%7Etracked-rentals&trip=${token}`,
-    );
+    expect(snapshot).toMatchObject({ guestFirstName: "Maya", pickupLocation: "PHX Sky Harbor", accessStatus: "invite_ready" });
+    expect(Object.keys(snapshot ?? {}).sort()).toEqual([
+      "accessStatus", "companyName", "endsAt", "guestFirstName", "lifecycle", "pickupLocation",
+      "progress", "progressUpdatedAt", "returnLocation", "startsAt", "tenantConfig",
+      "storageScope", "timezone", "vehicle",
+    ].sort());
+    expect(JSON.stringify(snapshot)).not.toContain("must-not-escape");
+    expect(JSON.stringify(snapshot)).not.toContain("vehicle-public");
   });
 
   it("fails closed before querying for a malformed token", async () => {
-    await expect(GuestTripPage({ params: Promise.resolve({ token: "short" }) }))
-      .rejects.toThrow("NEXT_NOT_FOUND");
-    expect(createClient).not.toHaveBeenCalled();
+    await expect(loadGuestTripPortal("short")).resolves.toBeNull();
+    expect(createAnonymousClient).not.toHaveBeenCalled();
   });
 });

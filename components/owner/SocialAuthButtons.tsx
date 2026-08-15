@@ -168,7 +168,7 @@ export function SocialAuthButtons({ next }: { next: string }) {
                 />
               </>
             ) : (
-              <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-center text-sm text-muted">
+              <p className="rounded-lg border border-line bg-surface px-4 py-3 text-center text-sm text-muted">
                 Google sign-in is temporarily unavailable.
               </p>
             )}
@@ -179,7 +179,7 @@ export function SocialAuthButtons({ next }: { next: string }) {
             type="button"
             disabled={Boolean(submitting)}
             onClick={() => continueWith("apple")}
-            className="flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl bg-ink px-4 text-sm font-medium text-white transition-colors hover:bg-ink/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+            className="flex min-h-12 w-full items-center justify-center gap-3 rounded-lg bg-ink px-4 text-sm font-medium text-white transition-colors hover:bg-ink/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
           >
             <IconApple className="h-5 w-5" />
             {submitting === "apple" ? "Opening Apple…" : "Continue with Apple"}

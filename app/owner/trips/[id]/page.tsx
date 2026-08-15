@@ -33,6 +33,8 @@ import { BatteryReturnGauge, TripTimeline } from "@/components/owner/charts";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconAlert } from "@/components/icons";
 import { regenerateGuestOnboardingLink } from "@/lib/owner/trip-repository";
+import { PageHeader } from "@/components/evhost-ui";
+import { ReminderButton } from "@/components/owner/ReminderButton";
 
 /* UTC-only formatting so server and first client paint always agree — see
  * the same convention in components/owner/owner-ui.tsx. */
@@ -125,6 +127,7 @@ export default function TripDetailPage() {
 
   return (
     <div className="space-y-5">
+      <PageHeader title={driver?.name || "Trip"} description={`${vehicle?.displayName || config.car.model} · ${formatDateRange(trip.startAt, trip.endAt)}`} action={<TripStatusBadge status={trip.status} />} />
       <Card className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -154,11 +157,17 @@ export default function TripDetailPage() {
               )}
             </div>
           </div>
-          <TripStatusBadge status={trip.status} />
+          <Link href="/owner/trips" className="text-sm font-semibold text-brand">Back to trips</Link>
         </div>
         <div className="mt-3 text-sm text-ink-soft">
           {formatDateRange(trip.startAt, trip.endAt)}
         </div>
+        <dl className="mt-4 grid gap-3 border-t border-line pt-4 text-sm sm:grid-cols-2">
+          <div><dt className="text-xs text-muted">Pickup location</dt><dd className="mt-1 font-medium text-ink">{trip.pickupLocation ?? "Use tenant pickup instructions"}</dd></div>
+          <div><dt className="text-xs text-muted">Return location</dt><dd className="mt-1 font-medium text-ink">{trip.returnLocation ?? trip.pickupLocation ?? "Use tenant return instructions"}</dd></div>
+          <div><dt className="text-xs text-muted">Tesla access</dt><dd className="mt-1 font-medium capitalize text-ink">{trip.accessStatus?.replaceAll("_", " ") ?? "No real grant"}</dd></div>
+          <div><dt className="text-xs text-muted">Last reminder</dt><dd className="mt-1 font-medium text-ink">{trip.reminderLastSentAt ? formatDateTime(trip.reminderLastSentAt) : "Not sent"}</dd></div>
+        </dl>
 
         {trip.status === "upcoming" && (
           <div className="mt-4 border-t border-line pt-4">
@@ -170,7 +179,7 @@ export default function TripDetailPage() {
                 aria-label="Latest private guest link"
                 readOnly
                 value={guestUrl}
-                className="mt-3 w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-base text-ink"
+                className="field mt-3 w-full px-3 py-2.5 text-base text-ink"
               />
             ) : null}
             {linkError ? <p role="alert" className="mt-2 text-sm text-danger">{linkError}</p> : null}
@@ -182,6 +191,7 @@ export default function TripDetailPage() {
             >
               {generatingLink ? "Generating…" : copied ? "New link copied" : "Generate new guest link"}
             </Button>
+            {!driver?.progress?.isDone ? <ReminderButton tripId={trip.id} className="mt-3" /> : null}
           </div>
         )}
       </Card>

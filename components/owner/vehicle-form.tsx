@@ -195,13 +195,13 @@ export function VehicleForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off" noValidate>
-      <div className="rounded-2xl border border-line bg-surface px-3.5 py-3 text-xs leading-relaxed text-muted">
+      <div className="rounded-lg border border-line bg-surface px-3.5 py-3 text-xs leading-relaxed text-muted">
         Editing here updates the private workspace fleet. Choose the guest-facing vehicle in
         Settings to publish its safe presentation fields to the walkthrough.
       </div>
 
       {submitError ? (
-        <div role="alert" className="rounded-2xl border border-danger/20 bg-danger/[0.04] px-3.5 py-3 text-sm text-danger">
+        <div role="alert" className="rounded-lg border border-danger/20 bg-danger/[0.04] px-3.5 py-3 text-sm text-danger">
           {submitError}
         </div>
       ) : null}

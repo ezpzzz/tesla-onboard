@@ -37,7 +37,7 @@ function Field({
 }) {
   const fieldName = `onlyevs-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
   const className =
-    "mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
+    "mt-1.5 w-full rounded-md border border-line bg-white px-3.5 py-3 text-base text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
   return (
     <label className="block text-sm font-medium text-ink">
       <span className="flex items-center justify-between gap-3">
@@ -207,7 +207,7 @@ export function TenantSettingsForm({
             name="onlyevs-workspace"
             value={workspace.key}
             onChange={(event) => setWorkspace(event.target.value)}
-            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+            className="mt-1.5 w-full rounded-md border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
           >
             {workspaces.map((item) => (
               <option key={item.key} value={item.key}>{item.name}</option>
@@ -216,7 +216,7 @@ export function TenantSettingsForm({
         </label>
       ) : null}
 
-      <div className="rounded-xl border border-brand/20 bg-brand/[0.04] px-3.5 py-3 text-sm leading-relaxed text-ink-soft">
+      <div className="rounded-md border border-brand/20 bg-brand/[0.04] px-3.5 py-3 text-sm leading-relaxed text-ink-soft">
         Fields marked <span className="font-semibold text-brand">Required</span> must be complete before guests can use the walkthrough. You can save a draft at any time; optional details can stay blank.
       </div>
 
@@ -238,7 +238,7 @@ export function TenantSettingsForm({
           <span className="flex items-center justify-between gap-3">
             <span>Accent color</span><span className="text-xs font-normal text-muted">Optional</span>
           </span>
-          <span className="mt-1.5 flex items-center gap-3 rounded-xl border border-line bg-white px-3.5 py-2.5">
+          <span className="mt-1.5 flex items-center gap-3 rounded-md border border-line bg-white px-3.5 py-2.5">
             <input
               aria-label="Accent color picker"
               name="onlyevs-accent-color-picker"
@@ -265,7 +265,7 @@ export function TenantSettingsForm({
 
       <SettingsSection title="Guest vehicle">
         {vehicleError ? (
-          <div role="alert" className="rounded-xl border border-danger/20 bg-danger/[0.04] px-3.5 py-3 text-sm text-danger">
+          <div role="alert" className="rounded-md border border-danger/20 bg-danger/[0.04] px-3.5 py-3 text-sm text-danger">
             {vehicleError}
           </div>
         ) : null}
@@ -281,10 +281,10 @@ export function TenantSettingsForm({
             year={draft.car.year}
             configurationVerified={Boolean(draft.car.sourceVehicleId)}
             decorative
-            className="h-44 rounded-xl border border-line"
+            className="h-44 rounded-md border border-line"
           />
         ) : (
-          <div className="rounded-xl border border-dashed border-line bg-surface px-4 py-8 text-center text-sm text-muted">
+          <div className="rounded-md border border-dashed border-line bg-surface px-4 py-8 text-center text-sm text-muted">
             No guest vehicle is configured.
           </div>
         )}
@@ -298,7 +298,7 @@ export function TenantSettingsForm({
               name="onlyevs-guest-vehicle"
               value={linkedVehicle?.id ?? (draft.car.sourceVehicleId ? "unavailable" : "")}
               onChange={(event) => useFleetVehicle(event.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+              className="mt-1.5 w-full rounded-md border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
             >
               <option value="">Custom / unlinked guest vehicle</option>
               {draft.car.sourceVehicleId && !linkedVehicleActive ? (
@@ -312,7 +312,7 @@ export function TenantSettingsForm({
             </select>
           </label>
         ) : null}
-        <div className="rounded-xl border border-line bg-surface px-3.5 py-3 text-sm leading-relaxed text-muted">
+        <div className="rounded-md border border-line bg-surface px-3.5 py-3 text-sm leading-relaxed text-muted">
           {draft.car.sourceVehicleId
             ? !linkedVehicleActive
               ? "This linked fleet vehicle is unavailable in this workspace. Select another active vehicle before saving."
@@ -342,7 +342,7 @@ export function TenantSettingsForm({
                 shifter: value === "stalk" || value === "console" ? value : "screen",
               });
             }}
-            className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+            className="mt-1.5 w-full rounded-md border border-line bg-white px-3.5 py-3 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
           >
             <option value="screen">Touchscreen</option>
             <option value="stalk">Steering-column stalk</option>
@@ -352,7 +352,7 @@ export function TenantSettingsForm({
       </SettingsSection>
 
       <SettingsSection title="Rental policy">
-        <div className="rounded-xl border border-line bg-surface px-3.5 py-3 text-sm leading-relaxed text-muted">
+        <div className="rounded-md border border-line bg-surface px-3.5 py-3 text-sm leading-relaxed text-muted">
           Starter wording is based on Turo&apos;s current US guest responsibilities and EV-charging
           guidance. Review and edit it for this listing; the live Turo trip agreement and policies
           always control. See Turo&apos;s{" "}
@@ -393,7 +393,7 @@ export function TenantSettingsForm({
         />
       </SettingsSection>
 
-      <div className="rounded-2xl border border-line bg-surface p-4 text-sm leading-relaxed text-muted">
+      <div className="rounded-lg border border-line bg-surface p-4 text-sm leading-relaxed text-muted">
         {persistence === "workspace"
           ? "Tenant settings are saved to your EVhost workspace. "
           : "Demo-mode settings stay in this browser and are not published. "}

@@ -115,7 +115,7 @@ export function WorkspaceDomains() {
           placeholder="welcome.example.com"
           value={hostname}
           onChange={(event) => setHostname(event.target.value)}
-          className="min-h-12 min-w-0 flex-1 rounded-xl border border-line bg-white px-3.5 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+          className="min-h-12 min-w-0 flex-1 rounded-md border border-line bg-white px-3.5 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
         />
         <Button type="submit" disabled={busy}>Add domain</Button>
       </form>
@@ -131,7 +131,7 @@ export function WorkspaceDomains() {
             <Badge tone={tone(domain.status)}>{domain.status.replaceAll("_", " ")}</Badge>
           </div>
           {domain.verification.length > 0 ? (
-            <div className="overflow-x-auto rounded-xl border border-line bg-surface p-3 text-xs">
+            <div className="overflow-x-auto rounded-md border border-line bg-surface p-3 text-xs">
               {domain.verification.map((record, index) => (
                 <dl key={`${record.type}-${record.name}-${index}`} className="grid grid-cols-[70px_1fr] gap-x-2 gap-y-1 border-b border-line py-2 last:border-0">
                   <dt className="text-muted">Type</dt><dd className="font-medium text-ink">{record.type}</dd>

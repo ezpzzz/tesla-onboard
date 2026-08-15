@@ -20,6 +20,7 @@ describe("Google Calendar candidate normalization", () => {
       externalIcalUid: "uid@example.test",
       recurringInstanceKey: "series-1:2026-09-01T16:00:00-07:00",
       summary: "Smith rental",
+      location: null,
       startsAt: "2026-09-01T23:00:00.000Z",
       endsAt: "2026-09-03T17:00:00.000Z",
       timezone: "America/Phoenix",

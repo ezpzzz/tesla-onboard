@@ -1,4 +1,7 @@
+import "server-only";
+
 import { createServerClient } from "@supabase/ssr";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 /**
@@ -54,4 +57,18 @@ export function createAnonymousClient() {
       },
     },
   );
+}
+
+/**
+ * Privileged server-only client for the narrow reminder-material RPC. Owner
+ * authorization and rate limiting happen first through the cookie-scoped
+ * client; this key is never used by a browser or a React component.
+ */
+export function createServiceRoleClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createSupabaseClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 }

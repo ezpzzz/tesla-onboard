@@ -177,7 +177,7 @@ sign-in or recovery token before the owner opens the message.
 the owner email on the magic-link tab. A verified first-time identity creates
 an EVhost auth account. The first owner request atomically claims a staged
 migrated workspace by email hash or creates a new workspace; no service-role
-key is used by the web app. `/forgot-password` sends the dedicated recovery
+key participates in identity or workspace claims. `/forgot-password` sends the dedicated recovery
 template and `/reset-password` updates the password inside the verified
 recovery session.
 
@@ -262,6 +262,23 @@ readable. Verified custom domains resolve the same tenant reference from the
 serving Host and therefore require no source edit or app redeploy. Domain
 ownership, DNS, and provider attachment must all pass before a hostname
 becomes active; Vercel manages certificate issuance and TLS for attached domains.
+
+Confirmed bookings also receive a 256-bit private trip capability at
+`/trip/<token>`. That link opens a no-store guest portal with Home, Guide,
+Vehicle, and Help surfaces; it expires 24 hours after trip end and does not
+create a guest account. Only the token hash is usable from public tables. A
+server-only AES-256-GCM envelope is retained in `private` storage so an owner
+can resend the current link without rotating it, and is destroyed after expiry.
+Reminder delivery is separately gated by `EVHOST_REMINDERS_ENABLED` and uses
+SendGrid with database-enforced cooldown and daily attempt limits. Do not enable
+it until the configured sender and delivered CTA have passed a controlled
+mailbox canary.
+
+The reminder route also requires `SUPABASE_SERVICE_ROLE_KEY`. It is used only
+after the cookie-scoped owner RPC has authorized a manager and reserved a
+rate-limited attempt; a service-role-only RPC then returns the unmasked
+recipient and encrypted link material to server code. Authenticated browser
+clients cannot execute that material RPC.
 
 Deployment environment variables remain only for **platform infrastructure**:
 Supabase connectivity, Tesla OAuth credentials and registered callbacks, and

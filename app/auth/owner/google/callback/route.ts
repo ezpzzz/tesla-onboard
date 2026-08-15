@@ -142,6 +142,7 @@ export async function GET(request: NextRequest) {
             external_ical_uid: candidate.externalIcalUid,
             recurring_instance_key: candidate.recurringInstanceKey,
             summary: candidate.summary,
+            location: candidate.location,
             starts_at: candidate.startsAt,
             ends_at: candidate.endsAt,
             timezone: candidate.timezone,

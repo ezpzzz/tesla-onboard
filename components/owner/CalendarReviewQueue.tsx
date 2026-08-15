@@ -136,12 +136,12 @@ export function CalendarReviewQueue({ vehicles }: { vehicles: Vehicle[] }) {
           Calendar events are suggestions. Confirm the guest and vehicle before access is scheduled; later provider changes require an explicit decision here.
         </p>
       </div>
-      {message ? <div role="status" className="rounded-xl border border-line bg-white p-3 text-sm text-ink-soft">{message}</div> : null}
+      {message ? <div role="status" className="rounded-md border border-line bg-white p-3 text-sm text-ink-soft">{message}</div> : null}
       {guestUrl ? (
         <Card className="p-4">
           <label className="block text-sm font-medium text-ink">
             Guest onboarding link
-            <input name="onlyevs-guest-onboarding-link" readOnly value={guestUrl} className="mt-2 w-full rounded-xl border border-line bg-surface px-3 py-3 text-base" />
+            <input name="onlyevs-guest-onboarding-link" readOnly value={guestUrl} className="mt-2 w-full rounded-md border border-line bg-surface px-3 py-3 text-base" />
           </label>
           <Button className="mt-3" variant="secondary" onClick={() => void navigator.clipboard.writeText(guestUrl)}>
             Copy link
@@ -181,13 +181,13 @@ export function CalendarReviewQueue({ vehicles }: { vehicles: Vehicle[] }) {
           {candidate.status === "pending" && selected?.id === candidate.id ? (
             <div className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-2">
               <label className="text-sm font-medium text-ink">Guest name
-                <input name="onlyevs-trip-guest-name" value={guestName} onChange={(event) => setGuestName(event.target.value)} className="mt-1.5 w-full rounded-xl border border-line px-3.5 py-3 text-base" autoComplete="name" />
+                <input name="onlyevs-trip-guest-name" value={guestName} onChange={(event) => setGuestName(event.target.value)} className="mt-1.5 w-full rounded-md border border-line px-3.5 py-3 text-base" autoComplete="name" />
               </label>
               <label className="text-sm font-medium text-ink">Booking email
-                <input name="onlyevs-trip-guest-email" type="email" value={guestEmail} onChange={(event) => setGuestEmail(event.target.value)} className="mt-1.5 w-full rounded-xl border border-line px-3.5 py-3 text-base" autoComplete="email" />
+                <input name="onlyevs-trip-guest-email" type="email" value={guestEmail} onChange={(event) => setGuestEmail(event.target.value)} className="mt-1.5 w-full rounded-md border border-line px-3.5 py-3 text-base" autoComplete="email" />
               </label>
               <label className="text-sm font-medium text-ink sm:col-span-2">Vehicle
-                <select name="onlyevs-trip-vehicle" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)} className="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-3 text-base">
+                <select name="onlyevs-trip-vehicle" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)} className="mt-1.5 w-full rounded-md border border-line bg-white px-3.5 py-3 text-base">
                   <option value="">Choose a fleet vehicle</option>
                   {activeVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.displayName}</option>)}
                 </select>

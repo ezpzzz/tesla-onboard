@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseConnectivityPayload, parseTelemetryPayload, telemetryFields } from "@/lib/owner/telemetry-ingest";
 
 describe("Tesla decoded telemetry ingestion", () => {
+  beforeAll(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T18:00:00Z"));
+  });
+
+  afterAll(() => vi.useRealTimers());
+
   it("extracts only the bounded current-stat and location fields", () => {
     expect(parseTelemetryPayload({
       vin: "5YJ3E1EA7KF000001",

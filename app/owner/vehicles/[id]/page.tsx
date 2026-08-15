@@ -267,7 +267,7 @@ export default function VehicleDetailPage() {
               <li key={trip.id}>
                 <Link
                   href={`/owner/trips/${trip.id}`}
-                  className="flex min-h-[44px] items-center gap-3 rounded-xl border border-line bg-white px-3.5 py-2.5 transition-colors hover:bg-surface"
+                  className="flex min-h-[44px] items-center gap-3 rounded-md border border-line bg-white px-3.5 py-2.5 transition-colors hover:bg-surface"
                 >
                   <TripStatusBadge status={trip.status} />
                   <span className="min-w-0 flex-1 text-[14px] font-medium text-ink">
@@ -291,7 +291,7 @@ export default function VehicleDetailPage() {
             : ""}
         </p>
         {statusError ? (
-          <p role="alert" className="mt-3 rounded-xl border border-danger/20 bg-danger/[0.04] p-3 text-sm text-danger">
+          <p role="alert" className="mt-3 rounded-md border border-danger/20 bg-danger/[0.04] p-3 text-sm text-danger">
             {statusError}
           </p>
         ) : null}

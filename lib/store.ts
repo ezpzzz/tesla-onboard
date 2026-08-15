@@ -14,7 +14,7 @@ import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { browserTenantScope, migrateLegacyStorage, scopedStorageKey } from "@/lib/tenant-storage";
 import { guestOnboardingStorageScope } from "@/lib/progress-bridge";
 import type { ExperienceLevel, TeslaProfile } from "./tesla";
-import type { PathMode } from "./flow";
+import type { PathMode, ProgressSummary } from "./flow";
 
 export const ONBOARDING_KEY = "rtr:state:v2";
 const LEGACY_ONBOARDING_KEY = "rtr:state:v1";
@@ -77,19 +77,44 @@ export function clearState(tenantSlug: string | null = browserTenantScope()): vo
   }
 }
 
+/** Restore only bounded, non-identity progress from the server when this
+ * browser has no local journey. Tesla profiles and tokens are never part of
+ * ProgressSummary and are deliberately reset here. */
+export function restoreOnboardingProgress(
+  local: OnboardingState,
+  remote?: ProgressSummary | null,
+): OnboardingState {
+  if (!remote || local.startedAt !== null || local.stepId !== initialState.stepId
+    || local.completed.length > 0 || Object.keys(local.checklist).length > 0) return local;
+  return {
+    ...initialState,
+    stepId: remote.stepId,
+    pathMode: remote.pathMode,
+    completed: [...remote.completed],
+    checklist: { ...remote.checklist },
+    startedAt: remote.startedAt,
+    newToTesla: remote.newToTesla === true,
+  };
+}
+
 type Patch = Partial<OnboardingState> | ((s: OnboardingState) => Partial<OnboardingState>);
 export type Updater = (patch: Patch) => void;
 
-export function useOnboarding() {
+export function useOnboarding(remoteProgress?: ProgressSummary | null) {
   const { tenantSlug } = useTenantConfig();
   const [state, setState] = useState<OnboardingState>(initialState);
   const [hydratedScope, setHydratedScope] = useState<string | null | undefined>(undefined);
   const currentScope = guestOnboardingStorageScope(tenantSlug);
 
   useEffect(() => {
-    setState(loadState(currentScope));
+    const local = loadState(currentScope);
+    const next = restoreOnboardingProgress(local, remoteProgress);
+    if (next !== local) {
+      saveState(next, currentScope);
+    }
+    setState(next);
     setHydratedScope(currentScope);
-  }, [currentScope]);
+  }, [currentScope, remoteProgress]);
 
   const hydrated = hydratedScope !== undefined && hydratedScope === currentScope;
 

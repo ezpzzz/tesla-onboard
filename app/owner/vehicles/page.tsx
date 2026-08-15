@@ -22,6 +22,7 @@ import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { ChargingSession, Trip, Vehicle } from "@/lib/owner/types";
 import type { VehicleStatsCurrent } from "@/lib/owner/access-types";
 import { tenantCarMatchesVehicle } from "@/lib/tenant-vehicle";
+import { PageHeader, StatePanel } from "@/components/evhost-ui";
 
 function VehicleStatCell({ label, value }: { label: string; value: string }) {
   return (
@@ -51,9 +52,9 @@ function VehicleCard({
   return (
     <Link
       href={`/owner/vehicles/${vehicle.id}`}
-      className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+      className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
     >
-      <Card className="overflow-hidden bg-white transition-[border-color,box-shadow,transform] duration-200 group-hover:border-black/20 group-hover:shadow-md group-active:scale-[0.995]">
+      <Card className="overflow-hidden bg-white transition-colors duration-200 group-hover:border-ink/30">
         <VehicleArtwork
           model={vehicle.model}
           color={vehicle.color}
@@ -90,7 +91,7 @@ function VehicleCard({
             />
           </div>
           {telemetry ? (
-            <div className="mt-4 grid grid-cols-4 gap-2 rounded-xl bg-surface p-3">
+            <div className="mt-4 grid grid-cols-4 gap-2 rounded-md bg-surface p-3">
               <VehicleStatCell label="Battery" value={telemetry.batteryPct === null ? "—" : `${Math.round(telemetry.batteryPct)}%`} />
               <VehicleStatCell label="Range" value={telemetry.estimatedRangeMi === null ? "—" : `${Math.round(telemetry.estimatedRangeMi)} mi`} />
               <VehicleStatCell label="Odometer" value={telemetry.odometerMi === null ? "—" : `${Math.round(telemetry.odometerMi).toLocaleString()} mi`} />
@@ -127,15 +128,15 @@ export default function VehiclesPage() {
   const ready = vehicleHydrated && dataHydrated;
 
   if (!ready) {
-    return <Card className="p-6 text-center text-sm text-muted">Loading vehicles…</Card>;
+    return <StatePanel title="Loading vehicles…" />;
   }
 
   if (vehicleError) {
-    return <Card role="alert" className="border-danger/20 p-6 text-center text-sm text-danger">{vehicleError}</Card>;
+    return <StatePanel tone="danger" title="Vehicle data is unavailable" detail={vehicleError} />;
   }
 
   if (operationalError) {
-    return <Card role="alert" className="border-danger/20 p-6 text-center text-sm text-danger">Vehicle statistics are unavailable: {operationalError}</Card>;
+    return <StatePanel tone="danger" title="Vehicle statistics are unavailable" detail={operationalError} />;
   }
 
   const active = vehicles.filter((v) => v.status === "active");
@@ -146,11 +147,7 @@ export default function VehiclesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-ink">Vehicles</h1>
-          <p className="mt-1 text-sm text-muted">Every car in your fleet, with lifetime stats.</p>
-        </div>
+      <PageHeader title="Vehicles" description="Product stages, verified presentation, live signal freshness, and utilization." action={
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
@@ -170,7 +167,7 @@ export default function VehiclesPage() {
             Add vehicle
           </Button>
         </div>
-      </div>
+      } />
 
       {mutationError ? (
         <Card role="alert" className="border-danger/20 bg-danger/[0.04] p-4 text-sm text-danger">
