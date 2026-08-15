@@ -29,6 +29,23 @@ const variants: Record<Variant, string> = {
   ghost: "text-muted hover:text-ink",
 };
 
+export function buttonClassName({
+  variant = "primary",
+  fullWidth = false,
+  className,
+}: {
+  variant?: Variant;
+  fullWidth?: boolean;
+  className?: string;
+} = {}) {
+  return cn(
+    "inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-5 py-2.5 text-[14px] font-semibold transition-[background-color,color,border-color,transform] duration-150 disabled:cursor-not-allowed",
+    variants[variant],
+    fullWidth && "w-full",
+    className,
+  );
+}
+
 export function Button({
   variant = "primary",
   fullWidth,
@@ -39,12 +56,7 @@ export function Button({
   return (
     <button
       {...rest}
-      className={cn(
-        "inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-5 py-2.5 text-[14px] font-semibold transition-[background-color,color,border-color,transform] duration-150 disabled:cursor-not-allowed",
-        variants[variant],
-        fullWidth && "w-full",
-        className,
-      )}
+      className={buttonClassName({ variant, fullWidth, className })}
     >
       {children}
     </button>

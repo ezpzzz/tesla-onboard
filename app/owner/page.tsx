@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PageHeader, ReadinessRail, StatePanel, TripRibbon } from "@/components/evhost-ui";
 import { ReminderButton } from "@/components/owner/ReminderButton";
 import { NewGuestOnboarding } from "@/components/owner/NewGuestOnboarding";
-import { Button, Card } from "@/components/ui";
+import { buttonClassName, Card } from "@/components/ui";
 import { IconAlert, IconCalendar, IconChevronRight, IconKey, IconTrips, IconVehicle } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
@@ -44,7 +44,7 @@ export default function OwnerTodayPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Today" description={now ? fullDate(now) : "Loading today…"} action={<Link href="#new-guest"><Button variant="secondary">New guest</Button></Link>} />
+      <PageHeader title="Today" description={now ? fullDate(now) : "Loading today…"} action={<Link href="#new-guest" className={buttonClassName({ variant: "secondary" })}>New guest</Link>} />
       {error ? <StatePanel tone="danger" title="Fleet data is unavailable" detail={error} /> : null}
 
       {!hydrated ? <StatePanel title="Loading today’s handoffs…" /> : handoff ? (
@@ -67,7 +67,7 @@ export default function OwnerTodayPage() {
             </section>
           </div>
         </Card>
-      ) : <StatePanel title="No handoffs are scheduled" detail="Create a private guest trip to start tracking readiness and access." action={<Link href="#new-guest" className="text-sm font-semibold text-brand">Create a guest trip</Link>} />}
+      ) : <StatePanel title="No handoffs are scheduled" detail="Create a private guest trip to start tracking readiness and access." action={<Link href="#new-guest" className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-semibold text-brand hover:bg-brand/5">Create a guest trip</Link>} />}
 
       <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
         <section className="rounded-lg border border-line bg-white px-6 py-3" aria-labelledby="today-handoffs-title">

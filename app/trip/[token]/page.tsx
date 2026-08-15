@@ -4,7 +4,7 @@ import Link from "next/link";
 import { OpenListRow, PageHeader, TripRibbon } from "@/components/evhost-ui";
 import { GuestReadiness } from "@/components/guest/GuestReadiness";
 import { formatTripDate, useGuestTripPortal, useGuestTripToken } from "@/components/guest/GuestPortal";
-import { Button, Card } from "@/components/ui";
+import { buttonClassName, Card } from "@/components/ui";
 import { IconGuide, IconKey, IconMapPin, IconVehicle } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 
@@ -56,7 +56,7 @@ export default function GuestTripHomePage() {
             <h2 id="ready-title" className="text-[22px] font-semibold tracking-[-0.02em]">{trip.lifecycle === "upcoming" ? "Get ready for pickup" : "Your handoff progress"}</h2>
             <div className="mt-5"><GuestReadiness /></div>
             <p className="mt-4 text-sm text-muted">{trip.progress?.isDone ? "Your guide is complete." : trip.progress ? `Continue from ${trip.progress.stepId.replaceAll("-", " ")}.` : "Start the guide before pickup."}</p>
-            <Link href={`/trip/${token}/guide`} className="mt-5 block"><Button variant="brand" fullWidth>{trip.progress ? "Continue guide" : "Start guide"}</Button></Link>
+            <Link href={`/trip/${token}/guide`} className={buttonClassName({ variant: "brand", fullWidth: true, className: "mt-5" })}>{trip.progress ? "Continue guide" : "Start guide"}</Link>
             <Link href={`/trip/${token}/details`} className="mt-2 flex min-h-11 items-center justify-center text-sm font-semibold text-brand">View trip details</Link>
           </section>
         </div>
