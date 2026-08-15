@@ -46,24 +46,52 @@ export interface RailStep {
 
 export function ReadinessRail({ steps, compact = false }: { steps: RailStep[]; compact?: boolean }) {
   return (
-    <ol className={cn("relative", compact ? "space-y-1" : "space-y-2")}>
+    <ol className={cn("relative", compact ? "space-y-0.5" : "space-y-1")}>
       {steps.map((step, index) => (
-        <li key={`${step.label}-${index}`} className="relative grid min-h-12 grid-cols-[34px_minmax(0,0.65fr)_minmax(0,1fr)_auto] items-center gap-2 text-[14px]">
-          {index < steps.length - 1 ? <span aria-hidden="true" className="absolute left-[16px] top-8 h-8 w-px bg-line" /> : null}
+        <li
+          key={`${step.label}-${index}`}
+          aria-current={step.state === "current" ? "step" : undefined}
+          className={cn(
+            "relative grid min-h-14 grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-x-3 text-[14px]",
+            compact ? "py-0.5" : "py-1",
+          )}
+        >
+          {index < steps.length - 1 ? (
+            <span
+              aria-hidden="true"
+              className={cn(
+                "absolute left-[15px] top-9 -bottom-3 w-px",
+                step.state === "complete" ? "bg-brand/35" : "bg-line",
+              )}
+            />
+          ) : null}
           <span
             aria-hidden="true"
             className={cn(
-              "relative z-10 flex h-7 w-7 items-center justify-center rounded border text-white",
+              "relative z-10 flex h-8 w-8 items-center justify-center rounded-md border",
               step.state === "complete" && "border-brand/20 bg-brand/10 text-brand",
-              step.state === "current" && "border-brand bg-brand",
-              step.state === "pending" && "border-muted bg-white text-transparent",
+              step.state === "current" && "border-brand bg-brand text-white shadow-[0_0_0_3px_rgba(8,127,209,0.10)]",
+              step.state === "pending" && "border-line bg-white text-muted",
             )}
           >
-            {step.state === "complete" ? <IconCheck className="h-4 w-4" strokeWidth={2.4} /> : null}
+            {step.state === "complete" ? <IconCheck className="h-[18px] w-[18px]" strokeWidth={2.4} /> : null}
+            {step.state === "current" ? <span className="h-2 w-2 rounded-[2px] bg-white" /> : null}
+            {step.state === "pending" ? <span className="text-[11px] font-semibold">{index + 1}</span> : null}
           </span>
-          <span className="font-semibold text-ink">{step.label}</span>
-          <span className="truncate text-muted">{step.detail}</span>
-          <span className={cn("whitespace-nowrap text-right", step.state === "current" ? "font-semibold text-brand" : "text-muted")}>{step.value}</span>
+          <span className="min-w-0 py-1">
+            <span className="block font-semibold leading-5 text-ink">{step.label}</span>
+            <span className="mt-0.5 block truncate text-[13px] leading-5 text-muted">{step.detail}</span>
+          </span>
+          <span
+            className={cn(
+              "whitespace-nowrap rounded-md border px-2 py-1 text-right text-[12px] font-semibold leading-4",
+              step.state === "complete" && "border-good/15 bg-good/[0.06] text-good",
+              step.state === "current" && "border-brand/15 bg-brand/[0.07] text-brand",
+              step.state === "pending" && "border-line bg-surface text-muted",
+            )}
+          >
+            {step.value}
+          </span>
         </li>
       ))}
     </ol>
