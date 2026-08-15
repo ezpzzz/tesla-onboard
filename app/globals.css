@@ -10,9 +10,10 @@
   --color-line: #d8dee4;
   --color-surface: #f6f8fa;
   --color-card: #ffffff;
-  --color-brand: #087fd1;
+  --color-brand: #0772bc;
   --color-brand-dark: #0669ae;
-  --color-good: #1b8a5a;
+  --color-signal: #087fd1;
+  --color-good: #187d51;
   --color-warn: #b45309;
   --color-danger: #c0362c;
 
@@ -27,6 +28,11 @@
 html,
 body {
   height: 100%;
+}
+
+html {
+  /* Keep content width stable when navigating between short and long pages. */
+  scrollbar-gutter: stable;
 }
 
 /* Keep iOS rubber-banding from pulling the fixed owner tab bar away from the

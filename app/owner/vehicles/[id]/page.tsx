@@ -206,7 +206,7 @@ export default function VehicleDetailPage() {
         interiorCode={vehicle.teslaInteriorCode}
         paintCode={vehicle.teslaPaintCode}
         year={vehicle.year}
-        className="h-64 md:h-72"
+        className="h-52 md:h-60"
       />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

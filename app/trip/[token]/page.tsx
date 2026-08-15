@@ -48,7 +48,7 @@ export default function GuestTripHomePage() {
               paintCode={trip.vehicle.teslaPaintCode}
               year={trip.vehicle.year}
               decorative
-              className="h-[260px] border-0 bg-white sm:h-[320px]"
+              className="h-[220px] border-0 bg-white sm:h-[260px]"
             />
             <TripRibbon pickup={formatTripDate(trip.startsAt, trip.timezone)} pickupLocation={trip.pickupLocation ?? "See pickup instructions"} duration={formatTripDuration(trip.startsAt, trip.endsAt)} dropoff={formatTripDate(trip.endsAt, trip.timezone)} />
           </div>

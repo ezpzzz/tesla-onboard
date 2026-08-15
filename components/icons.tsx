@@ -50,6 +50,13 @@ export const IconCheck = (p: P) => (
   </svg>
 );
 
+export const IconClose = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M18 6 6 18" />
+    <path d="m6 6 12 12" />
+  </svg>
+);
+
 export const IconPlay = (p: P) => (
   <svg {...base(p)} fill="currentColor" stroke="none">
     <path d="M8 5v14l11-7z" />

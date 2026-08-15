@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PageHeader, ReadinessRail, StatePanel, TripRibbon } from "@/components/evhost-ui";
 import { ReminderButton } from "@/components/owner/ReminderButton";
 import { NewGuestOnboarding } from "@/components/owner/NewGuestOnboarding";
-import { buttonClassName, Card } from "@/components/ui";
+import { Card } from "@/components/ui";
 import { IconAlert, IconCalendar, IconChevronRight, IconKey, IconTrips, IconVehicle } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
@@ -40,15 +40,16 @@ export default function OwnerTodayPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Operations" title="Today" description={now ? fullDate(now) : "Loading today…"} action={<Link href="#new-guest" className={buttonClassName({ variant: "secondary" })}>New guest</Link>} />
+      <PageHeader eyebrow="Operations" title="Today" description={now ? fullDate(now) : "Loading today…"} />
+      <section id="new-guest" className="scroll-mt-24"><NewGuestOnboarding vehicles={vehicles} /></section>
       {error ? <StatePanel tone="danger" title="Fleet data is unavailable" detail={error} /> : null}
 
-      {!hydrated ? <StatePanel title="Loading today’s handoffs…" /> : handoff ? (
+      {!hydrated ? <TodayHandoffSkeleton /> : handoff ? (
         <Card className="overflow-hidden">
           <div className="grid lg:grid-cols-[1.12fr_0.88fr]">
             <section className="border-b border-line lg:border-b-0 lg:border-r" aria-labelledby="next-handoff-title">
               <div className="border-b border-line bg-brand/[0.045] px-6 py-4"><div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand">Next handoff</div><h2 id="next-handoff-title" className="mt-1 font-semibold">{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(handoff.boundaryAt))}</h2><p className="mt-1 text-sm text-muted">{handoff.location ?? "Location in trip instructions"}</p></div>
-              {handoff.vehicle ? <VehicleArtwork model={handoff.vehicle.model} color={handoff.vehicle.color} trim={handoff.vehicle.trim} wheelType={handoff.vehicle.wheelType} interior={handoff.vehicle.interior} interiorCode={handoff.vehicle.teslaInteriorCode} paintCode={handoff.vehicle.teslaPaintCode} year={handoff.vehicle.year} decorative className="h-[300px] border-0 bg-white" /> : <div className="flex h-[300px] items-center justify-center text-sm text-muted">Vehicle image unavailable</div>}
+              {handoff.vehicle ? <VehicleArtwork model={handoff.vehicle.model} color={handoff.vehicle.color} trim={handoff.vehicle.trim} wheelType={handoff.vehicle.wheelType} interior={handoff.vehicle.interior} interiorCode={handoff.vehicle.teslaInteriorCode} paintCode={handoff.vehicle.teslaPaintCode} year={handoff.vehicle.year} decorative className="h-[220px] border-0 bg-white sm:h-[260px] lg:h-[300px]" /> : <div className="flex h-[220px] items-center justify-center text-sm text-muted sm:h-[260px] lg:h-[300px]">Vehicle image unavailable</div>}
               <TripRibbon pickup={dateTime(handoff.trip.startAt)} pickupLocation={handoff.trip.pickupLocation ?? null} duration={formatTripDuration(handoff.trip.startAt, handoff.trip.endAt)} dropoff={dateTime(handoff.trip.endAt)} />
             </section>
             <section className="bg-white p-6 lg:bg-brand/[0.025] lg:p-8" aria-labelledby="handoff-guest-title">
@@ -82,7 +83,6 @@ export default function OwnerTodayPage() {
         <div><div className={attention.length ? "text-2xl font-semibold text-warn" : "text-2xl font-semibold text-ink"}>{attention.length}</div><div className="mt-1 text-xs text-muted">Actions needed</div></div>
       </section>
 
-      <section id="new-guest"><NewGuestOnboarding vehicles={vehicles} /></section>
     </div>
   );
 }
@@ -93,4 +93,31 @@ function relativeBoundary(at: number, now: number) {
   if (hours < 24) return `in ${hours} hours`;
   const days = Math.ceil(hours / 24);
   return `in ${days} day${days === 1 ? "" : "s"}`;
+}
+
+function TodayHandoffSkeleton() {
+  return (
+    <Card aria-busy="true" aria-label="Loading today’s handoffs" className="overflow-hidden">
+      <div className="grid lg:grid-cols-[1.12fr_0.88fr]">
+        <div className="border-b border-line lg:border-b-0 lg:border-r" aria-hidden="true">
+          <div className="h-[101px] border-b border-line bg-brand/[0.035] px-6 py-4">
+            <div className="h-3 w-24 rounded-full bg-line/70" />
+            <div className="mt-3 h-5 w-20 rounded-full bg-line" />
+            <div className="mt-2 h-4 w-56 max-w-full rounded-full bg-line/70" />
+          </div>
+          <div className="h-[220px] bg-white sm:h-[260px] lg:h-[300px]" />
+          <div className="h-[176px] border-t border-line bg-surface/60 sm:h-[148px]" />
+        </div>
+        <div className="min-h-[390px] bg-white p-6 lg:min-h-0 lg:bg-brand/[0.02] lg:p-8" aria-hidden="true">
+          <div className="h-7 w-40 rounded-full bg-line" />
+          <div className="mt-3 h-5 w-32 rounded-full bg-line/80" />
+          <div className="mt-5 h-4 w-64 max-w-full rounded-full bg-line/65" />
+          <div className="my-5 border-t border-line" />
+          <div className="space-y-4">
+            {[0, 1, 2, 3].map((item) => <div key={item} className="h-11 rounded-md bg-surface" />)}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
 }

@@ -4,7 +4,7 @@ import { cn } from "@/components/ui";
 import { IconCalendar, IconCheck, IconChevronRight } from "@/components/icons";
 
 export function SignalMark({ className }: { className?: string }) {
-  return <span aria-hidden="true" className={cn("inline-block h-2.5 w-2.5 rounded-[2px] bg-brand", className)} />;
+  return <span aria-hidden="true" className={cn("inline-block h-2.5 w-2.5 rounded-[2px] bg-signal", className)} />;
 }
 
 export function EvhostWordmark({ className }: { className?: string }) {
