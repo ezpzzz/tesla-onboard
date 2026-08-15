@@ -1,5 +1,24 @@
 begin;
-select plan(34);
+select plan(37);
+
+select has_index(
+  'private',
+  'onlyevs_trip_link_secrets',
+  'onlyevs_trip_link_secrets_workspace_trip_idx',
+  'trip link secret cleanup and cascades have a covering workspace-trip index'
+);
+select has_index(
+  'public',
+  'onlyevs_reminder_deliveries',
+  'onlyevs_reminder_deliveries_workspace_trip_idx',
+  'reminder trip history has a covering workspace-trip index'
+);
+select has_index(
+  'public',
+  'onlyevs_reminder_deliveries',
+  'onlyevs_reminder_deliveries_requested_by_idx',
+  'reminder ownership cascades have a covering requester index'
+);
 
 select has_function(
   'public',
