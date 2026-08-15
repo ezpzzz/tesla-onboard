@@ -85,6 +85,7 @@ function progress(value: unknown): ProgressSummary | null {
 
 export async function loadGuestTripPortal(token: string): Promise<GuestTripPortalSnapshot | null> {
   if (!GUEST_TRIP_TOKEN_PATTERN.test(token)) return null;
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) return null;
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
   const supabase = createAnonymousClient();
   const { data, error } = await supabase.rpc("get_onlyevs_trip_invitation", { p_public_token_hash: tokenHash });

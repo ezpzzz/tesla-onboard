@@ -14,6 +14,10 @@ test("a real private trip capability exposes the complete guest portal", async (
   const navigation = page.getByRole("navigation", { name: isMobile ? "Guest tabs" : "Guest portal" });
   await expect(navigation.getByRole("link")).toHaveCount(4);
   await expect(navigation.getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
+  if (isMobile) {
+    const homeTarget = await page.getByRole("link", { name: "Trip home" }).boundingBox();
+    expect(homeTarget?.height).toBeGreaterThanOrEqual(44);
+  }
 
   for (const [segment, label] of [["guide", "Guide"], ["vehicle", "Vehicle"], ["help", "Help"]] as const) {
     await navigation.getByRole("link", { name: label }).click();

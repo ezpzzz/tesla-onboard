@@ -13,6 +13,8 @@ test("mobile owner navigation exposes five stable tabs and keeps workspace actio
   await expect(navigation.getByRole("link")).toHaveCount(5);
   await expect(navigation.getByRole("link", { name: "Trips" })).toHaveAttribute("aria-current", "page");
   await expect(navigation.getByRole("link", { name: "Settings" })).toHaveCount(0);
+  const ownerHomeTarget = await page.getByRole("link", { name: "EVhost Today" }).boundingBox();
+  expect(ownerHomeTarget?.height).toBeGreaterThanOrEqual(44);
 
   const before = await navigation.boundingBox();
   expect(before).not.toBeNull();
@@ -26,10 +28,13 @@ test("mobile owner navigation exposes five stable tabs and keeps workspace actio
 
   await page.locator('summary[aria-label="Open account menu"]').click();
   await expect(page.getByRole("link", { name: "Integrations" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+  const settingsLink = page.getByRole("link", { name: "Settings", exact: true });
+  await expect(settingsLink).toBeVisible();
 
-  await page.goto("/owner/settings");
+  await settingsLink.click();
+  await expect(page).toHaveURL("/owner/settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.locator('details:has(summary[aria-label="Open account menu"])')).not.toHaveAttribute("open", "");
   await expect(page.getByRole("textbox", { name: /Company name/ })).toBeVisible();
 
   const fields = page.locator("input, select, textarea");

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newTenantConfigDraft } from "@/lib/tenant-config";
 
 const rpc = vi.fn();
@@ -12,8 +12,12 @@ const { loadGuestTripPortal } = await import("@/lib/guest-trip-portal");
 describe("private guest trip links", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://local-test.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "test-publishable-key");
     createAnonymousClient.mockReturnValue({ rpc });
   });
+
+  afterEach(() => vi.unstubAllEnvs());
 
   it("returns only the guest-safe portal allowlist without guest authentication", async () => {
     const config = newTenantConfigDraft("Desert EV Hosting");
@@ -63,6 +67,14 @@ describe("private guest trip links", () => {
 
   it("fails closed before querying for a malformed token", async () => {
     await expect(loadGuestTripPortal("short")).resolves.toBeNull();
+    expect(createAnonymousClient).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the guest portal provider is not configured", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "");
+
+    await expect(loadGuestTripPortal("a".repeat(43))).resolves.toBeNull();
     expect(createAnonymousClient).not.toHaveBeenCalled();
   });
 });

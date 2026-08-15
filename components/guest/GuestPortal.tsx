@@ -58,7 +58,7 @@ export function GuestPortalLayout({ snapshot, token, children }: { snapshot: Gue
         <div className="min-h-dvh bg-white text-ink">
           <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur">
             <div className="mx-auto flex h-[72px] max-w-[1360px] items-center px-5 md:px-8">
-              <Link href={base} aria-label="Trip home" className="shrink-0"><EvhostWordmark /></Link>
+              <Link href={base} aria-label="Trip home" className="flex min-h-11 shrink-0 items-center"><EvhostWordmark /></Link>
               <div className="ml-8 hidden items-center gap-2 text-sm text-muted sm:flex"><IconLock className="h-4 w-4" />Private trip</div>
               <nav aria-label="Guest portal" className="mx-auto hidden h-full items-center gap-12 md:flex">
                 {NAV.map((item) => {
@@ -66,7 +66,7 @@ export function GuestPortalLayout({ snapshot, token, children }: { snapshot: Gue
                   return <Link key={item.label} href={item.segment ? `${base}/${item.segment}` : base} aria-current={active ? "page" : undefined} className={cn("relative flex h-full items-center text-sm font-medium", active ? "text-brand" : "text-ink-soft hover:text-ink")}>{item.label}{active ? <span className="absolute inset-x-0 bottom-0 h-0.5 bg-brand" /> : null}</Link>;
                 })}
               </nav>
-              <Link href={`${base}/details`} className="ml-auto hidden items-center gap-2 text-sm text-muted md:flex"><IconCalendar className="h-4 w-4" />{formatTripDate(snapshot.startsAt, snapshot.timezone, false)}–{formatTripDate(snapshot.endsAt, snapshot.timezone, false).replace(/^\w+\s/, "")}</Link>
+              <Link href={`${base}/details`} className="ml-auto hidden min-h-11 items-center gap-2 text-sm text-muted md:flex"><IconCalendar className="h-4 w-4" />{formatTripDate(snapshot.startsAt, snapshot.timezone, false)}–{formatTripDate(snapshot.endsAt, snapshot.timezone, false).replace(/^\w+\s/, "")}</Link>
               <span className="ml-4 hidden h-10 w-10 items-center justify-center rounded-full bg-surface text-sm font-semibold md:flex">{snapshot.guestFirstName.slice(0, 1).toUpperCase()}</span>
               <span className="ml-auto flex items-center gap-2 text-sm text-muted sm:hidden"><IconLock className="h-5 w-5" />Private trip</span>
             </div>

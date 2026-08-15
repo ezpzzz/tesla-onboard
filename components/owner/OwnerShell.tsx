@@ -88,7 +88,7 @@ export function OwnerShell({ children, ownerEmail }: { children: ReactNode; owne
 
       <div className="min-w-0 md:col-start-2">
         <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-line bg-white/95 px-5 backdrop-blur md:h-16 md:px-8">
-          <Link href="/owner" aria-label="EVhost Today" className="md:hidden"><EvhostWordmark /></Link>
+          <Link href="/owner" aria-label="EVhost Today" className="flex min-h-11 items-center md:hidden"><EvhostWordmark /></Link>
           <div className="hidden md:block">
             {workspace && workspaces.length > 1 ? (
               <select aria-label="Active workspace" value={workspace.key} onChange={(event) => setWorkspace(event.target.value)} className="min-h-10 rounded-md border border-line bg-white px-3 text-sm text-ink">
@@ -99,7 +99,7 @@ export function OwnerShell({ children, ownerEmail }: { children: ReactNode; owne
           <div className="flex items-center gap-3 md:ml-auto">
             <span className="hidden items-center gap-2 text-xs text-muted lg:flex"><span className="flex h-5 w-5 items-center justify-center rounded-full border border-good text-good">✓</span>All systems</span>
             <Link href="/owner/settings" aria-label="Help and settings" className="flex h-11 w-11 items-center justify-center rounded-full text-ink hover:bg-surface"><IconHelp className="h-6 w-6" /></Link>
-            <details className="relative">
+            <details key={pathname} className="relative">
               <summary aria-label="Open account menu" className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full bg-surface text-sm font-semibold text-ink marker:hidden">{ownerInitial}</summary>
               <div className="absolute right-0 top-12 w-48 rounded-lg border border-line bg-white p-2 shadow-[0_12px_32px_rgba(22,26,31,0.12)]">
                 <Link href="/owner/account" className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-surface"><IconUser className="h-4 w-4" />Account</Link>
