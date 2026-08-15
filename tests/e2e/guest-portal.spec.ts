@@ -14,6 +14,14 @@ test("a real private trip capability exposes the complete guest portal", async (
   const navigation = page.getByRole("navigation", { name: isMobile ? "Guest tabs" : "Guest portal" });
   await expect(navigation.getByRole("link")).toHaveCount(4);
   await expect(navigation.getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
+  const tripRibbon = page.getByTestId("trip-ribbon");
+  await expect(tripRibbon).toBeVisible();
+  const ribbonOverflow = await tripRibbon.locator("*").evaluateAll((elements) => elements
+    .filter((element) => element instanceof HTMLElement && element.clientWidth > 0 && element.scrollWidth > element.clientWidth + 1)
+    .map((element) => element.textContent?.trim()).filter(Boolean));
+  expect(ribbonOverflow, "trip schedule text should wrap rather than clip").toEqual([]);
+  const homeDimensions = await page.evaluate(() => ({ width: window.innerWidth, scrollWidth: document.documentElement.scrollWidth }));
+  expect(homeDimensions.scrollWidth, "home should not overflow").toBeLessThanOrEqual(homeDimensions.width);
   if (isMobile) {
     const homeTarget = await page.getByRole("link", { name: "Trip home" }).boundingBox();
     expect(homeTarget?.height).toBeGreaterThanOrEqual(44);

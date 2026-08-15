@@ -16,10 +16,12 @@ export function EvhostWordmark({ className }: { className?: string }) {
 }
 
 export function PageHeader({
+  eyebrow,
   title,
   description,
   action,
 }: {
+  eyebrow?: ReactNode;
   title: string;
   description?: ReactNode;
   action?: ReactNode;
@@ -27,8 +29,14 @@ export function PageHeader({
   return (
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div>
+        {eyebrow ? (
+          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand">
+            <SignalMark className="h-1.5 w-1.5 rounded-full" />
+            {eyebrow}
+          </div>
+        ) : null}
         <h1 className="text-[30px] font-semibold leading-[1.08] tracking-[-0.035em] text-ink md:text-[34px]">{title}</h1>
-        {description ? <div className="mt-1.5 text-[15px] leading-6 text-muted">{description}</div> : null}
+        {description ? <div className="mt-1.5 max-w-[68ch] text-[15px] leading-6 text-muted">{description}</div> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </header>
@@ -111,13 +119,32 @@ export function TripRibbon({
   dropoff: string;
 }) {
   return (
-    <div className="grid grid-cols-[1fr_auto_1fr] items-center border-t border-line px-4 py-5 text-center md:px-7">
-      <div className="flex items-center justify-start gap-3 text-left">
-        <IconCalendar className="h-5 w-5 shrink-0 text-ink" />
-        <div><div className="font-semibold text-ink">{pickup}</div>{pickupLocation ? <div className="mt-0.5 text-xs text-muted">{pickupLocation}</div> : null}</div>
+    <div className="border-t border-line" data-testid="trip-ribbon">
+      <div className="flex items-center justify-center gap-2 border-b border-line bg-brand/[0.045] px-4 py-2.5 sm:hidden">
+        <SignalMark className="h-1.5 w-1.5 rounded-full" />
+        <span className="text-sm font-semibold text-brand">{duration}</span>
+        <span className="text-xs text-muted">Trip duration</span>
       </div>
-      <div className="border-x border-line px-5 md:px-9"><div className="font-semibold text-ink">{duration}</div><div className="mt-0.5 text-xs text-muted">Trip duration</div></div>
-      <div className="text-right"><div className="font-semibold text-ink">{dropoff}</div><div className="mt-0.5 text-xs text-muted">Return</div></div>
+      <div className="grid grid-cols-2 divide-x divide-line sm:grid-cols-[1fr_auto_1fr] sm:items-center sm:divide-x-0 sm:px-7 sm:py-5 sm:text-center">
+        <div className="min-w-0 px-4 py-4 text-left sm:px-0 sm:py-0">
+          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
+            <IconCalendar className="h-4 w-4 shrink-0 text-brand" />
+            <span>Pickup</span>
+          </div>
+          <div className="min-w-0">
+            <div className="break-words text-[15px] font-semibold leading-5 text-ink">{pickup}</div>
+            {pickupLocation ? <div className="mt-1 break-words text-xs leading-[1.45] text-muted">{pickupLocation}</div> : null}
+          </div>
+        </div>
+        <div className="hidden border-x border-line bg-brand/[0.04] px-5 py-2 sm:block md:px-9">
+          <div className="font-semibold text-brand">{duration}</div>
+          <div className="mt-0.5 text-xs text-muted">Trip duration</div>
+        </div>
+        <div className="min-w-0 px-4 py-4 text-right sm:px-0 sm:py-0">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Return</div>
+          <div className="break-words text-[15px] font-semibold leading-5 text-ink">{dropoff}</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -137,7 +164,7 @@ export function OpenListRow({
 }) {
   return (
     <Link href={href} className="group flex min-h-16 items-center gap-3 border-b border-line py-3 last:border-0 hover:bg-surface/70">
-      {icon ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface text-ink">{icon}</span> : null}
+      {icon ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand/[0.07] text-brand">{icon}</span> : null}
       <span className="min-w-0 flex-1"><span className="block font-semibold text-ink">{title}</span>{detail ? <span className="mt-0.5 block text-sm text-muted">{detail}</span> : null}</span>
       {action ? <span className="text-sm font-semibold text-brand">{action}</span> : null}
       <IconChevronRight className="h-4 w-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5" />
@@ -154,10 +181,15 @@ export function StatePanel({
   title: string;
   detail?: ReactNode;
   action?: ReactNode;
-  tone?: "neutral" | "danger";
+  tone?: "neutral" | "brand" | "danger";
 }) {
   return (
-    <div className={cn("rounded-lg border bg-white px-5 py-6 text-center", tone === "danger" ? "border-danger/25 text-danger" : "border-line text-ink")}>
+    <div className={cn(
+      "rounded-lg border px-5 py-6 text-center",
+      tone === "danger" && "border-danger/25 bg-danger/[0.03] text-danger",
+      tone === "brand" && "border-brand/20 bg-brand/[0.04] text-ink",
+      tone === "neutral" && "border-line bg-white text-ink",
+    )}>
       <div className="font-semibold">{title}</div>
       {detail ? <div className="mx-auto mt-1.5 max-w-[52ch] text-sm leading-6 text-muted">{detail}</div> : null}
       {action ? <div className="mt-4">{action}</div> : null}

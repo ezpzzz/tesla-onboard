@@ -32,12 +32,15 @@ export default function GuestTripHomePage() {
 
   return (
     <div className="mx-auto max-w-[1040px] space-y-5">
-      <PageHeader title={headline} description={<><span className="block text-ink-soft">Hi {trip.guestFirstName},</span>{subhead}</>} />
+      <PageHeader eyebrow="Trip companion" title={headline} description={<><span className="block text-ink-soft">Hi {trip.guestFirstName},</span>{subhead}</>} />
 
       <Card className="overflow-hidden">
         <div className="grid lg:grid-cols-[1.12fr_0.88fr]">
           <div className="min-w-0 border-b border-line lg:border-b-0 lg:border-r">
-            <div className="flex items-center gap-2 px-6 pt-6 text-[16px] font-semibold"><IconGuide className="h-5 w-5" />{phaseLabel}</div>
+            <div className="flex items-center gap-3 border-b border-line bg-brand/[0.045] px-6 py-4 text-[15px] font-semibold">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand/10 text-brand"><IconGuide className="h-4.5 w-4.5" /></span>
+              {phaseLabel}
+            </div>
             <VehicleArtwork
               model={trip.vehicle.model}
               color={trip.vehicle.color}
@@ -52,7 +55,7 @@ export default function GuestTripHomePage() {
             />
             <TripRibbon pickup={formatTripDate(trip.startsAt, trip.timezone)} pickupLocation={trip.pickupLocation ?? "See pickup instructions"} duration={`${daysBetween(trip.startsAt, trip.endsAt)} days`} dropoff={formatTripDate(trip.endsAt, trip.timezone)} />
           </div>
-          <section className="border-l-[4px] border-l-brand p-6 lg:border-l-0 lg:p-8" aria-labelledby="ready-title">
+          <section className="border-l-[4px] border-l-brand bg-white p-6 lg:border-l-0 lg:bg-brand/[0.025] lg:p-8" aria-labelledby="ready-title">
             <h2 id="ready-title" className="text-[22px] font-semibold tracking-[-0.02em]">{trip.lifecycle === "upcoming" ? "Get ready for pickup" : "Your handoff progress"}</h2>
             <div className="mt-5"><GuestReadiness /></div>
             <p className="mt-4 text-sm text-muted">{trip.progress?.isDone ? "Your guide is complete." : trip.progress ? `Continue from ${trip.progress.stepId.replaceAll("-", " ")}.` : "Start the guide before pickup."}</p>
@@ -62,14 +65,17 @@ export default function GuestTripHomePage() {
         </div>
       </Card>
 
-      <Link href={`/trip/${token}/vehicle`} className="group flex min-h-20 items-center gap-4 rounded-lg border border-line bg-white px-5 hover:bg-surface/60">
-        <IconKey className="h-6 w-6 text-ink" />
+      <Link href={`/trip/${token}/vehicle`} className="group flex min-h-20 items-center gap-4 rounded-lg border border-line border-l-brand bg-white px-5 hover:bg-brand/[0.025]">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand/[0.08] text-brand"><IconKey className="h-5 w-5" /></span>
         <span className="min-w-0 flex-1"><span className="block font-semibold text-ink">Tesla access · {trip.accessStatus ? trip.accessStatus.replaceAll("_", " ") : "Not yet available"}</span><span className="mt-0.5 block text-sm text-muted">{trip.accessStatus ? "View access details for this trip" : "Your host will share access details when they are ready"}</span></span>
         <span className="text-brand">View</span>
       </Link>
 
       <section className="rounded-lg border border-line bg-white px-6 py-3" aria-labelledby="before-title">
-        <h2 id="before-title" className="py-3 text-[20px] font-semibold">Before you go</h2>
+        <div className="border-b border-line py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand">Trip essentials</div>
+          <h2 id="before-title" className="mt-0.5 text-[20px] font-semibold">Before you go</h2>
+        </div>
         <OpenListRow href={`/trip/${token}/details`} icon={<IconMapPin className="h-5 w-5" />} title="Pickup instructions" detail="Where to meet and what to bring" />
         <OpenListRow href={`/trip/${token}/vehicle`} icon={<IconVehicle className="h-5 w-5" />} title="Quick reference" detail="Key controls for your trip" />
       </section>

@@ -55,7 +55,7 @@ export function GuestPortalLayout({ snapshot, token, children }: { snapshot: Gue
   return (
     <TenantConfigBoundary config={snapshot.tenantConfig} tenantSlug={snapshot.storageScope}>
       <GuestPortalContext.Provider value={{ snapshot, token }}>
-        <div className="min-h-dvh bg-white text-ink">
+        <div className="min-h-dvh bg-surface text-ink">
           <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur">
             <div className="mx-auto flex h-[72px] max-w-[1360px] items-center px-5 md:px-8">
               <Link href={base} aria-label="Trip home" className="flex min-h-11 shrink-0 items-center"><EvhostWordmark /></Link>
