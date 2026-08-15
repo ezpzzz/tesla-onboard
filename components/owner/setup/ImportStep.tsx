@@ -252,7 +252,7 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
         ) : (
           <button
             onClick={() => setManualOpen(true)}
-            className="mt-5 text-sm font-medium text-muted hover:text-ink"
+            className="mt-3 inline-flex min-h-11 items-center rounded-md px-2 text-sm font-medium text-muted hover:bg-surface hover:text-ink"
           >
             + Add another vehicle manually
           </button>
@@ -352,7 +352,7 @@ export function ImportStep({ state, update, nav }: SetupStepProps) {
       {!manualOpen ? (
         <button
           onClick={() => setManualOpen(true)}
-          className="mt-4 text-sm font-medium text-muted hover:text-ink"
+          className="mt-2 inline-flex min-h-11 items-center rounded-md px-2 text-sm font-medium text-muted hover:bg-surface hover:text-ink"
         >
           + Add another vehicle manually
         </button>
