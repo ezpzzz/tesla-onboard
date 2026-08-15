@@ -4,6 +4,7 @@ import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { decryptTripLink } from "@/lib/owner/trip-link-secret";
 import { sendGridConfigFromEnv, sendGridTripReminder } from "@/lib/owner/sendgrid";
 import { publishedTenantConfigFromFeatures } from "@/lib/tenant-config";
+import { isSameOriginRequest } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +44,7 @@ function rateError(message: string): { status: number; message: string } {
 }
 
 export async function POST(request: NextRequest, context: RouteContext<"/api/owner/trips/[id]/reminder">) {
-  if (request.headers.get("origin") !== request.nextUrl.origin) {
+  if (!isSameOriginRequest(request)) {
     return reply({ error: "Cross-origin reminder delivery was rejected." }, 403);
   }
   if (process.env.EVHOST_REMINDERS_ENABLED !== "true") return reply({ error: "Reminders are not enabled." }, 404);

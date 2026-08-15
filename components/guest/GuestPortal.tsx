@@ -29,9 +29,12 @@ export function useGuestTripToken() {
 }
 
 export function formatTripDate(ms: number, timezone: string, withTime = true) {
-  return new Intl.DateTimeFormat("en-US", withTime
+  const parts = new Intl.DateTimeFormat("en-US-u-hc-h12", withTime
     ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: timezone }
-    : { month: "short", day: "numeric", timeZone: timezone }).format(new Date(ms));
+    : { month: "short", day: "numeric", timeZone: timezone }).formatToParts(new Date(ms));
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  const date = `${value("month")} ${value("day")}`;
+  return withTime ? `${date}, ${value("hour")}:${value("minute")} ${value("dayPeriod")}` : date;
 }
 
 export function formatTripRange(snapshot: GuestTripPortalSnapshot) {

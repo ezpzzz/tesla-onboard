@@ -4,6 +4,7 @@ import { credentialKeyringFromEnv, decryptCredential } from "@/lib/owner/credent
 import { isTeslaInvitationUrl } from "@/lib/owner/tesla-access-client";
 import { createClient } from "@/lib/supabase/server";
 import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
+import { isSameOriginRequest } from "@/lib/request-origin";
 
 interface ReadyInviteRow {
   workspace_id: string;
@@ -13,8 +14,7 @@ interface ReadyInviteRow {
 
 export async function POST(request: NextRequest) {
   if (!ONLYEVS_OPERATIONS_ENABLED) return NextResponse.json({ error: "Not available." }, { status: 404 });
-  const origin = request.headers.get("origin");
-  if (origin && origin !== request.nextUrl.origin) {
+  if (!isSameOriginRequest(request)) {
     return NextResponse.json({ error: "origin_mismatch" }, { status: 403 });
   }
   const body = await request.json().catch(() => null) as { token?: unknown } | null;

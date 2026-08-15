@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getConfig, unseal } from "@/lib/tesla-server";
 import type { TeslaProfile } from "@/lib/tesla";
 import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
+import { isSameOriginRequest } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ function reply(body: unknown, status = 200) {
 
 export async function POST(request: NextRequest) {
   if (!ONLYEVS_OPERATIONS_ENABLED) return reply({ error: "Not available." }, 404);
-  if (request.headers.get("origin") !== new URL(request.url).origin) {
+  if (!isSameOriginRequest(request)) {
     return reply({ error: "Cross-origin completion was rejected." }, 403);
   }
   const body = (await request.json().catch(() => null)) as { token?: string; consent?: boolean } | null;

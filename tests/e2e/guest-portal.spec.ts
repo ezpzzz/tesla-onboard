@@ -5,6 +5,9 @@ const token = process.env.EVHOST_E2E_GUEST_TOKEN;
 test("a real private trip capability exposes the complete guest portal", async ({ isMobile, page }) => {
   test.skip(!token, "Set EVHOST_E2E_GUEST_TOKEN to a controlled staging trip capability.");
   const base = `/trip/${token}`;
+  const browserErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") browserErrors.push(message.text()); });
+  page.on("pageerror", (error) => browserErrors.push(error.message));
 
   await page.goto(base);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -27,4 +30,5 @@ test("a real private trip capability exposes the complete guest portal", async (
   await expect(page).toHaveURL(`${base}/help`);
   await page.goForward();
   await expect(page).toHaveURL(`${base}/details`);
+  expect(browserErrors).toEqual([]);
 });

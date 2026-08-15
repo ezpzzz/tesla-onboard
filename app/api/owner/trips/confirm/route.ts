@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 import { createEncryptedTripLink } from "@/lib/owner/trip-link-secret";
+import { isSameOriginRequest } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ function response(body: unknown, status = 200) {
 
 export async function POST(request: NextRequest) {
   if (!ONLYEVS_OPERATIONS_ENABLED) return response({ error: "Not available." }, 404);
-  if (request.headers.get("origin") !== new URL(request.url).origin) {
+  if (!isSameOriginRequest(request)) {
     return response({ error: "Cross-origin confirmation was rejected." }, 403);
   }
   const body = (await request.json().catch(() => null)) as {

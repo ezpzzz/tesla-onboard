@@ -3,6 +3,7 @@ import { canonicalOnlyEvsOrigin } from "@/lib/onlyevs-origin";
 import { createClient } from "@/lib/supabase/server";
 import { allowRequest } from "@/lib/owner-throttle";
 import { createEncryptedTripLink } from "@/lib/owner/trip-link-secret";
+import { isSameOriginRequest } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ export async function POST(
   request: NextRequest,
   context: RouteContext<"/api/owner/trips/[id]/link">,
 ) {
-  if (request.headers.get("origin") !== request.nextUrl.origin) {
+  if (!isSameOriginRequest(request)) {
     return reply({ error: "Cross-origin link generation was rejected." }, 403);
   }
   const { id } = await context.params;

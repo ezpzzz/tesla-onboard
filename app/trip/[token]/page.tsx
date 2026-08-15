@@ -15,7 +15,7 @@ function daysBetween(start: number, end: number) {
 export default function GuestTripHomePage() {
   const trip = useGuestTripPortal();
   const token = useGuestTripToken();
-  const daysUntil = Math.max(0, Math.ceil((trip.startsAt - Date.now()) / 86_400_000));
+  const daysUntil = Math.max(0, Math.ceil((trip.startsAt - trip.generatedAt) / 86_400_000));
   const headline = trip.lifecycle === "upcoming"
     ? `Your ${trip.vehicle.model} is almost ready`
     : trip.lifecycle === "active"

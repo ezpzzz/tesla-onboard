@@ -53,7 +53,7 @@ describe("private guest trip links", () => {
     });
     expect(snapshot).toMatchObject({ guestFirstName: "Maya", pickupLocation: "PHX Sky Harbor", accessStatus: "invite_ready" });
     expect(Object.keys(snapshot ?? {}).sort()).toEqual([
-      "accessStatus", "companyName", "endsAt", "guestFirstName", "lifecycle", "pickupLocation",
+      "accessStatus", "companyName", "endsAt", "generatedAt", "guestFirstName", "lifecycle", "pickupLocation",
       "progress", "progressUpdatedAt", "returnLocation", "startsAt", "tenantConfig",
       "storageScope", "timezone", "vehicle",
     ].sort());

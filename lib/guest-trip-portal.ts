@@ -11,6 +11,7 @@ export type GuestTripLifecycle = "upcoming" | "active" | "completed";
 
 export interface GuestTripPortalSnapshot {
   storageScope: string;
+  generatedAt: number;
   companyName: string;
   guestFirstName: string;
   vehicle: {
@@ -101,6 +102,7 @@ export async function loadGuestTripPortal(token: string): Promise<GuestTripPorta
   const progressUpdatedAt = row.progress_updated_at ? Date.parse(String(row.progress_updated_at)) : null;
   return {
     storageScope: `guest-${tokenHash.slice(0, 32)}`,
+    generatedAt: Date.now(),
     companyName: text(row.company_name, 160) ?? tenantConfig.companyName,
     guestFirstName: text(row.guest_first_name, 120) ?? "there",
     vehicle: {
