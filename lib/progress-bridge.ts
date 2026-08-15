@@ -5,7 +5,7 @@
  *
  * The guest-facing onboarding flow and the host-facing /owner dashboard are two
  * separate apps. Browser-local storage preserves same-device continuity while
- * authenticated booking links also publish a bounded summary to the private
+ * private trip links also publish a bounded summary to the matching
  * trip binding so an owner can track progress from another device.
  *
  * `?trip=<id>` is how a host's deep link ("send this guest their onboarding

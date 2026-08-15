@@ -12,10 +12,9 @@
  *    supabase.auth.signInWithPassword directly, so the *network response* is
  *    identical too — Supabase distinguishes invalid_credentials from
  *    email_not_confirmed over the wire even though the UI can't.
- *  - Magic link: ALWAYS shows the same "check your email" interstitial
- *    regardless of whether the address has an account (shouldCreateUser is
- *    false, so a non-account email silently gets no email — the UI can't
- *    tell, by design). The request itself is proxied through
+ *  - Magic link: ALWAYS shows the same "check your email" interstitial.
+ *    Verified first-time addresses create an EVhost owner account and claim
+ *    or bootstrap a workspace. The request itself is proxied through
  *    /api/owner/magic-link rather than calling supabase.auth.signInWithOtp
  *    directly, so the *network response* is identical too — Supabase's own
  *    /auth/v1/otp is distinguishable (200 vs 422) over the wire even though
@@ -214,9 +213,9 @@ function LoginForm() {
       <div className="text-center">
         <h1 className="text-xl font-semibold tracking-tight text-ink">Check your email</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          If an account exists for{" "}
-          <span className="font-medium text-ink">{email}</span>, we sent a
-          sign-in link. Open it on this device to continue.
+          If the address can receive EVhost sign-in links, we sent one to{" "}
+          <span className="font-medium text-ink">{email}</span>. Open it on
+          this device to continue.
         </p>
         <div className="mt-6 space-y-3">
           <Button

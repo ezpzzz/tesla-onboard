@@ -144,7 +144,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                 <div>
                   <h2 id="new-guest-heading" className="text-lg font-semibold text-ink">Onboarding link ready</h2>
                   <p className="mt-1 text-sm leading-relaxed text-muted">
-                    Share this private link only with {guestName}. They must verify {guestEmail} before beginning.
+                    Share this private link only with {guestName}. Anyone with the link can open this trip's walkthrough.
                   </p>
                 </div>
               </div>
@@ -259,7 +259,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
               {error ? <p role="alert" className="text-sm font-medium text-danger">{error}</p> : null}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
                 <p className="max-w-[48ch] text-xs leading-relaxed text-muted">
-                  The raw link is shown once. evhost.app stores only its cryptographic hash and tracks progress after the guest verifies the booking email.
+                  The raw link is shown once. evhost.app stores only its cryptographic hash and uses the private link to track this trip's onboarding progress.
                 </p>
                 <Button type="submit" variant="brand" disabled={saving} className="min-h-12 px-7">
                   {saving ? "Creating…" : "Create private link"}
@@ -271,7 +271,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
           {!expanded && !ready ? (
             <p className="mt-4 border-t border-brand/10 pt-4 text-xs leading-relaxed text-muted">
               {!durable
-                ? "A durable Sophosic workspace is required before guest links can be created."
+                ? "A durable EVhost workspace is required before guest links can be created."
                 : !published
                   ? <>Complete and publish <Link href="/owner/setup" className="font-medium text-brand hover:underline">fleet setup</Link> before inviting guests.</>
                   : <>Add an active vehicle in <Link href="/owner/vehicles" className="font-medium text-brand hover:underline">Vehicles</Link> before inviting guests.</>}

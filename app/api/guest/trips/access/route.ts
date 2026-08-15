@@ -22,8 +22,6 @@ export async function POST(request: NextRequest) {
   if (token.length < 32 || token.length > 256) return NextResponse.json({ error: "invalid_invitation" }, { status: 400 });
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const supabase = await createClient();
-  const { data: user } = await supabase.auth.getUser();
-  if (!user.user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   const { data, error } = await supabase.rpc("get_onlyevs_ready_invite", { p_public_token_hash: tokenHash });
   const row = (Array.isArray(data) ? data[0] : data) as ReadyInviteRow | null;
   if (error || !row?.invite_url_ciphertext) {

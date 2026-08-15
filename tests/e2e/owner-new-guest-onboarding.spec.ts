@@ -11,5 +11,5 @@ test("owner overview gives guest onboarding a prominent durable-workspace CTA", 
   // The test server deliberately has no Supabase workspace. The product must
   // advertise the action without pretending a browser-only link is trackable.
   await expect(section.getByRole("button", { name: "New onboarding" })).toBeDisabled();
-  await expect(section).toContainText("durable Sophosic workspace is required");
+  await expect(section).toContainText("durable EVhost workspace is required");
 });

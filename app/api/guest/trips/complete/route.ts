@@ -37,9 +37,6 @@ export async function POST(request: NextRequest) {
     return reply({ error: "Connect the Tesla account that should receive vehicle access first." }, 409);
   }
   const supabase = await createClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) return reply({ error: "Verify the booking email first." }, 401);
-
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
   const bindingSecret = process.env.ONLYEVS_TRIP_BINDING_HMAC_SECRET
     ?? oauthStateSecretFromEnv();
@@ -54,10 +51,7 @@ export async function POST(request: NextRequest) {
     p_tesla_subject_hmac: teslaSubjectHmac,
   });
   if (error) {
-    const message = error.message.includes("binding")
-      ? "Verify the booking email before scheduling Tesla access."
-      : "Tesla access could not be scheduled for this trip.";
-    return reply({ error: message }, error.code === "42501" ? 403 : 400);
+    return reply({ error: "Tesla access could not be scheduled for this trip." }, 400);
   }
   const grant = data as { status?: string; issue_at?: string; revoke_at?: string } | null;
   return reply({

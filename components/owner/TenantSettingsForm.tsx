@@ -202,7 +202,7 @@ export function TenantSettingsForm({
     <form onSubmit={submit} className="space-y-6">
       {workspaces.length > 1 ? (
         <label className="block text-sm font-medium text-ink">
-          Sophosic workspace
+          EVhost workspace
           <select
             name="onlyevs-workspace"
             value={workspace.key}
@@ -395,7 +395,7 @@ export function TenantSettingsForm({
 
       <div className="rounded-2xl border border-line bg-surface p-4 text-sm leading-relaxed text-muted">
         {persistence === "workspace"
-          ? "Tenant settings are saved to your Sophosic workspace. "
+          ? "Tenant settings are saved to your EVhost workspace. "
           : "Demo-mode settings stay in this browser and are not published. "}
         Supabase keys, Tesla OAuth secrets,
         callback URLs, and cookie-encryption secrets remain platform-managed and are never exposed

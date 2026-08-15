@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Owner-dashboard admin helper: create (or reset) a sign-in user for /owner
- * in the shared Supabase Auth project. Operator-only — this script is never
+ * in the dedicated EVhost Supabase Auth project. Operator-only — this script is never
  * imported by app code, and it is the ONLY place the service-role key is
  * used anywhere in this repo.
  *
@@ -67,4 +67,4 @@ console.log(`Created owner user: ${data.user?.email} (${data.user?.id})`);
 if (generatedPassword) {
   console.log(`Generated password (shown once, save it now): ${password}`);
 }
-console.log("Reminder: this account needs membership in a Sophosic workspace to save tenant settings.");
+console.log("The verified account will claim a staged EVhost workspace or bootstrap a new one on first sign-in.");

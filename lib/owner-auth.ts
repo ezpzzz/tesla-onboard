@@ -1,7 +1,7 @@
 import "server-only";
 
 /**
- * Owner-dashboard auth gate (Supabase Auth, shared project).
+ * Owner-dashboard auth gate (dedicated EVhost Supabase project).
  *
  * /owner has no auth at all when NEXT_PUBLIC_SUPABASE_URL /
  * NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY are unset — that's "demo mode", and it
@@ -11,9 +11,9 @@ import "server-only";
  * Partial config (only one of the pair set) counts as unconfigured — fail
  * toward demo mode, not toward a half-working gate.
  *
- * Signing in proves identity. Tenant access is resolved from the shared
- * platform's workspace_users membership and enforced by its existing RLS
- * policies, so this deployment no longer carries an email allowlist.
+ * Signing in proves identity. Tenant access is resolved from EVhost-owned
+ * workspace_users membership and enforced by RLS policies, so this deployment
+ * does not carry a global email allowlist.
  */
 
 export function isOwnerAuthConfigured(): boolean {

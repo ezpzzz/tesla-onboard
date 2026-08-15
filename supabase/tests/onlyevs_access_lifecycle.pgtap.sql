@@ -1,5 +1,5 @@
 begin;
-select plan(57);
+select plan(63);
 
 select has_table('public'::name, 'onlyevs_integrations'::name);
 select has_table('public'::name, 'onlyevs_calendar_candidates'::name);
@@ -120,6 +120,48 @@ select function_privs_are(
   'public',
   array[]::text[]
 );
+select function_privs_are(
+  'public',
+  'complete_onlyevs_integration',
+  array['uuid', 'text', 'text', 'text', 'text[]', 'text', 'text', 'text', 'text', 'text', 'smallint', 'timestamp with time zone'],
+  'anon',
+  array[]::text[]
+);
+select function_privs_are(
+  'public',
+  'create_onlyevs_owner_import_session',
+  array['uuid', 'text', 'text', 'jsonb', 'timestamp with time zone'],
+  'anon',
+  array[]::text[]
+);
+select function_privs_are(
+  'public',
+  'request_onlyevs_custom_domain',
+  array['uuid', 'text', 'text'],
+  'anon',
+  array[]::text[]
+);
+select function_privs_are(
+  'public',
+  'touch_evhost_record',
+  array[]::text[],
+  'anon',
+  array[]::text[]
+);
+select function_privs_are(
+  'public',
+  'complete_onlyevs_guest_onboarding',
+  array['text', 'boolean', 'text'],
+  'anon',
+  array['EXECUTE']
+);
+select function_privs_are(
+  'public',
+  'get_onlyevs_trip_invitation',
+  array['text'],
+  'anon',
+  array['EXECUTE']
+);
 select has_function('public', 'request_onlyevs_custom_domain', array['uuid', 'text', 'text']);
 select has_function('public', 'request_onlyevs_custom_domain_removal', array['uuid', 'uuid']);
 select has_function('public', 'get_onlyevs_ready_invite', array['text']);
@@ -154,6 +196,13 @@ on conflict (id) do nothing;
 insert into public.workspaces (id, name, slug)
 values ('20000000-0000-4000-8000-000000000001', 'evhost.app test', 'onlyevs-test')
 on conflict (id) do nothing;
+insert into public.workspace_users (workspace_id, user_id, role)
+values (
+  '20000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000001',
+  'owner'
+)
+on conflict (workspace_id, user_id) do update set role = excluded.role;
 insert into public.workspace_branding (workspace_id, shop_slug, display_name)
 values ('20000000-0000-4000-8000-000000000001', 'onlyevs-test', 'evhost.app test')
 on conflict (workspace_id, shop_slug) do nothing;
@@ -210,11 +259,14 @@ select is(
   'cancel',
   'the review state records that the provider cancelled the event'
 );
-insert into public.onlyevs_vehicles (id, workspace_id, shop_slug, display_name, vin)
+insert into public.onlyevs_vehicles (
+  id, workspace_id, shop_slug, display_name, model, trim, year, color, vin
+)
 values (
   '50000000-0000-4000-8000-000000000001',
   '20000000-0000-4000-8000-000000000001',
-  'onlyevs-test', 'Test Model 3', '5YJ30000000000000'
+  'onlyevs-test', 'Test Model 3', 'Model 3', 'Performance', 2024, 'Solid Black',
+  '5YJ30000000000000'
 );
 insert into public.onlyevs_trips (
   id, workspace_id, shop_slug, calendar_candidate_id, vehicle_id,
