@@ -92,7 +92,7 @@ export default function OwnerSetupPage() {
                   <button
                     onClick={nav.back}
                     aria-label="Back"
-                    className="-ml-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface hover:text-ink"
+                    className="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface hover:text-ink"
                   >
                     <IconArrowLeft className="h-4 w-4" />
                   </button>
@@ -104,7 +104,7 @@ export default function OwnerSetupPage() {
               {!nav.isFirst && (
                 <button
                   onClick={handleRestart}
-                  className="shrink-0 text-xs font-medium text-muted transition-colors hover:text-ink"
+                  className="inline-flex min-h-11 shrink-0 items-center rounded-md px-2 text-xs font-medium text-muted transition-colors hover:bg-surface hover:text-ink"
                 >
                   Start over
                 </button>

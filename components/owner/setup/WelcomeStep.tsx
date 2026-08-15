@@ -41,7 +41,7 @@ export function WelcomeStep({ nav, update }: SetupStepProps) {
               update({ dismissedAt: Date.now() });
               router.push("/owner");
             }}
-            className="block w-full text-center text-sm font-medium text-muted hover:text-ink"
+            className="flex min-h-11 w-full items-center justify-center rounded-md text-center text-sm font-medium text-muted hover:bg-surface hover:text-ink"
           >
             Skip for now
           </button>

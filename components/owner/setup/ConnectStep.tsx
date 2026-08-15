@@ -43,7 +43,7 @@ export function ConnectStep({ state, update, nav }: SetupStepProps) {
             </Button>
             <button
               onClick={useDifferentAccount}
-              className="block w-full text-center text-sm font-medium text-muted hover:text-ink"
+              className="flex min-h-11 w-full items-center justify-center rounded-md text-center text-sm font-medium text-muted hover:bg-surface hover:text-ink"
             >
               Use a different account
             </button>
