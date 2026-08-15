@@ -9,7 +9,7 @@ import {
   type ReactNode,
   type CSSProperties,
 } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   DEFAULT_TENANT_CONFIG,
@@ -78,6 +78,7 @@ function supabaseConfigured(): boolean {
 }
 
 export function TenantConfigProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
   const search = searchParams.toString();
   const [value, setValue] = useState<TenantConfigContextValue>({
@@ -87,6 +88,14 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
+    // Private trip routes carry an already-validated, guest-safe tenant
+    // snapshot in their nested boundary. Resolving the serving hostname here
+    // would be redundant and can create a blocked background request under
+    // the portal's intentionally strict no-referrer policy.
+    if (pathname.startsWith("/trip/")) {
+      setValue({ ...DEFAULT_CONTEXT, tenantSlug: null, loading: false, readiness: "missing-tenant" });
+      return;
+    }
     let cancelled = false;
     void (async () => {
       const params = new URLSearchParams(search);
@@ -185,7 +194,7 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [search]);
+  }, [pathname, search]);
 
   return (
     <TenantConfigContext.Provider value={value}>

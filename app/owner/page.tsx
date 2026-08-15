@@ -9,8 +9,8 @@ import { buttonClassName, Card } from "@/components/ui";
 import { IconAlert, IconCalendar, IconChevronRight, IconKey, IconTrips, IconVehicle } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
-import { handoffSteps, selectNextHandoff } from "@/lib/owner/handoff";
-import { driverStatus } from "@/lib/owner/derive";
+import { handoffSteps, selectAttentionQueue, selectNextHandoff } from "@/lib/owner/handoff";
+import { formatTripDuration } from "@/lib/trip-format";
 
 function dateTime(ms: number) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(ms));
@@ -18,10 +18,6 @@ function dateTime(ms: number) {
 
 function fullDate(ms: number) {
   return new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date(ms));
-}
-
-function durationDays(start: number, end: number) {
-  return `${Math.max(1, Math.ceil((end - start) / 86_400_000))} days`;
 }
 
 export default function OwnerTodayPage() {
@@ -39,7 +35,7 @@ export default function OwnerTodayPage() {
       return [];
     }).sort((a, b) => a.at - b.at).slice(0, 3);
   }, [trips, drivers, vehicles, now]);
-  const attention = useMemo(() => now ? drivers.map((driver) => ({ driver, status: driverStatus(driver, now), trip: trips.find((item) => item.driverId === driver.id && item.status !== "completed") ?? null })).filter((row) => row.status !== "ready").slice(0, 3) : [], [drivers, trips, now]);
+  const attention = useMemo(() => now ? selectAttentionQueue(drivers, trips, now) : [], [drivers, trips, now]);
   const error = vehicleError ?? operationalError;
 
   return (
@@ -53,7 +49,7 @@ export default function OwnerTodayPage() {
             <section className="border-b border-line lg:border-b-0 lg:border-r" aria-labelledby="next-handoff-title">
               <div className="border-b border-line bg-brand/[0.045] px-6 py-4"><div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand">Next handoff</div><h2 id="next-handoff-title" className="mt-1 font-semibold">{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(handoff.boundaryAt))}</h2><p className="mt-1 text-sm text-muted">{handoff.location ?? "Location in trip instructions"}</p></div>
               {handoff.vehicle ? <VehicleArtwork model={handoff.vehicle.model} color={handoff.vehicle.color} trim={handoff.vehicle.trim} wheelType={handoff.vehicle.wheelType} interior={handoff.vehicle.interior} interiorCode={handoff.vehicle.teslaInteriorCode} paintCode={handoff.vehicle.teslaPaintCode} year={handoff.vehicle.year} decorative className="h-[300px] border-0 bg-white" /> : <div className="flex h-[300px] items-center justify-center text-sm text-muted">Vehicle image unavailable</div>}
-              <TripRibbon pickup={dateTime(handoff.trip.startAt)} pickupLocation={handoff.trip.pickupLocation ?? null} duration={durationDays(handoff.trip.startAt, handoff.trip.endAt)} dropoff={dateTime(handoff.trip.endAt)} />
+              <TripRibbon pickup={dateTime(handoff.trip.startAt)} pickupLocation={handoff.trip.pickupLocation ?? null} duration={formatTripDuration(handoff.trip.startAt, handoff.trip.endAt)} dropoff={dateTime(handoff.trip.endAt)} />
             </section>
             <section className="bg-white p-6 lg:bg-brand/[0.025] lg:p-8" aria-labelledby="handoff-guest-title">
               <h2 id="handoff-guest-title" className="text-[28px] font-semibold leading-tight tracking-[-0.03em]">{handoff.driver?.name || "Guest"}</h2>
@@ -71,12 +67,12 @@ export default function OwnerTodayPage() {
 
       <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
         <section className="rounded-lg border border-line bg-white px-6 py-3" aria-labelledby="today-handoffs-title">
-          <h2 id="today-handoffs-title" className="flex items-center gap-2 border-b border-line py-3 text-[17px] font-semibold"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand/[0.08] text-brand"><IconCalendar className="h-4 w-4" /></span>Today’s handoffs</h2>
+          <h2 id="today-handoffs-title" className="flex items-center gap-2 border-b border-line py-3 text-[17px] font-semibold"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand/[0.08] text-brand"><IconCalendar className="h-4 w-4" /></span>Upcoming handoffs</h2>
           {boundaries.length ? boundaries.map((item) => <Link key={`${item.trip.id}-${item.kind}`} href={`/owner/trips/${item.trip.id}`} className="group grid min-h-[64px] grid-cols-[72px_1fr_auto] items-center gap-3 border-b border-line text-sm last:border-0 hover:bg-surface/60"><span className="text-muted">{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(item.at))}</span><span className="min-w-0"><span className="block truncate font-semibold">{item.label}</span><span className="block truncate text-xs text-muted">{item.location ?? item.vehicle?.displayName ?? "Trip details"}</span></span><IconChevronRight className="h-4 w-4 text-muted group-hover:translate-x-0.5" /></Link>) : <p className="py-6 text-sm text-muted">No upcoming pickup or return boundaries.</p>}
         </section>
         <section className="rounded-lg border border-line bg-white px-6 py-3" aria-labelledby="attention-title">
           <h2 id="attention-title" className="flex items-center gap-2 border-b border-line py-3 text-[17px] font-semibold"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-warn/10 text-warn"><IconAlert className="h-4 w-4" /></span>Needs attention · {attention.length}</h2>
-          {attention.length ? attention.map(({ driver, status, trip }) => <div key={driver.id} className="flex min-h-[64px] items-center gap-3 border-b border-line last:border-0"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-xs font-semibold">{driver.name.slice(0, 2).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{driver.name || "Guest"} walkthrough</span><span className="block text-xs text-muted">{status.replaceAll("-", " ")}</span></span>{trip ? <Link href={`/owner/trips/${trip.id}`} className="text-xs font-semibold text-brand">Review</Link> : null}</div>) : <p className="py-6 text-sm text-muted">Every guest is on track.</p>}
+          {attention.length ? attention.map(({ driver, status, trip }) => <div key={driver.id} className="flex min-h-[64px] items-center gap-3 border-b border-line last:border-0"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-xs font-semibold">{driver.name.slice(0, 2).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{driver.name || "Guest"} walkthrough</span><span className="block text-xs text-muted">{status.replaceAll("-", " ")}</span></span><Link href={`/owner/trips/${trip.id}`} className="text-xs font-semibold text-brand">Review</Link></div>) : <p className="py-6 text-sm text-muted">Every active guest is on track.</p>}
         </section>
       </div>
 

@@ -302,7 +302,7 @@ export function DriverTable({
               >
                 <td className="px-4 py-3">
                   <Link
-                    href={`/owner/drivers/${row.driver.id}`}
+                    href={`/owner/drivers/${encodeURIComponent(row.driver.id)}`}
                     className="inline-flex min-h-[28px] items-center gap-2 font-medium text-ink hover:text-brand"
                   >
                     {row.driver.name || "Unnamed guest"}
@@ -354,7 +354,7 @@ export function DriverTable({
             key={row.driver.id}
             className="rounded-lg border border-line bg-white p-4"
           >
-            <Link href={`/owner/drivers/${row.driver.id}`} className="block">
+            <Link href={`/owner/drivers/${encodeURIComponent(row.driver.id)}`} className="block">
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate font-medium text-ink">
                   {row.driver.name || "Unnamed guest"}

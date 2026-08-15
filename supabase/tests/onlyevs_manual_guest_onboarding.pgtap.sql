@@ -1,5 +1,24 @@
 begin;
-select plan(23);
+select plan(34);
+
+select has_function(
+  'public',
+  'create_onlyevs_manual_trip',
+  array['uuid', 'text', 'uuid', 'text', 'text', 'text', 'timestamptz', 'timestamptz', 'text', 'timestamptz'],
+  'the previous web release keeps its manual-trip signature during the rolling deploy'
+);
+select has_function(
+  'public',
+  'confirm_onlyevs_calendar_candidate',
+  array['uuid', 'uuid', 'text', 'text', 'text', 'timestamptz'],
+  'the previous web release keeps its calendar-confirm signature during the rolling deploy'
+);
+select has_function(
+  'public',
+  'rotate_onlyevs_trip_public_token',
+  array['uuid', 'text', 'timestamptz'],
+  'the previous web release keeps its link-rotation signature during the rolling deploy'
+);
 
 select ok(
   not has_function_privilege('anon', 'public.create_onlyevs_manual_trip(uuid,uuid,text,uuid,text,text,text,timestamptz,timestamptz,text,text,text,timestamptz,text,smallint)', 'execute'),
@@ -192,6 +211,97 @@ select is(
   (select token_ciphertext from private.onlyevs_trip_link_secrets where trip_id = '74000000-0000-4000-8000-000000000001'),
   repeat('d', 64),
   'rotation replaces the ciphertext in the same transaction as the public hash'
+);
+select lives_ok(
+  $$select public.begin_onlyevs_trip_reminder('74000000-0000-4000-8000-000000000001')$$,
+  'a manager can reserve one reminder delivery'
+);
+select throws_ok(
+  $$select public.begin_onlyevs_trip_reminder('74000000-0000-4000-8000-000000000001')$$,
+  '55000',
+  'trip_reminder_cooldown',
+  'a pending reminder enforces the five-minute cooldown'
+);
+select lives_ok(
+  $$select public.finish_onlyevs_trip_reminder(
+    (select id from public.onlyevs_reminder_deliveries
+      where trip_id = '74000000-0000-4000-8000-000000000001'
+      order by requested_at desc limit 1),
+    'failed', null, 'provider_unavailable'
+  )$$,
+  'a failed provider attempt is recorded durably'
+);
+select is(
+  (select action from public.onlyevs_integration_audit_events
+    where entity_id = '74000000-0000-4000-8000-000000000001'
+    order by created_at desc limit 1),
+  'guest_reminder_failed',
+  'the audit action does not describe a failed reminder as sent'
+);
+select throws_ok(
+  $$select public.begin_onlyevs_trip_reminder('74000000-0000-4000-8000-000000000001')$$,
+  '55000',
+  'trip_reminder_retry_delay',
+  'a failed reminder enforces the one-minute retry delay'
+);
+update public.onlyevs_reminder_deliveries
+set requested_at = now() - interval '2 minutes'
+where trip_id = '74000000-0000-4000-8000-000000000001';
+insert into public.onlyevs_reminder_deliveries (
+  workspace_id, trip_id, requested_by, status, recipient_hash, recipient_masked,
+  error_code, requested_at, completed_at
+)
+select
+  '72000000-0000-4000-8000-000000000001',
+  '74000000-0000-4000-8000-000000000001',
+  '71000000-0000-4000-8000-000000000001',
+  'failed', repeat('e', 64), 'ta••••@example.com', 'provider_unavailable',
+  now() - interval '2 minutes', now() - interval '2 minutes'
+from generate_series(1, 5);
+select throws_ok(
+  $$select public.begin_onlyevs_trip_reminder('74000000-0000-4000-8000-000000000001')$$,
+  '54000',
+  'trip_reminder_daily_limit',
+  'a trip cannot exceed six reminder attempts in 24 hours'
+);
+delete from public.onlyevs_reminder_deliveries
+where trip_id = '74000000-0000-4000-8000-000000000001';
+insert into public.onlyevs_trips (
+  id, workspace_id, shop_slug, vehicle_id, guest_name, guest_email, timezone,
+  starts_at, ends_at, public_token_hash, token_expires_at
+)
+select
+  '74000000-0000-4000-8000-000000000002', workspace_id, shop_slug, vehicle_id,
+  'Workspace Limit Guest', 'limit@example.com', timezone,
+  starts_at + interval '20 days', ends_at + interval '20 days', repeat('f', 64),
+  token_expires_at + interval '20 days'
+from public.onlyevs_trips
+where id = '74000000-0000-4000-8000-000000000001';
+insert into public.onlyevs_reminder_deliveries (
+  workspace_id, trip_id, requested_by, status, recipient_hash, recipient_masked,
+  error_code, requested_at, completed_at
+)
+select
+  '72000000-0000-4000-8000-000000000001',
+  '74000000-0000-4000-8000-000000000002',
+  '71000000-0000-4000-8000-000000000001',
+  'failed', repeat('f', 64), 'li••••@example.com', 'provider_unavailable',
+  now() - interval '2 minutes', now() - interval '2 minutes'
+from generate_series(1, 100);
+select throws_ok(
+  $$select public.begin_onlyevs_trip_reminder('74000000-0000-4000-8000-000000000001')$$,
+  '54000',
+  'workspace_reminder_daily_limit',
+  'a workspace cannot exceed 100 reminder attempts in 24 hours'
+);
+update public.onlyevs_trips
+set status = 'completed'
+where id = '74000000-0000-4000-8000-000000000001';
+select throws_ok(
+  $$select public.begin_onlyevs_trip_reminder('74000000-0000-4000-8000-000000000001')$$,
+  '55000',
+  'trip_reminder_unavailable',
+  'a completed trip cannot send a pickup reminder'
 );
 
 select * from finish();

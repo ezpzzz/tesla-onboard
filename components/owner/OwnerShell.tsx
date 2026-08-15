@@ -8,7 +8,6 @@ import { EvhostWordmark, SignalMark } from "@/components/evhost-ui";
 import { cn } from "@/components/ui";
 import {
   IconDrivers,
-  IconHelp,
   IconInsights,
   IconOverview,
   IconPlug,
@@ -97,8 +96,7 @@ export function OwnerShell({ children, ownerEmail }: { children: ReactNode; owne
             ) : <span className="text-sm text-muted">{workspace?.name || "Owner workspace"}</span>}
           </div>
           <div className="flex items-center gap-3 md:ml-auto">
-            <span className="hidden items-center gap-2 text-xs text-muted lg:flex"><span className="flex h-5 w-5 items-center justify-center rounded-full border border-good text-good">✓</span>All systems</span>
-            <Link href="/owner/settings" aria-label="Help and settings" className="flex h-11 w-11 items-center justify-center rounded-full text-ink hover:bg-surface"><IconHelp className="h-6 w-6" /></Link>
+            <Link href="/owner/settings" aria-label="Workspace settings" className="flex h-11 w-11 items-center justify-center rounded-full text-ink hover:bg-surface"><IconSettings className="h-5 w-5" /></Link>
             <details key={pathname} className="relative">
               <summary aria-label="Open account menu" className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full bg-surface text-sm font-semibold text-ink marker:hidden">{ownerInitial}</summary>
               <div className="absolute right-0 top-12 w-48 rounded-lg border border-line bg-white p-2 shadow-[0_12px_32px_rgba(22,26,31,0.12)]">

@@ -130,9 +130,11 @@ begin
 end;
 $$;
 
-drop function if exists public.create_onlyevs_manual_trip(
-  uuid, text, uuid, text, text, text, timestamptz, timestamptz, text, timestamptz
-);
+-- Keep the previous signature throughout the rolling release. The new
+-- server route calls the overload below, while an already-serving web
+-- revision can continue creating trips until Vercel finishes promoting.
+-- A later cleanup migration may remove the legacy overload after the new
+-- serving SHA has been proven in production.
 
 create function public.create_onlyevs_manual_trip(
   p_trip_id uuid,
@@ -312,9 +314,8 @@ begin
 end;
 $$;
 
-drop function if exists public.confirm_onlyevs_calendar_candidate(
-  uuid, uuid, text, text, text, timestamptz
-);
+-- Preserve the previous overload for rolling-deploy compatibility; see the
+-- manual-trip note above.
 
 create function public.confirm_onlyevs_calendar_candidate(
   p_trip_id uuid,
@@ -381,7 +382,8 @@ exception when exclusion_violation then
 end;
 $$;
 
-drop function if exists public.rotate_onlyevs_trip_public_token(uuid, text, timestamptz);
+-- Preserve the previous overload for rolling-deploy compatibility; see the
+-- manual-trip note above.
 
 create function public.rotate_onlyevs_trip_public_token(
   p_trip_id uuid,
@@ -528,7 +530,8 @@ begin
   if (select auth.uid()) is null or not public.has_minimum_role(trip.workspace_id, (select auth.uid()), 'manager') then
     raise exception 'workspace_manager_required' using errcode = '42501';
   end if;
-  if trip.status in ('cancelled', 'conflict') or trip.token_expires_at <= now() then
+  if trip.status in ('cancelled', 'conflict', 'completed') or trip.ends_at <= now()
+    or trip.token_expires_at <= now() then
     raise exception 'trip_reminder_unavailable' using errcode = '55000';
   end if;
   perform pg_advisory_xact_lock(hashtextextended(trip.workspace_id::text, 0));
@@ -626,7 +629,8 @@ begin
     action, result, provider_request_id, error_code, details
   ) values (
     delivery.workspace_id, 'owner', encode(extensions.digest((select auth.uid())::text, 'sha256'), 'hex'),
-    'trip', delivery.trip_id, 'guest_reminder_sent',
+    'trip', delivery.trip_id,
+    case when p_status = 'sent' then 'guest_reminder_sent' else 'guest_reminder_failed' end,
     case when p_status = 'sent' then 'success' else 'failure' end,
     nullif(left(coalesce(p_provider_message_id, ''), 500), ''),
     nullif(left(coalesce(p_error_code, ''), 120), ''),

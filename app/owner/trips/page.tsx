@@ -20,6 +20,7 @@ import { PageHeader, ReadinessRail, StatePanel, TripRibbon } from "@/components/
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import { ReminderButton } from "@/components/owner/ReminderButton";
 import { IconChevronRight, IconMapPin } from "@/components/icons";
+import { formatTripDuration } from "@/lib/trip-format";
 
 type Filter = "all" | TripStatus;
 
@@ -92,7 +93,7 @@ export default function TripsPage() {
               <div className="min-w-0 border-r border-line">
                 <div className="px-6 pt-6"><div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">{selected.status}</div><h2 className="mt-2 text-2xl font-semibold">{selectedGuest?.name || "Guest"}</h2><p className="mt-1 text-sm text-muted">{formatTripRange(selected.startAt, selected.endAt)}</p></div>
                 {selectedVehicle ? <VehicleArtwork model={selectedVehicle.model} color={selectedVehicle.color} trim={selectedVehicle.trim} wheelType={selectedVehicle.wheelType} interior={selectedVehicle.interior} interiorCode={selectedVehicle.teslaInteriorCode} paintCode={selectedVehicle.teslaPaintCode} year={selectedVehicle.year} decorative className="h-56 border-0 bg-white" /> : null}
-                <TripRibbon pickup={formatDateTime(selected.startAt)} pickupLocation={selected.pickupLocation ?? "Instructions"} duration={`${Math.max(1, Math.ceil((selected.endAt-selected.startAt)/86_400_000))} days`} dropoff={formatDateTime(selected.endAt)} />
+                <TripRibbon pickup={formatDateTime(selected.startAt)} pickupLocation={selected.pickupLocation ?? "Instructions"} duration={formatTripDuration(selected.startAt, selected.endAt)} dropoff={formatDateTime(selected.endAt)} />
               </div>
               <aside className="p-5"><h3 className="font-semibold">Handoff status</h3><div className="mt-4"><ReadinessRail steps={[{ label: "Link", detail: selectedGuest?.progress ? "Opened" : "Not opened", value: selectedGuest?.progress ? "Complete" : "Pending", state: selectedGuest?.progress ? "complete" : "current" }, { label: "Guide", detail: "Guest walkthrough", value: `${Math.round(selectedGuest?.progress?.pct ?? 0)}%`, state: selectedGuest?.progress?.isDone ? "complete" : selectedGuest?.progress ? "current" : "pending" }, { label: "Access", detail: "Tesla access", value: selected.accessStatus?.replaceAll("_", " ") ?? "Unavailable", state: selected.accessStatus ? "current" : "pending" }]} /></div><div className="mt-5 flex items-start gap-2 text-sm text-muted"><IconMapPin className="mt-0.5 h-4 w-4 shrink-0" />{selected.pickupLocation ?? "Location is in the trip instructions"}</div>{selected.status !== "completed" && !selectedGuest?.progress?.isDone ? <ReminderButton tripId={selected.id} className="mt-5" fullWidth /> : null}<Link href={`/owner/trips/${selected.id}`} className="mt-2 flex min-h-11 items-center justify-center text-sm font-semibold text-brand">Open trip detail</Link></aside>
             </div>

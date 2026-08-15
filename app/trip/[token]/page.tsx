@@ -7,10 +7,7 @@ import { formatTripDate, useGuestTripPortal, useGuestTripToken } from "@/compone
 import { buttonClassName, Card } from "@/components/ui";
 import { IconGuide, IconKey, IconMapPin, IconVehicle } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
-
-function daysBetween(start: number, end: number) {
-  return Math.max(1, Math.ceil((end - start) / 86_400_000));
-}
+import { formatTripDuration } from "@/lib/trip-format";
 
 export default function GuestTripHomePage() {
   const trip = useGuestTripPortal();
@@ -53,7 +50,7 @@ export default function GuestTripHomePage() {
               decorative
               className="h-[260px] border-0 bg-white sm:h-[320px]"
             />
-            <TripRibbon pickup={formatTripDate(trip.startsAt, trip.timezone)} pickupLocation={trip.pickupLocation ?? "See pickup instructions"} duration={`${daysBetween(trip.startsAt, trip.endsAt)} days`} dropoff={formatTripDate(trip.endsAt, trip.timezone)} />
+            <TripRibbon pickup={formatTripDate(trip.startsAt, trip.timezone)} pickupLocation={trip.pickupLocation ?? "See pickup instructions"} duration={formatTripDuration(trip.startsAt, trip.endsAt)} dropoff={formatTripDate(trip.endsAt, trip.timezone)} />
           </div>
           <section className="border-l-[4px] border-l-brand bg-white p-6 lg:border-l-0 lg:bg-brand/[0.025] lg:p-8" aria-labelledby="ready-title">
             <h2 id="ready-title" className="text-[22px] font-semibold tracking-[-0.02em]">{trip.lifecycle === "upcoming" ? "Get ready for pickup" : "Your handoff progress"}</h2>

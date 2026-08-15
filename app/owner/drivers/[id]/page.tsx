@@ -17,6 +17,7 @@ import { CHECKLIST, moduleById } from "@/lib/content";
 import { Badge, Card, ProgressBar } from "@/components/ui";
 import { IconCheck, IconChevronRight } from "@/components/icons";
 import { StatusPill, TripStatusBadge, EmptyState } from "@/components/owner/owner-ui";
+import { PageHeader } from "@/components/evhost-ui";
 
 const STEP_LABELS: Record<string, string> = {
   welcome: "Welcome",
@@ -79,7 +80,16 @@ const SSR_FALLBACK_NOW = 0;
 
 export default function DriverDetailPage() {
   const params = useParams<{ id: string }>();
-  const id = params.id;
+  // Next may preserve an encoded dynamic segment during client navigation.
+  // Normalize once so roster links containing the synthetic `trip-guest:`
+  // prefix resolve identically after a hard load and an in-app transition.
+  const id = (() => {
+    try {
+      return decodeURIComponent(params.id);
+    } catch {
+      return params.id;
+    }
+  })();
   const { drivers, trips, hydrated } = useOwnerData();
   const [now, setNow] = useState(SSR_FALLBACK_NOW);
 
@@ -119,13 +129,18 @@ export default function DriverDetailPage() {
 
   return (
     <div className="space-y-5">
-      <div>
+      <div className="space-y-4">
         <Link
           href="/owner/drivers"
           className="text-xs font-medium text-muted transition-colors hover:text-ink"
         >
           ← Guests
         </Link>
+        <PageHeader
+          eyebrow="Guest readiness"
+          title={driver.name || "Unnamed guest"}
+          description="Walkthrough progress, required readiness items, and linked trip context."
+        />
       </div>
 
       {/* Identity */}
@@ -133,9 +148,7 @@ export default function DriverDetailPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-lg font-semibold tracking-tight text-ink">
-                {driver.name || "Unnamed guest"}
-              </span>
+              <span className="text-sm font-semibold text-ink">Guest profile</span>
               {driver.source === "guest-local" && (
                 <Badge tone="brand">This browser&apos;s guest</Badge>
               )}

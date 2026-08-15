@@ -8,6 +8,7 @@ import { EvhostWordmark, SignalMark } from "@/components/evhost-ui";
 import { cn } from "@/components/ui";
 import { IconCalendar, IconGuide, IconHelp, IconHome, IconLock, IconVehicle } from "@/components/icons";
 import type { GuestTripPortalSnapshot } from "@/lib/guest-trip-portal";
+import { formatTripShortDateRange } from "@/lib/trip-format";
 
 interface GuestPortalContextValue {
   snapshot: GuestTripPortalSnapshot;
@@ -66,7 +67,7 @@ export function GuestPortalLayout({ snapshot, token, children }: { snapshot: Gue
                   return <Link key={item.label} href={item.segment ? `${base}/${item.segment}` : base} aria-current={active ? "page" : undefined} className={cn("relative flex h-full min-w-11 items-center justify-center px-2 text-sm font-medium", active ? "text-brand" : "text-ink-soft hover:text-ink")}>{item.label}{active ? <span className="absolute inset-x-2 bottom-0 h-0.5 bg-brand" /> : null}</Link>;
                 })}
               </nav>
-              <Link href={`${base}/details`} className="ml-auto hidden min-h-11 items-center gap-2 text-sm text-muted md:flex"><IconCalendar className="h-4 w-4" />{formatTripDate(snapshot.startsAt, snapshot.timezone, false)}–{formatTripDate(snapshot.endsAt, snapshot.timezone, false).replace(/^\w+\s/, "")}</Link>
+              <Link href={`${base}/details`} className="ml-auto hidden min-h-11 items-center gap-2 text-sm text-muted md:flex"><IconCalendar className="h-4 w-4" />{formatTripShortDateRange(snapshot.startsAt, snapshot.endsAt, snapshot.timezone)}</Link>
               <span className="ml-4 hidden h-10 w-10 items-center justify-center rounded-full bg-surface text-sm font-semibold md:flex">{snapshot.guestFirstName.slice(0, 1).toUpperCase()}</span>
               <span className="ml-auto flex items-center gap-2 text-sm text-muted sm:hidden"><IconLock className="h-5 w-5" />Private trip</span>
             </div>

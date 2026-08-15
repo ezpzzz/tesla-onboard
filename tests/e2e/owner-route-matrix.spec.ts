@@ -15,6 +15,7 @@ test("every owner destination uses the responsive shell without horizontal overf
   for (const [path, title] of ROUTES) {
     await page.goto(path);
     await expect(page.getByRole("heading", { name: title, level: 1 })).toBeVisible();
+    await expect(page.getByText("All systems", { exact: true })).toHaveCount(0);
     const dimensions = await page.evaluate(() => ({ width: window.innerWidth, scrollWidth: document.documentElement.scrollWidth }));
     expect(dimensions.scrollWidth, `${path} should not overflow`).toBeLessThanOrEqual(dimensions.width);
   }

@@ -54,7 +54,7 @@ export interface RailStep {
 
 export function ReadinessRail({ steps, compact = false }: { steps: RailStep[]; compact?: boolean }) {
   return (
-    <ol className="relative">
+    <ol className="relative" data-testid="readiness-rail">
       {steps.map((step, index) => {
         const previousIsComplete = index > 0 && steps[index - 1]?.state === "complete";
         return (
@@ -62,7 +62,7 @@ export function ReadinessRail({ steps, compact = false }: { steps: RailStep[]; c
             key={`${step.label}-${index}`}
             aria-current={step.state === "current" ? "step" : undefined}
             className={cn(
-              "grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-x-3 text-[14px]",
+              "grid grid-cols-[28px_minmax(0,1fr)_minmax(56px,auto)] items-center gap-x-3 text-[14px]",
               compact ? "min-h-[52px]" : "min-h-[60px]",
             )}
           >
@@ -88,11 +88,11 @@ export function ReadinessRail({ steps, compact = false }: { steps: RailStep[]; c
             </span>
             <span className="min-w-0 py-2">
               <span className="block font-semibold leading-5 text-ink">{step.label}</span>
-              <span className="mt-0.5 block truncate text-[13px] leading-5 text-muted">{step.detail}</span>
+              <span className="mt-0.5 block break-words text-[13px] leading-5 text-muted">{step.detail}</span>
             </span>
             <span
               className={cn(
-                "whitespace-nowrap text-right text-[12px] font-semibold leading-4",
+                "min-w-0 max-w-[112px] break-words text-right text-[12px] font-semibold leading-4",
                 step.state === "complete" && "text-good",
                 step.state === "current" && "text-brand",
                 step.state === "pending" && "text-muted",

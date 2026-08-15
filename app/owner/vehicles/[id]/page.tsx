@@ -31,6 +31,7 @@ import { Badge, Button, Card } from "@/components/ui";
 import { IconChevronRight } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { VehicleInput } from "@/lib/owner/types";
+import { PageHeader } from "@/components/evhost-ui";
 
 export default function VehicleDetailPage() {
   const { config } = useTenantConfig();
@@ -181,14 +182,19 @@ export default function VehicleDetailPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
+      <div className="space-y-4">
         <Link
           href="/owner/vehicles"
           className="text-xs font-medium text-muted transition-colors hover:text-ink"
         >
           ← Vehicles
         </Link>
-        {vehicle.status === "archived" && <Badge>Removed</Badge>}
+        <PageHeader
+          eyebrow="Fleet vehicle"
+          title={vehicle.displayName}
+          description={`${vehicle.year} ${vehicle.color} ${vehicle.model}${vehicle.trim ? ` · ${vehicle.trim}` : ""}`}
+          action={vehicle.status === "archived" ? <Badge>Removed</Badge> : undefined}
+        />
       </div>
 
       <VehicleArtwork

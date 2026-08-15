@@ -1,4 +1,5 @@
-import type { Driver, Trip, Vehicle } from "@/lib/owner/types";
+import { driverStatus } from "@/lib/owner/derive";
+import type { Driver, DriverStatus, Trip, Vehicle } from "@/lib/owner/types";
 
 export type HandoffBoundaryKind = "pickup" | "return";
 
@@ -9,6 +10,39 @@ export interface OwnerHandoff {
   kind: HandoffBoundaryKind;
   boundaryAt: number;
   location: string | null;
+}
+
+export interface OwnerAttentionItem {
+  driver: Driver;
+  trip: Trip;
+  status: Exclude<DriverStatus, "ready">;
+}
+
+export function selectAttentionQueue(
+  drivers: Driver[],
+  trips: Trip[],
+  now: number,
+  limit = 3,
+): OwnerAttentionItem[] {
+  const severity: Record<Exclude<DriverStatus, "ready">, number> = {
+    stalled: 0,
+    "not-started": 1,
+    "in-progress": 2,
+  };
+  return drivers.flatMap((driver) => {
+    const trip = trips
+      .filter((item) => item.driverId === driver.id
+        && ((item.status === "active" && item.endAt > now) || (item.status === "upcoming" && item.startAt > now)))
+      .sort((a, b) => (a.status === "active" ? a.endAt : a.startAt) - (b.status === "active" ? b.endAt : b.startAt))[0];
+    const status = driverStatus(driver, now);
+    return trip && status !== "ready" ? [{ driver, trip, status }] : [];
+  }).sort((a, b) => {
+    const severityDelta = severity[a.status] - severity[b.status];
+    if (severityDelta !== 0) return severityDelta;
+    const aBoundary = a.trip.status === "active" ? a.trip.endAt : a.trip.startAt;
+    const bBoundary = b.trip.status === "active" ? b.trip.endAt : b.trip.startAt;
+    return aBoundary - bBoundary || a.driver.id.localeCompare(b.driver.id);
+  }).slice(0, Math.max(0, limit));
 }
 
 /** The next operational boundary is an active trip's return or an upcoming

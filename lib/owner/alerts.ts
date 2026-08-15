@@ -51,7 +51,7 @@ export function deriveAlerts(args: {
       kind: "guest-not-started",
       severity: "danger",
       message: `${driverName(drivers, trip.driverId)} hasn't started onboarding and picks up within 48 hours.`,
-      href: `/owner/drivers/${driver.id}`,
+      href: `/owner/drivers/${encodeURIComponent(driver.id)}`,
       driverId: driver.id,
       tripId: trip.id,
     });
@@ -71,7 +71,7 @@ export function deriveAlerts(args: {
       kind: "required-checklist-open",
       severity: "danger",
       message: `${driverName(drivers, trip.driverId)} still has ${openRequired.length} required readiness item${openRequired.length === 1 ? "" : "s"} unchecked ahead of pickup.`,
-      href: `/owner/drivers/${driver.id}`,
+      href: `/owner/drivers/${encodeURIComponent(driver.id)}`,
       driverId: driver.id,
       tripId: trip.id,
     });
@@ -89,7 +89,7 @@ export function deriveAlerts(args: {
       kind: "guest-stalled",
       severity: "warn",
       message: `${driver.name} has stalled mid-onboarding — no progress in over a day.`,
-      href: `/owner/drivers/${driver.id}`,
+      href: `/owner/drivers/${encodeURIComponent(driver.id)}`,
       driverId: driver.id,
       tripId: relevantTrip.id,
     });
