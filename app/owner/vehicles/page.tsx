@@ -65,7 +65,7 @@ function VehicleCard({
           paintCode={vehicle.teslaPaintCode}
           year={vehicle.year}
           decorative
-          className="h-44 rounded-none border-0 md:h-48"
+          className="h-36 rounded-none border-0 md:h-40"
         />
         <div className="p-4">
           <div className="flex items-start justify-between gap-2">

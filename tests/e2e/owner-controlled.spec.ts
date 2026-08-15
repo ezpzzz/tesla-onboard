@@ -10,13 +10,49 @@ test("an authenticated owner can use every operational surface and detail route"
   page.on("pageerror", (error) => browserErrors.push(error.message));
 
   await page.goto("/login?next=/owner");
-  await page.getByLabel("Email").fill(email!);
+  const emailField = page.getByLabel("Email", { exact: true });
+  await emailField.fill(email!);
+  await expect(emailField).toHaveValue(email!);
   await page.getByLabel("Password").fill(password!);
+  await expect(emailField).toHaveValue(email!);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL("/owner");
   await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
   await expect(page.getByText("All systems", { exact: true })).toHaveCount(0);
   await expect(page.getByTestId("readiness-rail").first()).toBeVisible();
+
+  const invite = page.getByRole("region", { name: "Invite your next guest" });
+  const trigger = invite.getByRole("button", { name: "New onboarding" });
+  await expect(trigger).toBeEnabled();
+  const inviteTop = await invite.evaluate((element) => element.getBoundingClientRect().top);
+  const handoffTop = await page.getByText("Next handoff", { exact: true })
+    .evaluate((element) => element.getBoundingClientRect().top);
+  expect(inviteTop).toBeLessThan(handoffTop);
+
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Trip and guest details" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel(/Guest name/)).toBeFocused();
+  const geometry = await dialog.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { bottom: box.bottom, left: box.left, right: box.right, top: box.top, viewportHeight: innerHeight, viewportWidth: innerWidth };
+  });
+  if (isMobile) {
+    expect(Math.abs(geometry.viewportHeight - geometry.bottom)).toBeLessThanOrEqual(1);
+    expect(geometry.left).toBe(0);
+    expect(geometry.right).toBe(geometry.viewportWidth);
+  } else {
+    expect(geometry.left).toBeGreaterThan(0);
+    expect(geometry.right).toBeLessThan(geometry.viewportWidth);
+    expect(Math.abs((geometry.top + geometry.bottom) / 2 - geometry.viewportHeight / 2)).toBeLessThanOrEqual(2);
+  }
+  const fieldSizes = await dialog.locator("input, select").evaluateAll((elements) =>
+    elements.map((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+  );
+  expect(fieldSizes.every((size) => size >= 16)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
 
   const routes = [
     ["/owner/trips", "Trips"],
@@ -32,6 +68,42 @@ test("an authenticated owner can use every operational surface and detail route"
     await expect(page.getByRole("heading", { name: heading, level: 1 })).toBeVisible();
     const dimensions = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
     expect(dimensions.scrollWidth, `${path} should not overflow`).toBeLessThanOrEqual(dimensions.width);
+  }
+
+  await page.goto("/owner/account");
+  await expect(page.getByRole("heading", { name: "Profile photo" })).toBeVisible();
+  const avatarUploadButton = page.getByRole("button", { name: /Upload photo|Replace photo/ });
+  await expect(avatarUploadButton).toBeVisible();
+  await expect(avatarUploadButton).toBeEnabled();
+
+  const onePixelPng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+  if (!isMobile) {
+    await page.locator('input[name="owner-avatar"]').setInputFiles({
+      name: "owner-avatar.png",
+      mimeType: "image/png",
+      buffer: onePixelPng,
+    });
+    await expect(page.getByRole("status")).toContainText("Profile photo updated");
+    await expect(page.locator('[data-owner-avatar="image"]').first()).toBeVisible();
+    await page.getByRole("button", { name: "Remove upload" }).click();
+    await expect(page.getByRole("status")).toContainText(/sign-in provider photo|initials/);
+  }
+
+  await page.goto("/owner/settings");
+  await expect(page.getByText("Business logo", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Upload|Replace/ }).first()).toBeEnabled();
+  if (!isMobile) {
+    await page.locator('input[name="onlyevs-business-logo"]').setInputFiles({
+      name: "business-logo.png",
+      mimeType: "image/png",
+      buffer: onePixelPng,
+    });
+    await expect(page.getByRole("status")).toContainText("Logo uploaded");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Saved." })).toBeVisible();
   }
 
   for (const [path, prefix] of [

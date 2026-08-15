@@ -19,7 +19,7 @@ export default function GuestVehiclePage() {
       <PageHeader eyebrow="Vehicle guide" title={trip.vehicle.displayName} description={[trip.vehicle.year, trip.vehicle.trim, trip.vehicle.color].filter(Boolean).join(" · ")} />
       <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
         <Card className="overflow-hidden">
-          <VehicleArtwork model={trip.vehicle.model} color={trip.vehicle.color} trim={trip.vehicle.trim} wheelType={trip.vehicle.wheelType} interior={trip.vehicle.interior} interiorCode={trip.vehicle.teslaInteriorCode} paintCode={trip.vehicle.teslaPaintCode} year={trip.vehicle.year} decorative className="h-[340px] border-0 bg-white" />
+          <VehicleArtwork model={trip.vehicle.model} color={trip.vehicle.color} trim={trip.vehicle.trim} wheelType={trip.vehicle.wheelType} interior={trip.vehicle.interior} interiorCode={trip.vehicle.teslaInteriorCode} paintCode={trip.vehicle.teslaPaintCode} year={trip.vehicle.year} decorative className="h-[240px] border-0 bg-white sm:h-[280px]" />
           <dl className="grid grid-cols-2 border-t border-line text-sm sm:grid-cols-4">
             {[["Model", trip.vehicle.model], ["Shifter", trip.vehicle.shifter], ["Wheels", trip.vehicle.wheelType ?? "See vehicle"], ["Interior", trip.vehicle.interior ?? "See vehicle"]].map(([label, value]) => <div key={label} className="border-b border-line p-4 last:border-0 sm:border-b-0 sm:border-r sm:last:border-r-0"><dt className="text-xs text-muted">{label}</dt><dd className="mt-1 font-semibold capitalize text-ink">{value}</dd></div>)}
           </dl>

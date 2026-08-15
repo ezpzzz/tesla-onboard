@@ -67,7 +67,7 @@ export function WelcomeStep({ nav, update }: SetupStepProps) {
             year={config.car.year}
             configurationVerified={Boolean(config.car.sourceVehicleId)}
             eager
-            className="mt-2 h-48 sm:h-64"
+            className="mt-2 h-44 sm:h-56"
           />
         ) : (
           <div className="mt-4 flex h-40 items-center justify-center rounded-lg border border-dashed border-line bg-surface px-6 text-center text-sm text-muted sm:h-52">

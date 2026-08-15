@@ -18,7 +18,6 @@ import {
 import { Button, Card } from "@/components/ui";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import { BrandMediaField } from "@/components/owner/BrandMediaField";
-import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 
 function Field({
   label,
@@ -223,7 +222,7 @@ export function TenantSettingsForm({
       <SettingsSection title="Brand & contact">
         <Field label="Company name" value={draft.companyName} onChange={(companyName) => patchRoot({ companyName })} />
         <Field publicationRequired={false} label="Tagline" value={draft.tagline} onChange={(tagline) => patchRoot({ tagline })} />
-        {ONLYEVS_OPERATIONS_ENABLED ? <div>
+        <div>
           <div className="mb-1.5 flex items-center justify-between gap-3 text-sm font-medium text-ink">
             <span>Brand media</span><span className="text-xs font-normal text-muted">Optional</span>
           </div>
@@ -232,7 +231,7 @@ export function TenantSettingsForm({
             companyName={draft.companyName}
             onChange={(brand) => patchRoot({ brand })}
           />
-        </div> : null}
+        </div>
         <Field publicationRequired={false} label="Logo description" value={draft.brand.logoAlt ?? ""} onChange={(logoAlt) => patchRoot({ brand: { ...draft.brand, logoAlt: logoAlt || null } })} />
         <label className="block text-sm font-medium text-ink">
           <span className="flex items-center justify-between gap-3">
@@ -281,7 +280,7 @@ export function TenantSettingsForm({
             year={draft.car.year}
             configurationVerified={Boolean(draft.car.sourceVehicleId)}
             decorative
-            className="h-44 rounded-md border border-line"
+            className="h-36 rounded-md border border-line sm:h-40"
           />
         ) : (
           <div className="rounded-md border border-dashed border-line bg-surface px-4 py-8 text-center text-sm text-muted">

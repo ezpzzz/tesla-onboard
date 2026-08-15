@@ -81,7 +81,7 @@ export function VehicleArtwork({
     <div
       className={cn(
         "relative isolate overflow-hidden bg-white",
-        compact ? "h-20 w-32 shrink-0" : className ? "w-full" : "h-52 w-full",
+        compact ? "h-20 w-32 shrink-0" : className ? "w-full" : "h-44 w-full",
         className,
       )}
     >
@@ -103,7 +103,7 @@ export function VehicleArtwork({
           onError={() => setFailedUrl(displayUrl)}
           className={cn(
             "h-full w-full transform-gpu object-contain",
-            compact ? "scale-[1.45]" : "scale-[1.42]",
+            compact ? "scale-[1.56]" : "scale-[1.52]",
           )}
         />
       ) : (

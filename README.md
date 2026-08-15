@@ -103,9 +103,12 @@ top-level tabs. It shows:
   and exact Tesla option codes used by the fail-closed artwork resolver. The
   selected fleet record remains the source, so later owner edits refresh the
   public guest-safe snapshot without publishing VINs, plates, or private notes.
-- **Workspace branding & domains** — when the background control plane is enabled, managers can upload a validated raster
-  business logo and browser/PWA icon, choose an accent color, and request a
-  custom guest hostname. Media paths are workspace/shop scoped; arbitrary
+- **Owner identity & workspace branding** — the shell uses a verified sign-in
+  provider photo when available, with an owner-managed raster avatar override
+  from `/owner/account`. Managers can upload a business logo and browser/PWA
+  icon without enabling the background operations control plane, choose an
+  accent color, and request a custom guest hostname. Personal avatars are
+  user-folder scoped; brand media paths are workspace/shop scoped. Arbitrary
   remote URLs and SVG/HTML uploads are rejected. A scoped worker attaches and
   verifies domains with the deploy provider, and the dedicated EVhost Supabase auth flow
   always completes on the canonical evhost.app broker before returning the guest

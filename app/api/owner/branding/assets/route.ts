@@ -1,28 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
 import { requireOwnerWorkspace, OwnerWorkspaceAuthError } from "@/lib/owner/server-auth";
+import { detectRasterImage, MAX_RASTER_ASSET_BYTES } from "@/lib/owner/raster-upload";
 import { createClient } from "@/lib/supabase/server";
-import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
-
-const MAX_ASSET_BYTES = 2 * 1024 * 1024;
+import { isSameOriginRequest } from "@/lib/request-origin";
 const PURPOSES = new Set(["logo", "hero", "favicon"]);
-
-function detectedImage(bytes: Uint8Array): { mime: string; extension: string } | null {
-  if (bytes.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((value, index) => bytes[index] === value)) {
-    return { mime: "image/png", extension: "png" };
-  }
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return { mime: "image/jpeg", extension: "jpg" };
-  }
-  if (
-    bytes.length >= 12
-    && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF"
-    && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
-  ) {
-    return { mime: "image/webp", extension: "webp" };
-  }
-  return null;
-}
 
 function responseForAuthError(error: OwnerWorkspaceAuthError) {
   const status = error.kind === "unauthenticated" ? 401 : error.kind === "forbidden" ? 403 : 400;
@@ -30,9 +12,7 @@ function responseForAuthError(error: OwnerWorkspaceAuthError) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!ONLYEVS_OPERATIONS_ENABLED) return NextResponse.json({ error: "Not available." }, { status: 404 });
-  const origin = request.headers.get("origin");
-  if (origin && origin !== request.nextUrl.origin) {
+  if (!isSameOriginRequest(request)) {
     return NextResponse.json({ error: "origin_mismatch" }, { status: 403 });
   }
   const form = await request.formData().catch(() => null);
@@ -52,11 +32,11 @@ export async function POST(request: NextRequest) {
       : NextResponse.json({ error: "authorization_failed" }, { status: 500 });
   }
 
-  if (file.size < 1 || file.size > MAX_ASSET_BYTES) {
+  if (file.size < 1 || file.size > MAX_RASTER_ASSET_BYTES) {
     return NextResponse.json({ error: "asset_size_invalid" }, { status: 413 });
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const detected = detectedImage(bytes);
+  const detected = detectRasterImage(bytes);
   if (!detected) {
     return NextResponse.json({ error: "asset_type_invalid" }, { status: 415 });
   }

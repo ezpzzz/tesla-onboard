@@ -17,6 +17,7 @@ import {
   IconVehicle,
 } from "@/components/icons";
 import { OwnerIdentity } from "./OwnerIdentity";
+import { OwnerAvatar } from "./OwnerAvatar";
 
 const PRIMARY_NAV = [
   { href: "/owner", label: "Today", icon: IconOverview },
@@ -55,16 +56,30 @@ function NavLink({ pathname, item }: { pathname: string; item: (typeof PRIMARY_N
   );
 }
 
-export function OwnerShell({ children, ownerEmail }: { children: ReactNode; ownerEmail?: string | null }) {
+export function OwnerShell({
+  children,
+  ownerEmail,
+  ownerName,
+  ownerAvatarUrl,
+}: {
+  children: ReactNode;
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  ownerAvatarUrl?: string | null;
+}) {
   const pathname = usePathname() ?? "/owner";
   const { workspace, workspaces, setWorkspace } = useOwnerTenant();
-  const ownerInitial = ownerEmail?.trim().charAt(0).toUpperCase() || "A";
-  const ownerTheme = { "--color-brand": "#087FD1", "--color-brand-dark": "#0669AE" } as CSSProperties;
+  const ownerLabel = ownerName || ownerEmail || "Owner";
+  const ownerTheme = {
+    "--color-brand": "#0772BC",
+    "--color-brand-dark": "#0669AE",
+    "--color-signal": "#087FD1",
+  } as CSSProperties;
 
   return (
     <div style={ownerTheme} className="min-h-dvh bg-surface text-ink md:grid md:grid-cols-[224px_minmax(0,1fr)]">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 flex-col border-r border-line bg-white md:flex">
-        <Link href="/owner" aria-label="EVhost Today" className="flex h-[88px] items-center px-7">
+        <Link href="/owner" prefetch={false} aria-label="EVhost Today" className="flex h-[88px] items-center px-7">
           <EvhostWordmark />
         </Link>
         <nav aria-label="Owner navigation" className="space-y-2 px-4 pt-3">
@@ -76,7 +91,7 @@ export function OwnerShell({ children, ownerEmail }: { children: ReactNode; owne
         </nav>
         <div className="mx-6 mt-7 border-t border-line py-6">
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface text-sm font-semibold text-ink">{ownerInitial}</span>
+            <OwnerAvatar avatarUrl={ownerAvatarUrl} name={ownerLabel} className="h-10 w-10" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-ink">{workspace?.name || "EVhost"}</div>
               {ownerEmail ? <OwnerIdentity email={ownerEmail} /> : <Link href="/owner/account" className="inline-flex min-h-11 items-center rounded-md text-xs text-muted hover:text-ink">Account</Link>}
@@ -87,7 +102,7 @@ export function OwnerShell({ children, ownerEmail }: { children: ReactNode; owne
 
       <div className="min-w-0 md:col-start-2">
         <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-line bg-white/95 px-5 backdrop-blur md:h-16 md:px-8">
-          <Link href="/owner" aria-label="EVhost Today" className="flex min-h-11 items-center md:hidden"><EvhostWordmark /></Link>
+          <Link href="/owner" prefetch={false} aria-label="EVhost Today" className="flex min-h-11 items-center md:hidden"><EvhostWordmark /></Link>
           <div className="hidden md:block">
             {workspace && workspaces.length > 1 ? (
               <select aria-label="Active workspace" value={workspace.key} onChange={(event) => setWorkspace(event.target.value)} className="min-h-10 rounded-md border border-line bg-white px-3 text-sm text-ink">
@@ -95,11 +110,16 @@ export function OwnerShell({ children, ownerEmail }: { children: ReactNode; owne
               </select>
             ) : <span className="text-sm text-muted">{workspace?.name || "Owner workspace"}</span>}
           </div>
-          <div className="flex items-center gap-3 md:ml-auto">
-            <Link href="/owner/settings" aria-label="Workspace settings" className="flex h-11 w-11 items-center justify-center rounded-full text-ink hover:bg-surface"><IconSettings className="h-5 w-5" /></Link>
+          <div className="ml-auto flex items-center">
             <details key={pathname} className="relative">
-              <summary aria-label="Open account menu" className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full bg-surface text-sm font-semibold text-ink marker:hidden">{ownerInitial}</summary>
-              <div className="absolute right-0 top-12 w-48 rounded-lg border border-line bg-white p-2 shadow-[0_12px_32px_rgba(22,26,31,0.12)]">
+              <summary aria-label="Open account menu" className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full marker:hidden">
+                <OwnerAvatar avatarUrl={ownerAvatarUrl} name={ownerLabel} className="h-11 w-11 ring-1 ring-line" />
+              </summary>
+              <div className="absolute right-0 top-12 w-56 rounded-lg border border-line bg-white p-2 shadow-[0_12px_32px_rgba(22,26,31,0.12)]">
+                <div className="mb-1 border-b border-line px-3 py-2.5">
+                  <div className="truncate text-sm font-semibold text-ink">{ownerLabel}</div>
+                  {ownerEmail ? <div className="mt-0.5 truncate text-xs text-muted">{ownerEmail}</div> : null}
+                </div>
                 <Link href="/owner/account" className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-surface"><IconUser className="h-4 w-4" />Account</Link>
                 <Link href="/owner/integrations" className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-surface"><IconPlug className="h-4 w-4" />Integrations</Link>
                 <Link href="/owner/settings" className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-surface"><IconSettings className="h-4 w-4" />Settings</Link>
@@ -117,7 +137,7 @@ export function OwnerShell({ children, ownerEmail }: { children: ReactNode; owne
               const active = isActive(pathname, item.href);
               const Icon = item.icon;
               return (
-                <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("relative flex min-h-[68px] flex-col items-center justify-center gap-1 text-[11px] font-medium", active ? "text-brand" : "text-muted")}>
+                <Link key={item.href} href={item.href} prefetch={false} aria-current={active ? "page" : undefined} className={cn("relative flex min-h-[68px] flex-col items-center justify-center gap-1 text-[11px] font-medium", active ? "text-brand" : "text-muted")}>
                   {active ? <SignalMark className="absolute top-2 h-1.5 w-1.5" /> : null}
                   <Icon className="h-[22px] w-[22px]" />{item.label}
                 </Link>

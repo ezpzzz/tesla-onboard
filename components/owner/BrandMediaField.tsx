@@ -52,6 +52,7 @@ function BrandAssetControl({
         name={`onlyevs-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`}
         className="sr-only"
         type="file"
+        aria-label={`Choose ${label.toLowerCase()}`}
         accept="image/png,image/jpeg,image/webp"
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -132,7 +133,7 @@ export function BrandMediaField({
     <div className="space-y-3">
       <BrandAssetControl
         label="Business logo"
-        description="Shown in owner and guest headers. Transparent images work best."
+        description="Shown in guest portal headers and trip materials. Transparent images work best."
         imageUrl={logoUrl}
         imageAlt={brand.logoAlt || companyName || "Workspace logo"}
         busy={busyPurpose === "logo"}

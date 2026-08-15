@@ -62,7 +62,7 @@ export function WelcomeStep({ nav, update, state }: StepProps) {
           year={car.year}
           configurationVerified={Boolean(car.sourceVehicleId)}
           eager
-          className="mt-2 h-48 sm:h-72"
+          className="mt-2 h-44 sm:h-60"
         />
         <div className="mt-1">
           <div className="text-2xl font-semibold tracking-tight text-ink">
