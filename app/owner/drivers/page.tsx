@@ -55,7 +55,7 @@ export default function DriversPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Guests" description="Readiness, trip context, and private-link follow-up for every guest." />
+      <PageHeader eyebrow="Readiness" title="Guests" description="Readiness, trip context, and private-link follow-up for every guest." />
 
       {operationalError ? (
         <Card role="alert" className="border-danger/20 bg-danger/[0.04] p-4 text-sm text-danger">

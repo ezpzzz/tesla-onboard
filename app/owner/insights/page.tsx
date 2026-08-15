@@ -11,11 +11,11 @@ export default function OwnerInsightsPage() {
   if (!hydrated) return <StatePanel title="Loading insights…" />;
   const completed = trips.filter((trip) => trip.status === "completed");
   if (!completed.length) {
-    return <div className="space-y-6"><PageHeader title="Insights" description="Persisted trip and charging performance—never demo estimates." /><StatePanel title="Insights begin after a completed trip" detail="Miles, return charge, energy cost, and charging activity will appear here once they are recorded for a completed trip." /></div>;
+    return <div className="space-y-6"><PageHeader eyebrow="Performance" title="Insights" description="Persisted trip and charging performance—never demo estimates." /><StatePanel tone="brand" title="Insights begin after a completed trip" detail="Miles, return charge, energy cost, and charging activity will appear here once they are recorded for a completed trip." /></div>;
   }
   return (
     <div className="space-y-6">
-      <PageHeader title="Insights" description="Persisted fleet performance from completed trips and recorded charging sessions." />
+      <PageHeader eyebrow="Performance" title="Insights" description="Persisted fleet performance from completed trips and recorded charging sessions." />
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Fleet totals">
         <Metric label="Miles rented" value={formatMiles(stats.totalMilesRented)} />
         <Metric label="Energy cost" value={formatUsd(stats.totalEnergyCostUsd)} />

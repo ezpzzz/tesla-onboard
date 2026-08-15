@@ -63,7 +63,7 @@ export default function TripsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Trips" description="Review each handoff, guest readiness, locations, and return history." action={<Link href="/owner#new-guest" className="inline-flex min-h-11 items-center rounded-md bg-brand px-4 text-sm font-semibold text-white">New guest</Link>} />
+      <PageHeader eyebrow="Handoffs" title="Trips" description="Review each handoff, guest readiness, locations, and return history." action={<Link href="/owner#new-guest" className="inline-flex min-h-11 items-center rounded-md bg-brand px-4 text-sm font-semibold text-white">New guest</Link>} />
 
       <Segmented options={FILTERS} value={filter} onChange={setFilter} />
 

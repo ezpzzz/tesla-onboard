@@ -147,7 +147,7 @@ export default function VehiclesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Vehicles" description="Product stages, verified presentation, live signal freshness, and utilization." action={
+      <PageHeader eyebrow="Fleet" title="Vehicles" description="Product stages, verified presentation, live signal freshness, and utilization." action={
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"

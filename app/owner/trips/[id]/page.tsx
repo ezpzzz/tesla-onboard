@@ -127,7 +127,7 @@ export default function TripDetailPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title={driver?.name || "Trip"} description={`${vehicle?.displayName || config.car.model} · ${formatDateRange(trip.startAt, trip.endAt)}`} action={<TripStatusBadge status={trip.status} />} />
+      <PageHeader eyebrow="Trip handoff" title={driver?.name || "Trip"} description={`${vehicle?.displayName || config.car.model} · ${formatDateRange(trip.startAt, trip.endAt)}`} action={<TripStatusBadge status={trip.status} />} />
       <Card className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

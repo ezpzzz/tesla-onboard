@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/evhost-ui";
 export default function OwnerSettingsPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <PageHeader title="Settings" description="Brand, contacts, rental policy, domains, and guest-facing workspace configuration." />
+      <PageHeader eyebrow="Workspace" title="Settings" description="Brand, contacts, rental policy, domains, and guest-facing workspace configuration." />
       {ONLYEVS_OPERATIONS_ENABLED ? <WorkspaceDomains /> : null}
       <TenantSettingsForm />
     </div>

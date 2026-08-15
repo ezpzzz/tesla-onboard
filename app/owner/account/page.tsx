@@ -27,7 +27,7 @@ export default function AccountPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Account" description="Workspace access, guest preview, and sign-in security." />
+      <PageHeader eyebrow="Profile & security" title="Account" description="Workspace access, guest preview, and sign-in security." />
 
       <Card className="max-w-md p-5">
         <h2 className="text-sm font-semibold text-ink">Rental workspace</h2>
