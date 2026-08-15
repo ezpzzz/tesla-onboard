@@ -32,6 +32,8 @@ yarn-error.log*
 /.qa-shots/
 /test-results/
 /playwright-report/
+/supabase/.branches/
+/supabase/.temp/
 
 # Tesla partner private key — NEVER commit
 /tesla-private-key.pem

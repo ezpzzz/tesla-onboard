@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 — 2026-08-15
+
+- Invite the next guest from the primary Today action, with a focused desktop dialog and a mobile bottom sheet that preserve context and keyboard accessibility.
+- Use signed-in provider profile photos throughout the owner portal, and let owners upload or remove a personal avatar and tenant brand logo.
+- Keep owner navigation visually stable with persistent shared data, route-matched loading geometry, and less flashing during background refreshes.
+- Tighten vehicle artwork framing across owner and guest surfaces, remove the redundant header settings control, and improve responsive spacing and contrast.
+- Harden raster uploads, same-origin checks, object cleanup, and per-user storage policies with route, database, browser, accessibility, and layout-shift coverage.
+
 ## 0.3.0 — 2026-08-15
 
 - Rebuild the owner experience around a light desktop sidebar, five stable mobile tabs, deadline-first handoffs, Guests, Vehicles, Insights, Integrations, and responsive detail surfaces.

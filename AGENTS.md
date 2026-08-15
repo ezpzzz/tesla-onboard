@@ -11,11 +11,13 @@ An adaptive onboarding web app for Turo Tesla rental guests (platform name **"ev
 ```bash
 pnpm install
 pnpm dev            # dev server at http://localhost:3000
+pnpm test           # Vitest unit/contract suite
+pnpm test:e2e       # Playwright browser checks
 pnpm build          # production build
 pnpm start          # serve the production build
 ```
 
-There is **no lint or test script and no test suite** — do not assume `pnpm test`/`pnpm lint` exist. Type checking happens via `pnpm build` (Next + `tsc`, `strict: true`). Path alias `@/*` maps to the repo root.
+There is no separate lint script. Type checking happens via `pnpm build` (Next + `tsc`, `strict: true`); deterministic contracts use Vitest and browser flows use Playwright. Path alias `@/*` maps to the repo root.
 
 Tesla Fleet API partner setup (only for live OAuth):
 
