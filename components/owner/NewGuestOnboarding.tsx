@@ -189,8 +189,8 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
       </Card>
 
       {expanded ? (
-        <div className="fixed inset-0 z-[60] flex items-end bg-ink/45 md:items-center md:justify-center md:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setExpanded(false); }}>
-          <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="new-guest-dialog-title" className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[18px] border border-line bg-white shadow-[0_-16px_48px_rgba(22,26,31,0.18)] md:max-w-[720px] md:rounded-xl md:shadow-[0_24px_80px_rgba(22,26,31,0.2)]">
+        <div className="fixed inset-0 z-[60] flex max-w-full items-end overflow-x-hidden bg-ink/45 md:items-center md:justify-center md:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setExpanded(false); }}>
+          <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="new-guest-dialog-title" className="flex max-h-[92dvh] w-full min-w-0 max-w-full flex-col overflow-hidden rounded-t-[18px] border border-line bg-white shadow-[0_-16px_48px_rgba(22,26,31,0.18)] md:max-w-[720px] md:rounded-xl md:shadow-[0_24px_80px_rgba(22,26,31,0.2)]">
             <div aria-hidden="true" className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-line md:hidden" />
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
               <div>
@@ -204,7 +204,7 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
               </button>
             </div>
 
-            <div className="overflow-y-auto overscroll-contain px-5 py-5 pb-[max(20px,env(safe-area-inset-bottom))] sm:px-6 sm:py-6">
+            <div className="min-w-0 overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain touch-pan-y px-5 py-5 pb-[max(20px,env(safe-area-inset-bottom))] sm:px-6 sm:py-6">
               {result ? (
                 <div aria-live="polite">
                   <div className="flex items-start gap-3 rounded-lg border border-good/20 bg-good/[0.04] p-4">
@@ -222,15 +222,15 @@ export function NewGuestOnboarding({ vehicles }: { vehicles: Vehicle[] }) {
                   {error ? <p role="alert" className="mt-3 text-sm text-danger">{error}</p> : null}
                 </div>
               ) : (
-                <form onSubmit={submit} className="space-y-5">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="text-sm font-medium text-ink">Guest name <span className="text-brand">Required</span><input ref={guestNameRef} required name="guestName" autoComplete="name" value={guestName} onChange={(event) => setGuestName(event.target.value)} className="field mt-2 w-full text-base" /></label>
-                    <label className="text-sm font-medium text-ink">Booking email <span className="text-brand">Required</span><input required name="guestEmail" type="email" inputMode="email" autoComplete="email" value={guestEmail} onChange={(event) => setGuestEmail(event.target.value)} className="field mt-2 w-full text-base" /></label>
-                    <label className="text-sm font-medium text-ink">Pickup location<input name="pickupLocation" autoComplete="street-address" maxLength={500} value={pickupLocation} onChange={(event) => setPickupLocation(event.target.value)} placeholder="Airport garage, hotel, or address" className="field mt-2 w-full text-base" /></label>
-                    <label className="text-sm font-medium text-ink">Return location<input name="returnLocation" autoComplete="street-address" maxLength={500} value={returnLocation} onChange={(event) => setReturnLocation(event.target.value)} placeholder={pickupLocation || "Defaults to pickup"} className="field mt-2 w-full text-base" /></label>
-                    <label className="text-sm font-medium text-ink sm:col-span-2">Vehicle <span className="text-brand">Required</span><select required name="vehicleId" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)} className="field mt-2 w-full text-base"><option value="">Choose a vehicle</option>{activeVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.displayName}</option>)}</select></label>
-                    <label className="text-sm font-medium text-ink">Pickup <span className="text-brand">Required</span><input required name="startsAt" type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} className="field mt-2 w-full text-base" /></label>
-                    <label className="text-sm font-medium text-ink">Return <span className="text-brand">Required</span><input required name="endsAt" type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} className="field mt-2 w-full text-base" /></label>
+                <form onSubmit={submit} className="min-w-0 space-y-5">
+                  <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                    <label className="min-w-0 text-sm font-medium text-ink">Guest name <span className="text-brand">Required</span><input ref={guestNameRef} required name="guestName" autoComplete="name" value={guestName} onChange={(event) => setGuestName(event.target.value)} className="field mt-2 w-full text-base" /></label>
+                    <label className="min-w-0 text-sm font-medium text-ink">Booking email <span className="text-brand">Required</span><input required name="guestEmail" type="email" inputMode="email" autoComplete="email" value={guestEmail} onChange={(event) => setGuestEmail(event.target.value)} className="field mt-2 w-full text-base" /></label>
+                    <label className="min-w-0 text-sm font-medium text-ink">Pickup location<input name="pickupLocation" autoComplete="street-address" maxLength={500} value={pickupLocation} onChange={(event) => setPickupLocation(event.target.value)} placeholder="Airport garage, hotel, or address" className="field mt-2 w-full text-base" /></label>
+                    <label className="min-w-0 text-sm font-medium text-ink">Return location<input name="returnLocation" autoComplete="street-address" maxLength={500} value={returnLocation} onChange={(event) => setReturnLocation(event.target.value)} placeholder={pickupLocation || "Defaults to pickup"} className="field mt-2 w-full text-base" /></label>
+                    <label className="min-w-0 text-sm font-medium text-ink sm:col-span-2">Vehicle <span className="text-brand">Required</span><select required name="vehicleId" value={vehicleId} onChange={(event) => setVehicleId(event.target.value)} className="field mt-2 w-full text-base"><option value="">Choose a vehicle</option>{activeVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.displayName}</option>)}</select></label>
+                    <label className="min-w-0 text-sm font-medium text-ink">Pickup <span className="text-brand">Required</span><input required name="startsAt" type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} className="field mt-2 w-full text-base" /></label>
+                    <label className="min-w-0 text-sm font-medium text-ink">Return <span className="text-brand">Required</span><input required name="endsAt" type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} className="field mt-2 w-full text-base" /></label>
                   </div>
                   {error ? <p role="alert" className="text-sm font-medium text-danger">{error}</p> : null}
                   <div className="border-t border-line pt-4">

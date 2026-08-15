@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
-import { EvhostWordmark, SignalMark } from "@/components/evhost-ui";
+import { EvhostWordmark } from "@/components/evhost-ui";
 import { cn } from "@/components/ui";
 import {
   IconDrivers,
@@ -138,7 +138,6 @@ export function OwnerShell({
               const Icon = item.icon;
               return (
                 <Link key={item.href} href={item.href} prefetch={false} aria-current={active ? "page" : undefined} className={cn("relative flex min-h-[68px] flex-col items-center justify-center gap-1 text-[11px] font-medium", active ? "text-brand" : "text-muted")}>
-                  {active ? <SignalMark className="absolute top-2 h-1.5 w-1.5" /> : null}
                   <Icon className="h-[22px] w-[22px]" />{item.label}
                 </Link>
               );

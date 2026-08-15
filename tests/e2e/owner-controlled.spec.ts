@@ -50,6 +50,16 @@ test("an authenticated owner can use every operational surface and detail route"
     elements.map((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
   );
   expect(fieldSizes.every((size) => size >= 16)).toBe(true);
+  if (isMobile) {
+    const scrollRegion = dialog.locator(".overflow-y-auto");
+    const horizontalGeometry = await scrollRegion.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollLeft: element.scrollLeft,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(horizontalGeometry.scrollLeft).toBe(0);
+    expect(horizontalGeometry.scrollWidth).toBeLessThanOrEqual(horizontalGeometry.clientWidth);
+  }
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();

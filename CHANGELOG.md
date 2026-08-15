@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 — 2026-08-15
+
+- Keep the mobile guest-invitation drawer within the viewport, including native date controls, and limit its scroll surface to vertical movement.
+- Remove the stray blue square from the active owner tab while preserving the accessible blue icon, label, and current-page state.
+
+### For contributors
+
+- Add Mobile Safari regression coverage for drawer overflow and bottom-navigation active styling.
+
 ## 0.4.0 — 2026-08-15
 
 - Invite the next guest from the primary Today action, with a focused desktop dialog and a mobile bottom sheet that preserve context and keyboard accessibility.

@@ -118,5 +118,5 @@ textarea {
    Vertical padding matches Button's py-3.5 scale; focus ring comes from the
    global *:focus-visible rule above, so no focus styles here. */
 .field {
-  @apply min-h-12 w-full rounded-md border border-line bg-white px-4 py-3 text-base text-ink placeholder:text-muted;
+  @apply min-h-12 w-full min-w-0 max-w-full rounded-md border border-line bg-white px-4 py-3 text-base text-ink placeholder:text-muted;
 }
