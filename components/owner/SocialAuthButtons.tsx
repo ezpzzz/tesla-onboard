@@ -1,20 +1,69 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Script from "next/script";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Provider } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { safeOwnerNextPath } from "@/lib/owner-auth-redirect";
-import { IconApple, IconGoogle } from "@/components/icons";
+import { IconApple } from "@/components/icons";
 
 interface ProviderAvailability {
   google: boolean;
   apple: boolean;
 }
 
+interface GoogleCredentialResponse {
+  credential?: string;
+}
+
+interface GoogleIdentityServices {
+  accounts: {
+    id: {
+      initialize(options: {
+        client_id: string;
+        callback: (response: GoogleCredentialResponse) => void;
+        nonce: string;
+        use_fedcm_for_prompt: boolean;
+      }): void;
+      renderButton(
+        parent: HTMLElement,
+        options: {
+          type: "standard";
+          theme: "outline";
+          size: "large";
+          text: "continue_with";
+          shape: "pill";
+          logo_alignment: "left";
+          width: number;
+        },
+      ): void;
+    };
+  };
+}
+
+declare global {
+  interface Window {
+    google?: GoogleIdentityServices;
+  }
+}
+
+async function googleNonce(): Promise<{ raw: string; hashed: string }> {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const raw = btoa(String.fromCharCode(...bytes));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+  const hashed = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return { raw, hashed };
+}
+
 export function SocialAuthButtons({ next }: { next: string }) {
   const [providers, setProviders] = useState<ProviderAvailability | null>(null);
   const [submitting, setSubmitting] = useState<Provider | null>(null);
   const [error, setError] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+  const googleNonceRef = useRef<string | null>(null);
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_AUTH_CLIENT_ID?.trim() ?? "";
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +79,56 @@ export function SocialAuthButtons({ next }: { next: string }) {
       cancelled = true;
     };
   }, []);
+
+  const initializeGoogle = useCallback(async () => {
+    const google = window.google;
+    const parent = googleButtonRef.current;
+    if (!google || !parent || !googleClientId) return;
+
+    try {
+      const nonce = await googleNonce();
+      googleNonceRef.current = nonce.raw;
+      google.accounts.id.initialize({
+        client_id: googleClientId,
+        nonce: nonce.hashed,
+        use_fedcm_for_prompt: true,
+        callback: async (response) => {
+          if (!response.credential || !googleNonceRef.current) {
+            setError(true);
+            return;
+          }
+
+          setError(false);
+          setSubmitting("google");
+          const { error: authError } = await createClient().auth.signInWithIdToken({
+            provider: "google",
+            token: response.credential,
+            nonce: googleNonceRef.current,
+          });
+          googleNonceRef.current = null;
+          if (authError) {
+            setSubmitting(null);
+            setError(true);
+            return;
+          }
+          window.location.assign(safeOwnerNextPath(next));
+        },
+      });
+
+      parent.replaceChildren();
+      google.accounts.id.renderButton(parent, {
+        type: "standard",
+        theme: "outline",
+        size: "large",
+        text: "continue_with",
+        shape: "pill",
+        logo_alignment: "left",
+        width: Math.max(240, Math.floor(parent.clientWidth)),
+      });
+    } catch {
+      setError(true);
+    }
+  }, [googleClientId, next]);
 
   async function continueWith(provider: Provider) {
     setError(false);
@@ -52,15 +151,28 @@ export function SocialAuthButtons({ next }: { next: string }) {
     <div className="mt-5">
       <div className="space-y-2.5">
         {providers.google && (
-          <button
-            type="button"
-            disabled={Boolean(submitting)}
-            onClick={() => continueWith("google")}
-            className="flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl border border-line bg-white px-4 text-sm font-medium text-ink transition-colors hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
-          >
-            <IconGoogle className="h-5 w-5" />
-            {submitting === "google" ? "Opening Google…" : "Continue with Google"}
-          </button>
+          <div className={submitting ? "pointer-events-none opacity-60" : undefined}>
+            {googleClientId ? (
+              <>
+                <div
+                  ref={googleButtonRef}
+                  className="min-h-11 w-full overflow-hidden rounded-full"
+                  aria-label="Continue with Google"
+                />
+                <Script
+                  id="google-identity-services"
+                  src="https://accounts.google.com/gsi/client"
+                  strategy="afterInteractive"
+                  onReady={() => void initializeGoogle()}
+                  onError={() => setError(true)}
+                />
+              </>
+            ) : (
+              <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-center text-sm text-muted">
+                Google sign-in is temporarily unavailable.
+              </p>
+            )}
+          </div>
         )}
         {providers.apple && (
           <button

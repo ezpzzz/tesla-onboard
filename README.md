@@ -139,6 +139,7 @@ the Supabase project variables turns on a real sign-in gate in front of it:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+NEXT_PUBLIC_GOOGLE_AUTH_CLIENT_ID=
 ```
 
 Leave both unset and `/owner` behaves exactly as it does today. Set
@@ -156,9 +157,13 @@ email allowlist.
    [`supabase/templates`](supabase/templates). Their links land on
    `https://evhost.app/auth/confirm`; a same-origin POST consumes the one-time
    token only after the owner presses the confirmation button.
-3. For Google, register `https://evhost.app` as the JavaScript origin and
-   `https://<project-ref>.supabase.co/auth/v1/callback` as the Google OAuth
-   redirect, then enable the provider in Supabase.
+3. For Google, register `https://evhost.app` as the JavaScript origin, enable
+   the provider in Supabase, and set the public web client ID as
+   `NEXT_PUBLIC_GOOGLE_AUTH_CLIENT_ID`. EVhost uses Google Identity Services on
+   its own origin and exchanges the resulting nonce-bound ID token with
+   Supabase, so Google presents EVhost rather than the Supabase project host.
+   Keep `https://<project-ref>.supabase.co/auth/v1/callback` registered as the
+   provider callback for operational compatibility.
 4. For Apple, create a dedicated Services ID and signing key, register the
    same Supabase callback as the return URL, and enable the provider in
    Supabase. Apple client secrets expire and must be rotated at least every
@@ -183,13 +188,14 @@ Sign-in remains password-first for returning accounts, with magic link and
 enabled social providers as alternatives. The dashboard redirect-URL and
 provider steps above are required for those callbacks to work.
 
-**Build-time requirement:** both `NEXT_PUBLIC_SUPABASE_URL` and
-`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` must be present at **build time**, not
-just at runtime. Next.js inlines `NEXT_PUBLIC_*` vars into the client bundle
-during `pnpm build`; setting them only in the runtime environment (e.g. after
-a build already ran without them) leaves the app permanently in demo mode
-with `/owner` open, since the browser bundle never saw the vars to begin
-with. Rebuild after adding or changing them.
+**Build-time requirement:** `NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and the optional Google web client ID
+must be present at **build time**, not just at runtime. Next.js inlines
+`NEXT_PUBLIC_*` vars into the client bundle during `pnpm build`; setting the
+Supabase pair only in the runtime environment (e.g. after a build already ran
+without them) leaves the app permanently in demo mode with `/owner` open,
+since the browser bundle never saw the vars. Rebuild after adding or changing
+any public auth variable.
 
 Password sign-in, registration, magic-link, and password-recovery requests are
 lightly throttled app-side to protect the EVhost project's auth rate limits.
