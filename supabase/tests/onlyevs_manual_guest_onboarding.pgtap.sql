@@ -1,13 +1,13 @@
 begin;
-select plan(17);
+select plan(19);
 
 select ok(
   not has_function_privilege('anon', 'public.create_onlyevs_manual_trip(uuid,text,uuid,text,text,text,timestamptz,timestamptz,text,timestamptz)', 'execute'),
   'anonymous callers cannot create owner trips'
 );
 select ok(
-  not has_function_privilege('anon', 'public.update_onlyevs_guest_onboarding_progress(text,jsonb)', 'execute'),
-  'anonymous callers cannot write guest progress'
+  has_function_privilege('anon', 'public.update_onlyevs_guest_onboarding_progress(text,jsonb)', 'execute'),
+  'the private trip capability can publish guest progress without an account'
 );
 select ok(
   not has_function_privilege('anon', 'public.get_onlyevs_workspace_trip_snapshot(uuid,text)', 'execute'),
@@ -17,17 +17,29 @@ select ok(
   not has_function_privilege('anon', 'public.rotate_onlyevs_trip_public_token(uuid,text,timestamptz)', 'execute'),
   'anonymous callers cannot rotate private links'
 );
-select ok(
-  not has_function_privilege('anon', 'public.bind_onlyevs_trip_guest(text)', 'execute'),
-  'anonymous callers cannot bind a guest identity'
+select hasnt_function(
+  'public',
+  'bind_onlyevs_trip_guest',
+  array['text'],
+  'guest onboarding no longer exposes an account-binding RPC'
 );
 select ok(
   has_function_privilege('anon', 'public.get_onlyevs_trip_invitation(text)', 'execute'),
   'anonymous guests can resolve a high-entropy invitation'
 );
+select hasnt_function(
+  'public',
+  'onlyevs_trip_email_matches',
+  array['text', 'text'],
+  'guest onboarding no longer exposes booking-email validation'
+);
 select ok(
-  has_function_privilege('anon', 'public.onlyevs_trip_email_matches(text,text)', 'execute'),
-  'anonymous guests can submit the booking email proof'
+  has_function_privilege('anon', 'public.complete_onlyevs_guest_onboarding(text,boolean,text)', 'execute'),
+  'the private trip capability can record explicit Tesla-access consent'
+);
+select ok(
+  has_function_privilege('anon', 'public.get_onlyevs_ready_invite(text)', 'execute'),
+  'the private trip capability can poll its own ready Tesla invite'
 );
 
 insert into auth.users (id)
@@ -53,12 +65,18 @@ values (
   '{"onlyevs":{"enabled":true,"publishedAt":1}}'::jsonb
 )
 on conflict (workspace_id, shop_slug) do update set features = excluded.features;
-insert into public.onlyevs_vehicles (id, workspace_id, shop_slug, display_name, vin, status)
+insert into public.onlyevs_vehicles (
+  id, workspace_id, shop_slug, display_name, model, trim, year, color, vin, status
+)
 values (
   '73000000-0000-4000-8000-000000000001',
   '72000000-0000-4000-8000-000000000001',
   'tracked-rentals',
   'Black Model 3',
+  'Model 3',
+  'Performance',
+  2024,
+  'Solid Black',
   '5YJ30000000000001',
   'active'
 )
@@ -96,13 +114,8 @@ select is(
   'the high-entropy link resolves only guest-safe invitation fields'
 );
 
-select set_config('request.jwt.claim.sub', '71000000-0000-4000-8000-000000000002', true);
-select set_config('request.jwt.claims', '{"email":"taylor@example.com"}', true);
-select is(
-  (select tenant_ref from public.bind_onlyevs_trip_guest(repeat('a', 64))),
-  '72000000-0000-4000-8000-000000000001~tracked-rentals',
-  'the verified booking email binds the guest to the correct tenant'
-);
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claims', '{}', true);
 select lives_ok(
   $$select public.update_onlyevs_guest_onboarding_progress(
     repeat('a', 64),
@@ -120,7 +133,13 @@ select lives_ok(
       "updatedAt":1700000000000
     }'::jsonb
   )$$,
-  'the bound guest can publish a bounded progress summary'
+  'the unexpired private trip capability can publish a bounded progress summary'
+);
+select ok(
+  (select bound_at is not null
+   from private.onlyevs_guest_bindings
+   where workspace_id = '72000000-0000-4000-8000-000000000001'),
+  'the first capability-authorized progress update records that onboarding opened'
 );
 
 select set_config('request.jwt.claim.sub', '71000000-0000-4000-8000-000000000001', true);

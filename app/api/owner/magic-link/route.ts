@@ -72,7 +72,7 @@ export async function POST(request: Request) {
           email: email.trim(),
           options: {
             emailRedirectTo: callbackUrl.toString(),
-            shouldCreateUser: false,
+            shouldCreateUser: true,
           },
         });
       } catch {

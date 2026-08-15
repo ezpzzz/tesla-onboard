@@ -69,8 +69,8 @@ onboarding progress in one place, separate from the guest flow. It shows:
 - **New guest onboarding** — a prominent overview action creates a scheduled,
   vehicle-linked trip and returns a one-time private guest URL. The database
   stores only a SHA-256 token hash; regenerating a link invalidates the old one.
-- **Live onboarding progress** — after the guest proves the booking email and
-  opens the private link, the matching trip shows their path, completed modules,
+- **Live onboarding progress** — after the guest opens the private link, the
+  matching trip shows their path, completed modules,
   readiness score, and last update across devices.
 - **Charging sessions**, driver history, and alerts, ready for a persistent
   bookings/charging adapter; until one is connected these surfaces render
@@ -95,7 +95,7 @@ onboarding progress in one place, separate from the guest flow. It shows:
   vehicle list.
 - **Workspace settings** — brand, contact, guest vehicle, rental policy, and
   house rules are editable in setup and at `/owner/settings`. They are saved
-  under the active Sophosic workspace and update that tenant's guest walkthrough
+  under the active EVhost workspace and update that tenant's guest walkthrough
   without a rebuild or deployment. An imported fleet vehicle can populate the
   guest vehicle in one selection, including trim, exterior, interior, wheels,
   and exact Tesla option codes used by the fail-closed artwork resolver. The
@@ -105,14 +105,14 @@ onboarding progress in one place, separate from the guest flow. It shows:
   business logo and browser/PWA icon, choose an accent color, and request a
   custom guest hostname. Media paths are workspace/shop scoped; arbitrary
   remote URLs and SVG/HTML uploads are rejected. A scoped worker attaches and
-  verifies domains with the deploy provider, and the shared Supabase auth flow
+  verifies domains with the deploy provider, and the dedicated EVhost Supabase auth flow
   always completes on the canonical evhost.app broker before returning the guest
   to the same tenant. Platform OAuth, DNS-provider, and encryption credentials
   remain server-managed rather than tenant-editable.
 - **Calendar, Tesla access, and fleet stats** — when the background control plane is enabled, an owner can connect Google
   Calendar to populate a review queue that refreshes every 15 minutes,
-  explicitly confirm an event into a trip, and schedule time-bounded Tesla driver access after the guest proves the
-  booking email, connects Tesla, and consents. The background control plane
+  explicitly confirm an event into a trip, and schedule time-bounded Tesla driver access after the guest opens the
+  private trip link, connects Tesla, and consents. The background control plane
   stores encrypted refresh tokens, reconciles non-idempotent invitation calls,
   consumes Fleet Telemetry for last-known battery/range/odometer/lock state,
   and requests Location only during the exact consented trip window.
@@ -143,43 +143,29 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 
 Leave both unset and `/owner` behaves exactly as it does today. Set
 `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and the
-gate is live. Tenant access comes from the signed-in user's existing
-`workspace_users` memberships and the shared platform's row-level-security
-policies; there is no deployment-wide email allowlist.
+gate is live. Tenant access comes from EVhost-owned `workspace_users`
+memberships and row-level-security policies; there is no deployment-wide
+email allowlist.
 
-**One-time Supabase dashboard step:** this app shares a Supabase project with
-other products, so the only thing to add is a redirect URL — go to
+**One-time Supabase dashboard step:** on the dedicated EVhost project, go to
 **Authentication → URL Configuration → Redirect URLs** and add this app's
 origin plus `/auth/callback` (e.g.
 `https://evhost.app/auth/callback`, and
-`http://localhost:3000/auth/callback` for local dev). Nothing else in that
-project is touched: the email **template** is not modified, the Site URL is
-not changed, and no existing user is edited.
+`http://localhost:3000/auth/callback` for local dev). The built-in email
+template can remain unchanged; `/auth/callback` accepts both PKCE codes and
+the legacy token-hash form.
 
-**First account:** use an existing account that is already a member of the
-intended Sophosic workspace. To create a fresh auth account, use the
-operator-only script (never run by the app), then add that user to a workspace
-through the platform's normal membership flow:
-
-```bash
-SUPABASE_SERVICE_ROLE_KEY=... node --env-file=.env.local scripts/owner-admin-create-user.mjs you@example.com
-```
-
-The service-role key is shell-env-only — it must never go in `.env.example`
-or any file the app reads. The script prints the password once.
+**First account:** enter the owner email on the magic-link tab. A verified
+first-time address creates an EVhost auth account. The first owner request
+atomically claims a staged migrated workspace by email hash or creates a new
+workspace; no service-role key is used by the web app.
 
 Signing out from `/owner` is **this-device-only** (`scope: 'local'`) — it
-never revokes your sessions in the project's other apps, since the user pool
-is shared.
+revokes only the current EVhost session.
 
-Sign-in is **password-first**, not magic-link-first: a password round-trip
-needs no email deliverability setup and doesn't depend on the shared
-project's email template (which this app is not allowed to touch). Magic
-link ships too, as the secondary tab on the sign-in page. The shared
-project's send-email hook delivers the message, but this app does not modify
-that hook's templates or any Supabase email template. The dashboard
-redirect-URL step above is **required** for the callback to work (Supabase
-only redirects a magic-link callback to a URL on the project's allowlist).
+Sign-in remains password-first for returning accounts, with magic link as the
+first-account and passwordless path. The dashboard redirect-URL step above is
+required for the callback to work.
 
 **Build-time requirement:** both `NEXT_PUBLIC_SUPABASE_URL` and
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` must be present at **build time**, not
@@ -190,7 +176,7 @@ with `/owner` open, since the browser bundle never saw the vars to begin
 with. Rebuild after adding or changing them.
 
 Password sign-in and magic-link requests are lightly throttled app-side to
-protect the shared Supabase project's rate limits.
+protect the EVhost project's auth rate limits.
 
 ---
 
@@ -236,7 +222,7 @@ Owners configure everything specific to a rental company in `/owner/setup` or
 business logo, app icon, accent color, key and charging instructions, return
 policy, and house rules. The settings are
 stored as an unpublished draft in `workspace_branding.features.onlyevs` for the
-active Sophosic workspace. The final fleet-setup action publishes only after
+active EVhost workspace. The final fleet-setup action publishes only after
 verifying an active linked vehicle and a complete guest configuration. Bare,
 unknown, reset, incomplete, and unpublished tenant links show a setup-required
 screen instead of seeded content.

@@ -3,8 +3,10 @@
 ## Unreleased
 
 - Add a prominent owner-dashboard action for creating private, vehicle-linked guest onboarding trips.
-- Persist only hashed guest-link capabilities, bind onboarding to the booking email, and sync bounded progress across devices for owner tracking.
+- Persist only hashed guest-link capabilities and sync bounded progress across devices for owner tracking.
+- Open private trip links directly without booking-email validation; the unexpired 256-bit link is the guest capability for that trip.
 - Let owners rotate a lost guest link while invalidating the previous URL immediately.
+- Move EVhost tenants, owner membership, fleet, branding, trips, and access state into a dedicated Supabase project with first-login workspace claiming and a narrowly scoped anonymous guest-link surface.
 
 ## 0.2.0 — 2026-08-14
 

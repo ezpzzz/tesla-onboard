@@ -32,10 +32,8 @@ function isSameOriginRequest(request: Request): boolean {
 }
 
 /**
- * Sign the owner out of THIS app only. scope: "local" is mandatory — the
- * Supabase project (zwkqgcqtahyehsryqrfl) is shared with the user's other
- * sophosic-platform apps, and a "global" sign-out would revoke sessions there
- * too. Never change this to "global".
+ * Sign the owner out on this device only. Keep scope: "local" so signing out
+ * of one browser does not revoke every EVhost session.
  */
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) {

@@ -209,7 +209,7 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const { data: memberships, error: membershipsError } = await supabase
+    let { data: memberships, error: membershipsError } = await supabase
       .from("workspace_users")
       .select("workspace_id,role")
       .eq("user_id", userId);
@@ -219,12 +219,29 @@ export function OwnerTenantProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const membershipRows = (memberships ?? []) as Array<{ workspace_id: string; role: string }>;
+    let membershipRows = (memberships ?? []) as Array<{ workspace_id: string; role: string }>;
+    if (membershipRows.length === 0) {
+      const { error: bootstrapError } = await supabase.rpc("bootstrap_evhost_workspace");
+      if (!bootstrapError) {
+        const refreshed = await supabase
+          .from("workspace_users")
+          .select("workspace_id,role")
+          .eq("user_id", userId);
+        memberships = refreshed.data;
+        membershipsError = refreshed.error;
+        membershipRows = (memberships ?? []) as Array<{ workspace_id: string; role: string }>;
+      }
+    }
+    if (membershipsError) {
+      setError("Workspace access could not be loaded.");
+      setLoading(false);
+      return;
+    }
     const ids = membershipRows.map((row) => row.workspace_id);
     if (ids.length === 0) {
       setWorkspaces([]);
       setWorkspaceId(null);
-      setError("No Sophosic workspace is linked to this account yet.");
+      setError("Your EVhost workspace could not be created. Try signing in again.");
       setLoading(false);
       return;
     }

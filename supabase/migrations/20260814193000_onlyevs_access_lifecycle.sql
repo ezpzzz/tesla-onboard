@@ -1536,6 +1536,15 @@ grant execute on function public.complete_onlyevs_guest_onboarding(text, boolean
 grant execute on function public.get_onlyevs_ready_invite(text) to authenticated;
 grant execute on function public.request_onlyevs_custom_domain(uuid, text, text) to authenticated;
 grant execute on function public.request_onlyevs_custom_domain_removal(uuid, uuid) to authenticated;
+revoke all on public.onlyevs_integrations,
+  public.onlyevs_calendar_candidates,
+  public.onlyevs_trips,
+  public.onlyevs_access_grants,
+  public.onlyevs_telemetry_enrollments,
+  public.onlyevs_vehicle_stats_current,
+  public.onlyevs_integration_audit_events,
+  public.onlyevs_brand_assets,
+  public.onlyevs_custom_domains from public, anon, authenticated;
 grant select on public.onlyevs_integrations,
   public.onlyevs_calendar_candidates,
   public.onlyevs_trips,

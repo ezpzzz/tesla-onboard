@@ -20,7 +20,7 @@ export function ReviewStep({ state, nav }: SetupStepProps) {
       </h1>
       <p className="mt-3 text-[15px] leading-relaxed text-muted">
         {persistence === "workspace"
-          ? "Complete the guest-facing settings. They are saved as a Sophosic workspace draft now and published only after the final step verifies an active linked fleet vehicle."
+          ? "Complete the guest-facing settings. They are saved as an EVhost workspace draft now and published only after the final step verifies an active linked fleet vehicle."
           : "Edit what guests will see. In demo mode, these settings preview locally in this browser."}
       </p>
       <div className="mt-6">

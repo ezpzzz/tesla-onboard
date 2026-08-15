@@ -32,6 +32,10 @@ function boundedChecklist(value: unknown): Record<string, boolean> | null {
   return Object.fromEntries(entries) as Record<string, boolean>;
 }
 
+function clientIp(request: Request): string {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+}
+
 export async function POST(request: NextRequest) {
   if (request.headers.get("origin") !== request.nextUrl.origin) {
     return NextResponse.json({ error: "origin_mismatch" }, { status: 403 });
@@ -93,10 +97,11 @@ export async function POST(request: NextRequest) {
     updatedAt: Date.now(),
   };
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-  if (!allowRequest(`guest-progress:${authData.user.id}:${tokenHash}`, 120, 60_000)) {
+  if (
+    !allowRequest(`guest-progress-token:${tokenHash}`, 120, 60_000) ||
+    !allowRequest(`guest-progress-ip:${clientIp(request)}`, 240, 60_000)
+  ) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
   const { error } = await supabase.rpc("update_onlyevs_guest_onboarding_progress", {
@@ -104,9 +109,7 @@ export async function POST(request: NextRequest) {
     p_progress: progress,
   });
   if (error) {
-    return NextResponse.json({ error: error.code === "42501" ? "guest_binding_required" : "progress_unavailable" }, {
-      status: error.code === "42501" ? 403 : 503,
-    });
+    return NextResponse.json({ error: "progress_unavailable" }, { status: 503 });
   }
   return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store, private" } });
 }
