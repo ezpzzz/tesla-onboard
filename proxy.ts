@@ -35,6 +35,9 @@ export const config = {
   matcher: [
     "/owner/:path*",
     "/login",
+    "/register",
+    "/forgot-password",
+    "/reset-password",
     "/api/owner/tesla/:path*",
     "/api/owner/google/:path*",
     "/api/owner/trips/:path*",
@@ -64,6 +67,9 @@ function redirectWithSession(base: NextResponse, url: URL): NextResponse {
 export async function proxy(request: NextRequest) {
   const canonicalOrigin = process.env.ONLYEVS_CANONICAL_ORIGIN?.replace(/\/$/, "");
   const isOwnerSurface = request.nextUrl.pathname === "/login"
+    || request.nextUrl.pathname === "/register"
+    || request.nextUrl.pathname === "/forgot-password"
+    || request.nextUrl.pathname === "/reset-password"
     || request.nextUrl.pathname.startsWith("/owner")
     || request.nextUrl.pathname.startsWith("/api/owner")
     || request.nextUrl.pathname.startsWith("/auth/owner");
@@ -83,6 +89,7 @@ export async function proxy(request: NextRequest) {
   // Same gate for /owner itself and its Tesla OAuth mirror (API + auth pages) —
   // see the matcher comment above for why the mirror is included here.
   const isOwnerGated =
+    pathname === "/reset-password" ||
     pathname.startsWith("/owner") ||
     pathname.startsWith("/api/owner/tesla") ||
     pathname.startsWith("/api/owner/google") ||
@@ -101,7 +108,10 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  if (pathname === "/login" && email) {
+  if (
+    (pathname === "/login" || pathname === "/register" || pathname === "/forgot-password") &&
+    email
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = "/owner";
     url.search = "";

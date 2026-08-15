@@ -5,7 +5,7 @@ import "server-only";
  * (magic-link, password-login). Per-isolate only: serverless deployments run
  * many isolates/instances behind a load balancer, and each gets its own Map,
  * so this is advisory — the first line of defense in front of the SHARED
- * Supabase project's own auth/email rate limits, not a hard guarantee. Don't
+ * dedicated EVhost Supabase project's own auth/email rate limits, not a hard guarantee. Don't
  * remove the underlying Supabase rate limiting on the assumption this alone
  * is sufficient.
  */

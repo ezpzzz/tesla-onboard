@@ -17,17 +17,24 @@ export default async function ConfirmOwnerEmailPage({
   const type = ownerEmailOtpType(single(query.type));
   const next = safeOwnerNextPath(single(query.next));
   const valid = Boolean(tokenHash && type);
+  const recovery = type === "recovery";
 
   return (
     <OwnerAuthShell>
       <div className="text-center">
         <h1 className="text-xl font-semibold tracking-tight text-ink">
-          {valid ? "Confirm your email" : "This link is unavailable"}
+          {valid
+            ? recovery
+              ? "Reset your password"
+              : "Confirm your email"
+            : "This link is unavailable"}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
           {valid
-            ? "Press the button below to finish signing in to EVhost. This one-time link will be used only after you confirm."
-            : "Request a new sign-in link from EVhost and try again."}
+            ? recovery
+              ? "Press the button below to continue to EVhost and choose a new password. This one-time link will be used only after you confirm."
+              : "Press the button below to finish signing in to EVhost. This one-time link will be used only after you confirm."
+            : "Request a new email from EVhost and try again."}
         </p>
 
         {valid ? (
@@ -36,15 +43,15 @@ export default async function ConfirmOwnerEmailPage({
             <input type="hidden" name="type" value={type!} />
             <input type="hidden" name="next" value={next} />
             <Button type="submit" fullWidth>
-              Confirm and continue
+              {recovery ? "Continue to reset password" : "Confirm and continue"}
             </Button>
           </form>
         ) : (
           <a
-            href={`/login?next=${encodeURIComponent(next)}`}
+            href={recovery ? "/forgot-password" : `/login?next=${encodeURIComponent(next)}`}
             className="mt-6 inline-flex text-sm font-medium text-brand hover:text-brand-dark"
           >
-            Return to sign in
+            {recovery ? "Request another reset email" : "Return to sign in"}
           </a>
         )}
       </div>

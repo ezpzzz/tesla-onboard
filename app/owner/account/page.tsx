@@ -106,8 +106,8 @@ function AccountCard() {
     setErrorMsg(null);
     setSuccess(false);
 
-    if (password.length < 6) {
-      setErrorMsg("Password must be at least 6 characters.");
+    if (password.length < 8) {
+      setErrorMsg("Password must be at least 8 characters.");
       return;
     }
     if (password !== confirmPassword) {
@@ -153,7 +153,8 @@ function AccountCard() {
             type="password"
             autoComplete="new-password"
             required
-            minLength={6}
+            minLength={8}
+            maxLength={128}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="field"
@@ -172,7 +173,8 @@ function AccountCard() {
             type="password"
             autoComplete="new-password"
             required
-            minLength={6}
+            minLength={8}
+            maxLength={128}
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             className="field"

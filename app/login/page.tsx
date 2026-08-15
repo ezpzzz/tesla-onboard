@@ -5,7 +5,9 @@
  * chrome) but is wrapped in OwnerAuthShell for the same centered-column
  * treatment as /not-authorized.
  *
- * Two ways in, one anti-enumeration posture:
+ * Email sign-in keeps one anti-enumeration posture; enabled social providers
+ * are discovered from the dedicated EVhost Supabase project and rendered
+ * above these methods:
  *  - Password: identical failure message for "wrong password" and "no such
  *    user" (only rate-limit errors get a distinct message). The request is
  *    proxied through /api/owner/password-login rather than calling
@@ -28,10 +30,12 @@
  */
 
 import { Suspense, useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { safeOwnerNextPath } from "@/lib/owner-auth-redirect";
 import { OwnerAuthShell } from "@/components/owner/OwnerAuthShell";
+import { SocialAuthButtons } from "@/components/owner/SocialAuthButtons";
 import { Badge, Button, Segmented } from "@/components/ui";
 import { IconArrowRight } from "@/components/icons";
 
@@ -247,7 +251,9 @@ function LoginForm() {
       <h1 className="text-xl font-semibold tracking-tight text-ink">Sign in</h1>
       <p className="mt-1 text-sm text-muted">Owner dashboard access.</p>
 
-      <div className="mt-5">
+      <SocialAuthButtons next={next} />
+
+      <div className="mt-5 first:mt-0">
         <Segmented
           options={[
             { value: "password", label: "Password" },
@@ -285,9 +291,14 @@ function LoginForm() {
             />
           </div>
           <div>
-            <label htmlFor="password" className="mb-1.5 block text-xs font-medium text-muted">
-              Password
-            </label>
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+              <label htmlFor="password" className="block text-xs font-medium text-muted">
+                Password
+              </label>
+              <Link href="/forgot-password" className="text-xs font-medium text-brand hover:text-brand-dark">
+                Forgot password?
+              </Link>
+            </div>
             <input
               id="password"
               name="password"
@@ -329,6 +340,16 @@ function LoginForm() {
           </p>
         </form>
       )}
+
+      <p className="mt-5 text-center text-sm text-muted">
+        New to EVhost?{" "}
+        <Link
+          href={`/register?next=${encodeURIComponent(next)}`}
+          className="font-medium text-brand hover:text-brand-dark"
+        >
+          Create owner account
+        </Link>
+      </p>
     </div>
   );
 }

@@ -147,25 +147,41 @@ gate is live. Tenant access comes from EVhost-owned `workspace_users`
 memberships and row-level-security policies; there is no deployment-wide
 email allowlist.
 
-**One-time Supabase dashboard step:** on the dedicated EVhost project, go to
-**Authentication → URL Configuration → Redirect URLs** and add this app's
-origin plus `/auth/callback` (e.g.
-`https://evhost.app/auth/callback`, and
-`http://localhost:3000/auth/callback` for local dev). The built-in email
-template can remain unchanged; `/auth/callback` accepts both PKCE codes and
-the legacy token-hash form.
+**One-time Supabase dashboard steps:** on the dedicated EVhost project:
 
-**First account:** enter the owner email on the magic-link tab. A verified
-first-time address creates an EVhost auth account. The first owner request
-atomically claims a staged migrated workspace by email hash or creates a new
-workspace; no service-role key is used by the web app.
+1. Under **Authentication → URL Configuration**, set the Site URL to
+   `https://evhost.app` and allow `https://evhost.app/auth/callback` (plus
+   `http://localhost:3000/auth/callback` for local development).
+2. Install the branded, scanner-safe email bodies tracked under
+   [`supabase/templates`](supabase/templates). Their links land on
+   `https://evhost.app/auth/confirm`; a same-origin POST consumes the one-time
+   token only after the owner presses the confirmation button.
+3. For Google, register `https://evhost.app` as the JavaScript origin and
+   `https://<project-ref>.supabase.co/auth/v1/callback` as the Google OAuth
+   redirect, then enable the provider in Supabase.
+4. For Apple, create a dedicated Services ID and signing key, register the
+   same Supabase callback as the return URL, and enable the provider in
+   Supabase. Apple client secrets expire and must be rotated at least every
+   six months.
+
+`/auth/callback` accepts PKCE codes and legacy token-hash callbacks, while
+the hosted templates use `/auth/confirm` so mailbox scanners cannot consume a
+sign-in or recovery token before the owner opens the message.
+
+**First account:** use `/register`, an enabled Google/Apple provider, or enter
+the owner email on the magic-link tab. A verified first-time identity creates
+an EVhost auth account. The first owner request atomically claims a staged
+migrated workspace by email hash or creates a new workspace; no service-role
+key is used by the web app. `/forgot-password` sends the dedicated recovery
+template and `/reset-password` updates the password inside the verified
+recovery session.
 
 Signing out from `/owner` is **this-device-only** (`scope: 'local'`) — it
 revokes only the current EVhost session.
 
-Sign-in remains password-first for returning accounts, with magic link as the
-first-account and passwordless path. The dashboard redirect-URL step above is
-required for the callback to work.
+Sign-in remains password-first for returning accounts, with magic link and
+enabled social providers as alternatives. The dashboard redirect-URL and
+provider steps above are required for those callbacks to work.
 
 **Build-time requirement:** both `NEXT_PUBLIC_SUPABASE_URL` and
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` must be present at **build time**, not
@@ -175,8 +191,8 @@ a build already ran without them) leaves the app permanently in demo mode
 with `/owner` open, since the browser bundle never saw the vars to begin
 with. Rebuild after adding or changing them.
 
-Password sign-in and magic-link requests are lightly throttled app-side to
-protect the EVhost project's auth rate limits.
+Password sign-in, registration, magic-link, and password-recovery requests are
+lightly throttled app-side to protect the EVhost project's auth rate limits.
 
 ---
 
