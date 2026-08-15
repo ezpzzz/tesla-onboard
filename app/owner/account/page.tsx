@@ -15,6 +15,7 @@ import { tenantGuestHref } from "@/lib/tenant-config";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconExternal } from "@/components/icons";
 import { PageHeader } from "@/components/evhost-ui";
+import { UserAvatarField } from "@/components/owner/UserAvatarField";
 
 const SUPABASE_CONFIGURED =
   Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
@@ -66,7 +67,10 @@ export default function AccountPage() {
       </Card>
 
       {SUPABASE_CONFIGURED ? (
-        <AccountCard />
+        <>
+          <UserAvatarField />
+          <AccountCard />
+        </>
       ) : (
         <Card className="p-4">
           <Badge tone="brand">Demo mode</Badge>

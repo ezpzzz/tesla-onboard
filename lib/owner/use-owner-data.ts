@@ -6,7 +6,16 @@
  * and the host's workspace-persisted vehicle roster after hydration.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { EMPTY_OWNER_SNAPSHOT, getOwnerDataSource } from "./data-source";
 import { fleetStats, parseReturnPolicyPct } from "./derive";
 import { useVehicleState } from "./vehicle-state";
@@ -27,13 +36,14 @@ import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 // drop-in behind the same hook.
 const INITIAL_SNAPSHOT: OwnerSnapshot = EMPTY_OWNER_SNAPSHOT;
 
-export function useOwnerData() {
-  const { config, tenantSlug } = useTenantConfig();
+function useOwnerDataValue() {
+  const { config, tenantSlug, loading: tenantLoading } = useTenantConfig();
   const [snapshot, setSnapshot] = useState<OwnerSnapshot>(INITIAL_SNAPSHOT);
   const [dataHydrated, setDataHydrated] = useState(false);
   const [operationalError, setOperationalError] = useState<string | null>(null);
   const [vehicleTelemetry, setVehicleTelemetry] = useState<Record<string, VehicleStatsCurrent>>({});
   const [tripRefresh, setTripRefresh] = useState(0);
+  const loadedScopeRef = useRef<string | null>(null);
   const guestProgress = useGuestProgress();
   const {
     vehicles: vehicleStateVehicles,
@@ -59,12 +69,18 @@ export function useOwnerData() {
   }, []);
 
   useEffect(() => {
+    if (tenantLoading) return;
     let cancelled = false;
-    setDataHydrated(false);
-    setOperationalError(null);
-    setSnapshot(INITIAL_SNAPSHOT);
-    setVehicleTelemetry({});
     const scope = vehicleWorkspaceScope(tenantSlug);
+    const scopeKey = scope ? `${scope.workspaceId}~${scope.shopSlug}` : `demo:${tenantSlug ?? "default"}`;
+    const scopeChanged = loadedScopeRef.current !== scopeKey;
+    loadedScopeRef.current = scopeKey;
+    if (scopeChanged) {
+      setDataHydrated(false);
+      setSnapshot(INITIAL_SNAPSHOT);
+      setVehicleTelemetry({});
+    }
+    setOperationalError(null);
     const request = scope
       ? Promise.all([
           fetchWorkspaceOperationalSnapshot(scope),
@@ -88,7 +104,7 @@ export function useOwnerData() {
     return () => {
       cancelled = true;
     };
-  }, [tenantSlug, tripRefresh]);
+  }, [tenantLoading, tenantSlug, tripRefresh]);
 
   const policyPct = useMemo(
     () => parseReturnPolicyPct(config.rental.returnChargeLevel),
@@ -147,4 +163,23 @@ export function useOwnerData() {
     operationalError,
     vehicleTelemetry,
   };
+}
+
+type OwnerDataValue = ReturnType<typeof useOwnerDataValue>;
+
+const OwnerDataContext = createContext<OwnerDataValue | null>(null);
+
+/**
+ * Lives in the persistent owner layout so route changes reuse one operational
+ * snapshot, one refresh timer, and one set of workspace subscriptions.
+ */
+export function OwnerDataProvider({ children }: { children: ReactNode }) {
+  const value = useOwnerDataValue();
+  return createElement(OwnerDataContext.Provider, { value }, children);
+}
+
+export function useOwnerData(): OwnerDataValue {
+  const value = useContext(OwnerDataContext);
+  if (!value) throw new Error("useOwnerData must be used inside OwnerDataProvider.");
+  return value;
 }
