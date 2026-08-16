@@ -40,12 +40,20 @@ describe("sendGridMessage failure classification", () => {
     expect((error as InstanceType<typeof SendGridDeliveryError>).classification).toBe("ambiguous");
   });
 
-  it("attaches an AbortSignal so a hanging SendGrid request cannot block forever", async () => {
+  it("attaches an AbortSignal when a caller opts in via timeoutMs, so a hanging request cannot block that caller forever", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
+    const { sendGridMessage } = await import("@/lib/owner/sendgrid");
+    await sendGridMessage(config, { ...message, timeoutMs: 10_000 });
+    const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("attaches no AbortSignal by default (timeoutMs omitted), preserving the original unbounded-wait behavior", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
     const { sendGridMessage } = await import("@/lib/owner/sendgrid");
     await sendGridMessage(config, message);
     const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(options.signal).toBeInstanceOf(AbortSignal);
+    expect(options.signal).toBeUndefined();
   });
 
   it("still validates the message shape before ever calling fetch", async () => {
@@ -87,6 +95,21 @@ describe("sendGridEmailAction", () => {
       evhost_workspace_id: "workspace-1",
       evhost_delivery_id: "delivery-1",
     });
+  });
+
+  it("attaches an AbortSignal, since this dark path holds a leased outbox job that must not block forever", async () => {
+    const { sendGridEmailAction } = await import("@/lib/owner/sendgrid");
+    await sendGridEmailAction({
+      config: { apiKey: "server-key", fromEmail: "trips@evhost.app", fromName: "EVhost" },
+      recipient: "owner@example.com",
+      subject: "A guest cancelled",
+      text: "text",
+      html: "<p>html</p>",
+      workspaceId: "workspace-1",
+      deliveryId: "delivery-1",
+    });
+    const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 });
 
@@ -130,5 +153,21 @@ describe("sendGridTripReminder regression (existing reminder flow is unchanged)"
       pickupLocation: null,
       portalUrl: "https://evhost.app/trip/secret-capability",
     })).rejects.toThrow("sendgrid_429");
+  });
+
+  it("attaches no AbortSignal, matching this call's pre-existing unbounded-wait behavior", async () => {
+    const { sendGridTripReminder } = await import("@/lib/owner/sendgrid");
+    await sendGridTripReminder({
+      config: { apiKey: "server-key", fromEmail: "trips@evhost.app", fromName: "EVhost Trips" },
+      recipient: "guest@example.com",
+      companyName: "EVhost",
+      guestName: "Alex Guest",
+      vehicleName: "Model Y",
+      pickupDate: "Aug 20",
+      pickupLocation: "PHX Sky Harbor",
+      portalUrl: "https://evhost.app/trip/secret-capability",
+    });
+    const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(options.signal).toBeUndefined();
   });
 });

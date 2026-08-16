@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { buildPrefilledCreateTripHref, deriveAppliedCandidateTrip } from "@/lib/owner/email-actions-repository";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { abortEmailRevocation, buildPrefilledCreateTripHref, deriveAppliedCandidateTrip } from "@/lib/owner/email-actions-repository";
+import type { VehicleWorkspaceScope } from "@/lib/owner/vehicle-repository";
 
 describe("buildPrefilledCreateTripHref", () => {
   it("encodes every present fact into the frozen query-param shape", () => {
@@ -80,5 +81,38 @@ describe("deriveAppliedCandidateTrip", () => {
 
   it("resolves to null when there is no candidate at all", () => {
     expect(deriveAppliedCandidateTrip(null, trip)).toBeNull();
+  });
+});
+
+describe("abortEmailRevocation", () => {
+  const scope: VehicleWorkspaceScope = { workspaceId: "workspace-id", shopSlug: "desert-ev", key: "workspace-id~desert-ev" };
+  const actionId = "00000000-0000-4000-8000-000000000030";
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("goes through the dedicated abort-revocation route, not a direct RPC call", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({ aborted: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await abortEmailRevocation(scope, actionId, 3, "Guest confirmed by phone; keep the original trip.");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`/api/owner/email-actions/${actionId}/abort-revocation`);
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      workspaceId: "workspace-id",
+      shopSlug: "desert-ev",
+      expectedRevision: 3,
+      reason: "Guest confirmed by phone; keep the original trip.",
+    });
+  });
+
+  it("surfaces the route's error message on failure", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "This revocation can no longer be aborted." }), { status: 409 })));
+
+    await expect(abortEmailRevocation(scope, actionId, 3, "reason")).rejects.toThrow("This revocation can no longer be aborted.");
   });
 });

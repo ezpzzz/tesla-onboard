@@ -82,9 +82,26 @@ export function verifySendGridWebhookSignature(
   return null;
 }
 
+/**
+ * `EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY` (singular) was renamed to
+ * `EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEYS` (plural, versioned keyring) in
+ * this same change. This is a merge-to-deploy-in-one-step repo, so the
+ * hosting provider's env var cannot be guaranteed to be renamed atomically
+ * with the code -- reading only the new name would make every SendGrid
+ * event webhook start failing closed (400) the instant this deploys against
+ * an environment that still has only the old singular var set. Prefer the
+ * new plural var; fall back to the old singular one (still valid single-key
+ * input per parseSendGridWebhookKeyring's version-1 shorthand) so the
+ * rename can land in the provider's dashboard on its own schedule. Remove
+ * this fallback once the provider env is confirmed migrated.
+ */
 export function sendGridWebhookKeyringFromEnv(): SendGridWebhookKeyring {
+  const plural = process.env.EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEYS;
+  if (plural) {
+    return parseSendGridWebhookKeyring(plural, "EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEYS");
+  }
   return parseSendGridWebhookKeyring(
-    process.env.EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEYS ?? "",
+    process.env.EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY ?? "",
     "EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEYS",
   );
 }

@@ -69,12 +69,14 @@ exception when exclusion_violation then
 end;
 $$;
 
+-- security invoker + no grant to any role: the only callers are the security
+-- definer wrappers above/below (create_onlyevs_manual_trip,
+-- confirm_onlyevs_calendar_candidate, execute_onlyevs_email_action), which
+-- run as their own owner and so never need their caller's role to hold
+-- EXECUTE on this shared core directly.
 revoke all on function private.create_onlyevs_trip_core(
   uuid, uuid, text, uuid, uuid, uuid, text, text, text, timestamptz, timestamptz, text, text, text, timestamptz, text, smallint
-) from public, anon, authenticated;
-grant execute on function private.create_onlyevs_trip_core(
-  uuid, uuid, text, uuid, uuid, uuid, text, text, text, timestamptz, timestamptz, text, text, text, timestamptz, text, smallint
-) to onlyevs_worker;
+) from public, anon, authenticated, onlyevs_worker;
 
 -- ---------------------------------------------------------------------------
 -- Redefine the two existing trip-creation entry points to call the extracted
@@ -506,13 +508,22 @@ begin
 
       if action.action_type = 'create_trip' then
         declare
+          -- Key names here MUST match lib/email/turo-parser.ts's actual `proposedState`
+          -- output (see that file's header-comment key contract, mirrored in
+          -- components/owner/InboxCandidateCard.tsx's parseEmailCandidateFacts): the
+          -- parser never writes 'guestName'/'timezone'/'startsAt'/'endsAt'/
+          -- 'pickupLocation' — it writes 'guestFirstName'/'tripTimeZone'/'tripStartAt'/
+          -- 'tripEndAt'/'pickupAddress'. Reading the wrong keys here means these
+          -- fields are silently always null. 'guestEmail'/'returnLocation'/'vehicleId'
+          -- have no parser source at all (Turo booking emails never expose a guest
+          -- email) and can only ever arrive via an owner correction.
           merged jsonb := coalesce(candidate.proposed_state, '{}'::jsonb) || coalesce(candidate.correction_facts, '{}'::jsonb);
-          guest_name text := nullif(btrim(coalesce(merged ->> 'guestName', '')), '');
+          guest_name text := nullif(btrim(coalesce(merged ->> 'guestFirstName', '')), '');
           guest_email text := lower(nullif(btrim(coalesce(merged ->> 'guestEmail', '')), ''));
-          tz_value text := nullif(btrim(coalesce(merged ->> 'timezone', '')), '');
-          starts_at timestamptz := nullif(merged ->> 'startsAt', '')::timestamptz;
-          ends_at timestamptz := nullif(merged ->> 'endsAt', '')::timestamptz;
-          pickup text := nullif(btrim(coalesce(merged ->> 'pickupLocation', '')), '');
+          tz_value text := nullif(btrim(coalesce(merged ->> 'tripTimeZone', '')), '');
+          starts_at timestamptz := nullif(merged ->> 'tripStartAt', '')::timestamptz;
+          ends_at timestamptz := nullif(merged ->> 'tripEndAt', '')::timestamptz;
+          pickup text := nullif(btrim(coalesce(merged ->> 'pickupAddress', '')), '');
           return_place text := nullif(btrim(coalesce(merged ->> 'returnLocation', '')), '');
           chosen_vehicle_id uuid;
           requested_vehicle_id uuid;
@@ -575,10 +586,11 @@ begin
           raise exception 'email_action_target_trip_missing' using errcode = '55000';
         end if;
         declare
+          -- Same parser key contract as the create_trip branch above.
           merged jsonb := coalesce(candidate.proposed_state, '{}'::jsonb) || coalesce(candidate.correction_facts, '{}'::jsonb);
-          new_starts timestamptz := nullif(merged ->> 'startsAt', '')::timestamptz;
-          new_ends timestamptz := nullif(merged ->> 'endsAt', '')::timestamptz;
-          new_pickup text := nullif(btrim(coalesce(merged ->> 'pickupLocation', '')), '');
+          new_starts timestamptz := nullif(merged ->> 'tripStartAt', '')::timestamptz;
+          new_ends timestamptz := nullif(merged ->> 'tripEndAt', '')::timestamptz;
+          new_pickup text := nullif(btrim(coalesce(merged ->> 'pickupAddress', '')), '');
           new_return text := nullif(btrim(coalesce(merged ->> 'returnLocation', '')), '');
         begin
           update public.onlyevs_trips t set

@@ -77,7 +77,24 @@ async function processParseJob(pool: Pool, job: EmailJob, workerId: string) {
     const row = selected.rows[0]; if (!row) throw new Error("email_inbound_missing");
     await client.query("update public.onlyevs_inbound_emails set state='processing',claimed_by=$2,claim_expires_at=now()+interval '2 minutes',attempt_count=attempt_count+1 where id=$1 and state='queued'", [row.id, workerId]);
     const normalized = await loadAndDecrypt(row);
-    const parsed = parseTuroEmail(normalized, approvedTuroTemplateFingerprints());
+    // The parser needs an IANA zone to resolve the email's local wall-clock
+    // trip times into a UTC instant. There is no per-vehicle timezone in the
+    // schema; the best available real signal for "what timezone does this
+    // rental operate in" is the workspace's own linked Google Calendar
+    // integration (same source lib/owner/google-calendar.ts already trusts
+    // for event-derived trip windows elsewhere). Left undefined -- same as
+    // before -- when no such integration is connected or it has no zone on
+    // file yet, so the existing trip_timezone_unresolved blocker still fires
+    // and nothing is ever guessed.
+    const calendarZone = await client.query<{ selected_calendar_timezone: string | null }>(
+      `select i.selected_calendar_timezone
+       from public.onlyevs_integrations i
+       join public.onlyevs_email_integrations ei on ei.workspace_id = i.workspace_id and ei.shop_slug = i.shop_slug
+       where ei.id = $1 and ei.workspace_id = $2 and i.provider = 'google_calendar'`,
+      [row.integration_id, row.workspace_id],
+    );
+    const vehicleTimeZone = calendarZone.rows[0]?.selected_calendar_timezone ?? undefined;
+    const parsed = parseTuroEmail(normalized, approvedTuroTemplateFingerprints(), { vehicleTimeZone });
     await client.query("begin");
     let priorLiveCandidateId: string | null = null;
     if (parsed.reservationId) {
@@ -178,7 +195,10 @@ function escapeHtml(value: string): string {
  * is never retried here; the delivery is left in 'sending' rather than
  * blind-resent, matching the "never blind-retry an ambiguous send" rule.
  */
-async function sendOwnerAlertForAction(pool: Pool, action: EmailActionRow, workerId: string) {
+// Exported (not otherwise part of the public module surface) solely so the
+// delivery-claim race fix has direct unit coverage -- see
+// services/onlyevs-worker/test/email-action-executor.test.ts.
+export async function sendOwnerAlertForAction(pool: Pool, action: EmailActionRow, workerId: string) {
   const client = await pool.connect();
   try {
     const already = await client.query<{ delivery_id: string | null }>(
@@ -227,10 +247,27 @@ async function sendOwnerAlertForAction(pool: Pool, action: EmailActionRow, worke
     );
     // Linking delivery_id does not touch `state`, so it never trips the
     // action's state-transition trigger; it is what makes this idempotent.
-    await client.query(
+    // The claim itself is a single atomic UPDATE (WHERE delivery_id is null),
+    // so it correctly serializes two concurrent callers -- but only if the
+    // *result* is checked. An overlapping call (e.g. a re-claimed outbox job
+    // after this one's lease expired mid-send, private.claim_onlyevs_due_email
+    // in 20260816003000_onlyevs_email_ingestion.sql) can reach this point with
+    // its own already.rows[0]?.delivery_id read having also seen null, and
+    // without this check would fall through and call SendGrid a second time
+    // for the same destructive-action alert regardless of which row this
+    // UPDATE actually touched.
+    const claim = await client.query(
       "update public.onlyevs_email_actions set delivery_id = $1 where id = $2 and delivery_id is null",
       [deliveryId, action.id],
     );
+    if (claim.rowCount === 0) {
+      // Lost the race: some other caller's claim already landed. Drop the
+      // orphaned delivery row we just inserted (it is unreferenced by any
+      // action and would otherwise sit in 'sending' forever) and never call
+      // SendGrid for it.
+      await client.query("delete from public.onlyevs_email_deliveries where id = $1", [deliveryId]);
+      return;
+    }
 
     try {
       await sendGridEmailAction({
@@ -288,11 +325,18 @@ async function processActionJob(pool: Pool, job: EmailJob, workerId: string) {
   // generous fixed horizon is used because the exact trip end date lives in
   // the candidate's facts, not known to the worker ahead of the call that
   // finally consumes it -- execute_onlyevs_email_action still rejects it if
-  // it turns out to be short of ends_at + 24h.
+  // it turns out to be short of ends_at + 24h. Bounded to 180 days rather
+  // than an open-ended horizon: Turo rentals are booked at most a handful of
+  // months out in practice, so this comfortably clears every realistic
+  // ends_at while capping the worst-case guest trip-link secret lifetime at
+  // ~6 months instead of ~2.7 years (both owner-facing callers of the
+  // shared core, app/api/owner/trips/{create,confirm}/route.ts, already
+  // compute a tight ends_at + 24h expiry since they know the real ends_at
+  // at request time -- only this blind-guess worker path needed bounding).
   const link = seed.action_type === "create_trip"
     ? createEncryptedTripLink({ workspaceId: job.workspace_id, shopSlug: seed.shop_slug })
     : null;
-  const linkExpiresAt = link ? new Date(Date.now() + 1_000 * 24 * 60 * 60 * 1_000) : null;
+  const linkExpiresAt = link ? new Date(Date.now() + 180 * 24 * 60 * 60 * 1_000) : null;
 
   let last: { state: string; revision: number } | null = null;
   let current: EmailActionRow = seed;

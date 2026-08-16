@@ -150,8 +150,15 @@ export async function confirmEmailCandidate(
  * Owner abort of an in-flight destructive action's revocation brake. Always
  * available regardless of the ONLYEVS_EMAIL_AUTO_* rollout gates -- those
  * gate whether the worker may act without a human, never whether a human can
- * stop it. `abort_onlyevs_email_revocation` re-checks state/deadline/
- * provider-claim on every call.
+ * stop it.
+ *
+ * Deliberately goes through `/api/owner/email-actions/[id]/abort-revocation`
+ * rather than calling `abort_onlyevs_email_revocation` directly the way
+ * `confirmEmailCandidate`/dismiss/archive do elsewhere in this file -- per
+ * that route's own header comment, abort gets a dedicated route *because* it
+ * is audited and destructive-adjacent, unlike those lower-stakes actions.
+ * The route re-verifies `getOwnerIntegrationCapabilities().turoEmail.
+ * intakeEnabled` and same-origin on every call before ever reaching the RPC.
  */
 export async function abortEmailRevocation(
   scope: VehicleWorkspaceScope,
@@ -159,11 +166,11 @@ export async function abortEmailRevocation(
   expectedRevision: number,
   reason: string,
 ) {
-  const { error } = await createClient().rpc("abort_onlyevs_email_revocation", {
-    p_workspace_id: scope.workspaceId,
-    p_action_id: actionId,
-    p_expected_revision: expectedRevision,
-    p_reason: reason,
+  const response = await fetch(`/api/owner/email-actions/${actionId}/abort-revocation`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ workspaceId: scope.workspaceId, shopSlug: scope.shopSlug, expectedRevision, reason }),
   });
-  if (error) throw new Error(error.message);
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  if (!response.ok) throw new Error(body?.error ?? "This revocation could not be aborted.");
 }

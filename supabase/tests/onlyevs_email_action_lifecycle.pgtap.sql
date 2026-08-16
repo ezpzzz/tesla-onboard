@@ -106,8 +106,13 @@ select pg_temp.seed_inbound('85000000-0000-4000-8000-000000000001', 'booking-res
 select pg_temp.seed_candidate(
   '86000000-0000-4000-8000-000000000001', '85000000-0000-4000-8000-000000000001', 'RES100', 'booking',
   jsonb_build_object(
-    'guestName', 'Taylor Reyes', 'guestEmail', 'taylor@example.com', 'timezone', 'America/Phoenix',
-    'startsAt', (now() + interval '2 days')::text, 'endsAt', (now() + interval '4 days')::text
+    -- Key names match lib/email/turo-parser.ts's actual proposedState output
+    -- (guestFirstName/tripTimeZone/tripStartAt/tripEndAt), not arbitrary
+    -- SQL-side names -- see the db_committing key-contract comment in
+    -- 20260816150000_onlyevs_email_action_lifecycle.sql. guestEmail has no
+    -- parser source and is included here to stand in for an owner correction.
+    'guestFirstName', 'Taylor Reyes', 'guestEmail', 'taylor@example.com', 'tripTimeZone', 'America/Phoenix',
+    'tripStartAt', (now() + interval '2 days')::text, 'tripEndAt', (now() + interval '4 days')::text
   ),
   now() - interval '10 minutes'
 );
@@ -345,9 +350,9 @@ begin
   perform pg_temp.seed_candidate(
     p_candidate_id, p_inbound_id, p_reservation, 'booking',
     jsonb_build_object(
-      'guestName', 'Prior Guest', 'guestEmail', 'prior@example.com', 'timezone', 'UTC',
-      'startsAt', (now() + make_interval(days => p_day_offset))::text,
-      'endsAt', (now() + make_interval(days => p_day_offset + 1))::text
+      'guestFirstName', 'Prior Guest', 'guestEmail', 'prior@example.com', 'tripTimeZone', 'UTC',
+      'tripStartAt', (now() + make_interval(days => p_day_offset))::text,
+      'tripEndAt', (now() + make_interval(days => p_day_offset + 1))::text
     ),
     now() - interval '1 hour'
   );
@@ -756,8 +761,8 @@ select pg_temp.seed_inbound('85000000-0000-4000-8000-000000000209', 'change-resa
 select pg_temp.seed_candidate(
   '86000000-0000-4000-8000-000000000209', '85000000-0000-4000-8000-000000000209', 'RESAU1', 'change',
   jsonb_build_object(
-    'startsAt', (now() + make_interval(days => 101))::text,
-    'endsAt', (now() + make_interval(days => 103))::text
+    'tripStartAt', (now() + make_interval(days => 101))::text,
+    'tripEndAt', (now() + make_interval(days => 103))::text
   ),
   now()
 );

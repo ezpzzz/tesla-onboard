@@ -16,6 +16,16 @@ export interface SendGridMessage {
   replyTo?: string | null;
   stableMessageId?: string;
   customArgs?: Record<string, string>;
+  /**
+   * Aborts the SendGrid request after this many ms, surfacing an "ambiguous"
+   * SendGridDeliveryError (see below) rather than hanging forever. Opt-in and
+   * omitted by default so `sendGridTripReminder` -- the pre-existing live
+   * owner-facing path -- keeps its original unbounded-wait call signature and
+   * behavior unchanged; only the email-action executor's dark
+   * `sendGridEmailAction` path (services/onlyevs-worker/email.ts, which holds
+   * a leased outbox job that must not block forever on a stuck fetch) opts in.
+   */
+  timeoutMs?: number;
 }
 
 export function sendGridConfigFromEnv(): SendGridConfig | null {
@@ -89,7 +99,7 @@ export async function sendGridMessage(
         ],
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(SENDGRID_SEND_TIMEOUT_MS),
+      ...(message.timeoutMs ? { signal: AbortSignal.timeout(message.timeoutMs) } : {}),
     });
   } catch (error) {
     // A network error or timeout means we never learned whether SendGrid
@@ -134,5 +144,6 @@ export async function sendGridEmailAction(input: {
       evhost_workspace_id: input.workspaceId,
       evhost_delivery_id: input.deliveryId,
     },
+    timeoutMs: SENDGRID_SEND_TIMEOUT_MS,
   });
 }

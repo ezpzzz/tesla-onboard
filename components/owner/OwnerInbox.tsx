@@ -46,7 +46,20 @@ type Filter = "all" | "needs_action" | "archived";
 type FetchStatus = "idle" | "loading" | "loaded" | "error";
 type MutateAction = "dismiss" | "archive" | "restore" | "confirm" | "abort";
 
-const CANDIDATE_ACTION_EVENT_TYPES = new Set(["booking", "change", "cancellation"]);
+/**
+ * Event types that can be Confirmed straight through the saga executor
+ * (`execute_onlyevs_email_action`'s `db_committing` step,
+ * `supabase/migrations/20260816150000_onlyevs_email_action_lifecycle.sql`).
+ * Deliberately excludes 'booking': create_trip requires a `guestEmail`, which
+ * Turo's booking-confirmation emails never expose (M1's extraction has no
+ * source for it) and this Inbox collects no correction for either -- Confirm
+ * would deterministically land every booking candidate in needs_review with
+ * `create_trip_facts_incomplete`. "Create trip manually" (rendered
+ * unconditionally for booking candidates below) is the one live path for a
+ * booking event in this build; 'change'/'cancellation' need no guest email
+ * (apply_update/cancel_trip) and confirm correctly.
+ */
+const CONFIRMABLE_EVENT_TYPES = new Set(["change", "cancellation"]);
 
 /**
  * Matches the shape `deriveAppliedCandidateTrip` (`lib/owner/
@@ -211,8 +224,13 @@ export function OwnerInbox() {
     const corrections: Record<string, string> = {};
     const startIso = localWallTimeToIso(correctionDraft.startsAt, facts.tripTimezone);
     const endIso = localWallTimeToIso(correctionDraft.endsAt, facts.tripTimezone);
-    if (facts.tripStartsAt && startIso !== new Date(facts.tripStartsAt).toISOString()) corrections.tripStartsAt = startIso;
-    if (facts.tripEndsAt && endIso !== new Date(facts.tripEndsAt).toISOString()) corrections.tripEndsAt = endIso;
+    // Key names here MUST match what execute_onlyevs_email_action's
+    // db_committing step reads off proposed_state/correction_facts --
+    // lib/email/turo-parser.ts's 'tripStartAt'/'tripEndAt' (see that
+    // migration's key-contract comment), not 'tripStartsAt'/'tripEndsAt'
+    // (the EmailCandidateFacts view-model field names below).
+    if (facts.tripStartsAt && startIso !== new Date(facts.tripStartsAt).toISOString()) corrections.tripStartAt = startIso;
+    if (facts.tripEndsAt && endIso !== new Date(facts.tripEndsAt).toISOString()) corrections.tripEndAt = endIso;
     void mutate("confirm", item, { corrections });
   }
 
@@ -413,7 +431,7 @@ function InboxCard({
 
 function InboxDetail({ item, facts, factsStatus, action, actionStatus, appliedTrip, correcting, correctionDraft, onBeginCorrection, onCorrectionDraftChange }: { item: OwnerInboxItem } & EnrichmentProps) {
   const now = useMinuteTicker(action?.state === "revocation_pending");
-  const canCorrect = facts?.tripStartsAt && facts?.tripEndsAt && facts?.tripTimezone && CANDIDATE_ACTION_EVENT_TYPES.has(item.eventType) && item.actionable;
+  const canCorrect = facts?.tripStartsAt && facts?.tripEndsAt && facts?.tripTimezone && CONFIRMABLE_EVENT_TYPES.has(item.eventType) && item.actionable;
   return (
     <div className="space-y-4">
       <div>
@@ -502,7 +520,7 @@ function InboxActions({
   facts: EmailCandidateFacts | undefined;
   onConfirmWithCorrections: (facts: EmailCandidateFacts) => void;
 }) {
-  const canConfirm = item.source === "turo_email" && item.actionable && CANDIDATE_ACTION_EVENT_TYPES.has(item.eventType);
+  const canConfirm = item.source === "turo_email" && item.actionable && CONFIRMABLE_EVENT_TYPES.has(item.eventType);
   // Turo emails never carry a guest email or a fleet vehicle id (M1's
   // extraction has no source for either) — buildPrefilledCreateTripHref
   // omits whatever facts are absent rather than emitting empty params.
