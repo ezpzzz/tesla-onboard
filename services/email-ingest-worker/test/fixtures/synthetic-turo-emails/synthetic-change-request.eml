@@ -39,6 +39,33 @@ Content-Transfer-Encoding: 7bit
 <p>You've confirmed Morgan's change request with your Tesla Model 3.</p>
 <p>Reservation #71298351 now has a new pickup time: Aug 21, 2026, 10:00 AM.</p>
 <p>Review the request in your Turo dashboard.</p>
+<table class="trip-details-wrapper">
+  <tr><td><div style="text-transform:uppercase">Trip start</div></td></tr>
+  <tr><td><strong>8/21/26</strong></td></tr>
+  <tr><td style="color:#898989">10:00 am</td></tr>
+</table>
+<table class="trip-details-wrapper">
+  <tr><td><div style="text-transform:uppercase">Trip end</div></td></tr>
+  <tr><td><strong>8/24/26</strong></td></tr>
+  <tr><td style="color:#898989">10:00 am</td></tr>
+</table>
+<p style="font-weight:900"><a href="https://turo.com/us/en/car-rental/united-states/denver-co/tesla/model-3/9990002">Tesla Model 3<span>2022</span></a></p>
+<div style="text-transform:uppercase">Location</div>
+<a href="http://maps.google.com/maps?f=q&amp;geocode=&amp;q=39.739200,-104.990300">
+  <table><tr><td align="center">1400 16th Street<br>Denver, CO</td></tr></table>
+</a>
+<p><a class="map-image-link" href="http://maps.google.com/maps?q=39.739200%2C-104.990300&amp;key=synthetic"><img src="http://maps.googleapis.com/maps/api/staticmap?center=39.739200%2C-104.990300&amp;zoom=16&amp;key=synthetic" border="0"></a></p>
+<style type="text/css">
+  @media only screen and (min-resolution: 2dppx) {
+    .map-image-link img {
+      content: url('http://maps.googleapis.com/maps/api/staticmap?center=39.739200%2C-104.990300&maptype=roadmap&zoom=16&size=360x186&scale=2&key=synthetic');
+    }
+  }
+</style>
+<div style="text-transform:uppercase">About the guest</div>
+<span><a href="https://turo.com/us/en/drivers/40010002"><img width="70" height="70" src="https://images.turo.com/media/driver/synth-avatar-morgan.300x300.jpg" style="border-radius:35px" alt="Morgan" title="Morgan"/></a></span>
+<a href="https://turo.com/us/en/drivers/40010002">Morgan</a>
+<a href="tel:+13035550199">(303) 555-0199</a>
 <p><em>This is a synthetic fixture message and does not describe a real trip.</em></p>
 </body></html>
 
