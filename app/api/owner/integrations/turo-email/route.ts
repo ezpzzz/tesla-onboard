@@ -5,6 +5,9 @@ import { encryptCredential, credentialKeyringFromEnv } from "@/lib/owner/credent
 import { requireOwnerWorkspace, OwnerWorkspaceAuthError } from "@/lib/owner/server-auth";
 import { createClient } from "@/lib/supabase/server";
 import { isSameOriginRequest } from "@/lib/request-origin";
+import { getOwnerIntegrationCapabilities } from "@/lib/owner/integration-capabilities";
+
+const INTAKE_GATED_ACTIONS = new Set(["setup", "rotate", "resume", "test"]);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +44,9 @@ export async function POST(request: NextRequest) {
   const shopSlug = body?.shopSlug?.trim() ?? "";
   try {
     const owner = await requireOwnerWorkspace(workspaceId, shopSlug, "admin");
+    if (body?.action && INTAKE_GATED_ACTIONS.has(body.action) && !getOwnerIntegrationCapabilities().turoEmail.intakeEnabled) {
+      return reply({ error: "Email intake is not configured on this deployment." }, 503);
+    }
     const supabase = await createClient();
     if (body?.action === "setup" || body?.action === "rotate") {
       const alias = createWorkspaceAlias(aliasKeyringFromEnv());

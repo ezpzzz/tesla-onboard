@@ -27,11 +27,13 @@ export function OwnerInbox() {
   const [hasMore, setHasMore] = useState(false);
   const snapshotAt = useRef(Date.now());
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const selectedRef = useRef<OwnerInboxItem | null>(null);
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
   const load = useCallback(async (append = false) => { if (!scope) { setLoading(false); return; } setLoading(true); try { if (!append) snapshotAt.current = Date.now(); const page = await fetchOwnerInbox(scope, snapshotAt.current, append ? cursor ?? undefined : undefined); setItems((current) => append ? [...current, ...page.items] : page.items); setCursor(page.nextCursor); setHasMore(page.hasMore); setError(null); } catch (cause) { setError(cause instanceof Error ? cause.message : "Inbox could not be loaded."); } finally { setLoading(false); } }, [cursor, scope]);
   useEffect(() => { void load(false); }, [scope?.key]);
   const visible = items.filter((item) => filter === "archived" ? item.archived : filter === "needs_action" ? item.actionable && !item.archived : !item.archived);
   const urgent = items.filter((item) => item.actionable && !item.archived).slice(0, 50);
-  function open(item: OwnerInboxItem) { setSelected((current) => current?.id === item.id ? null : item); if (window.matchMedia("(max-width: 767px)").matches) setTimeout(() => dialogRef.current?.showModal(), 0); }
+  function open(item: OwnerInboxItem) { const next = selected?.id === item.id ? null : item; setSelected(next); if (!window.matchMedia("(max-width: 767px)").matches) return; if (!next) { dialogRef.current?.close(); return; } if (!dialogRef.current?.open) setTimeout(() => { if (selectedRef.current && !dialogRef.current?.open) dialogRef.current?.showModal(); }, 0); }
   async function mutate(action: "dismiss" | "archive" | "restore", item: OwnerInboxItem) { if (!scope) return; setBusy(true); try { if (action === "dismiss") await dismissEmailInboxItem(scope, item); if (action === "archive") await archiveInboxItem(scope, item); if (action === "restore") await restoreInboxItem(scope, item); setSelected(null); dialogRef.current?.close(); setCursor(null); await load(false); } catch (cause) { setError(cause instanceof Error ? cause.message : "Inbox action failed."); } finally { setBusy(false); } }
   return <div className="space-y-5">
     {urgent.length ? <section className="rounded-lg border border-warn/30 bg-warn/[0.06] p-4" aria-label="Needs attention"><div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold text-ink">Needs attention</h2><p className="mt-1 text-sm text-muted">{urgent.length}{items.filter((item) => item.actionable && !item.archived).length > 50 ? "+" : ""} booking update{urgent.length === 1 ? "" : "s"} waiting for a decision.</p></div><Badge tone="warn">{urgent.length}</Badge></div></section> : null}

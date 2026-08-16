@@ -18,7 +18,10 @@ const RESERVATION_PATTERNS = [
 function eventType(subject: string): EmailCandidateEvent {
   const value = subject.toLowerCase();
   if (/\b(cancelled|canceled)\b/.test(value)) return "cancellation";
-  if (/\b(changed|updated|change to)\b/.test(value)) return "change";
+  // "change request" covers Turo's real ApprovedChangeRequestBookedOwner subject
+  // ("You've confirmed <Name>'s change request with your Tesla Model 3"), which
+  // otherwise falls through to "unknown".
+  if (/\b(changed|updated|change to|change request)\b/.test(value)) return "change";
   if (/\b(is booked|trip booked|booked!)\b/.test(value)) return "booking";
   if (/\b(sent you a message|new message)\b/.test(value)) return "guest_message";
   if (/earnings|reimbursement|rated their trip|receipt|invoice/.test(value)) return "noise";
@@ -27,11 +30,33 @@ function eventType(subject: string): EmailCandidateEvent {
 
 function fingerprint(subject: string): string {
   const shape = subject.toLowerCase()
+    // Turo's real subjects embed the guest's first name directly in otherwise
+    // fixed templates ("<Name>'s trip with your Tesla Model 3 is booked!",
+    // "<Name> has sent you a message about your Tesla Model 3", "You've
+    // confirmed <Name>'s change request with your Tesla Model 3", "<Name> has
+    // been charged for your reimbursement invoice"). Without generalizing the
+    // name token, every guest mints a distinct fingerprint for the same
+    // template, which defeats the human-approved-per-fingerprint allowlist.
+    // Replace a possessive name token anywhere it appears ("<name>'s trip...",
+    // "confirmed <name>'s change request...") and a leading name token before
+    // " has " ("<name> has sent...", "<name> has been charged..."). This is
+    // intentionally conservative but can over-generalize on the lowercased
+    // subject (e.g. a leading "tesla's ..." would also collapse to "<name>'s
+    // ..."). That's acceptable: normalization only needs to be deterministic
+    // and collision-safe within Turo's known template space, and a slightly
+    // wider bucket is still safe because nothing is auto-approved from it —
+    // every fingerprint still requires human review before entering the
+    // allowlist.
+    .replace(/\b[a-z][a-z'’.-]*['’]s\b/g, "<name>'s")
+    .replace(/^[a-z][a-z'’.-]*(?=\s+has\s)/, "<name>")
     .replace(/\b\d+\b/g, "#")
     .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g, "<email>")
     .replace(/\s+/g, " ")
     .trim();
-  return createHash("sha256").update(`turo-subject-v1\u001f${shape}`).digest("hex");
+  // v2: adds the name-generalization pass above. Bumped so a v1 hash can
+  // never be confused with a v2 hash (the allowlist env var is always empty,
+  // so this bump ships with nothing to migrate).
+  return createHash("sha256").update(`turo-subject-v2\u001f${shape}`).digest("hex");
 }
 
 export function parseTuroEmail(

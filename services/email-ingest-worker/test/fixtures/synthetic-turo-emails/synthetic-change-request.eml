@@ -1,0 +1,45 @@
+Return-Path: <0000000000000002-00000000-0000-0000-0000-000000000005-000000@return.mail.turo.com>
+Received: from mail.turo.com (mail.turo.com [198.51.100.11])
+	by mx.mail.evhost.app with ESMTPS id sYNTH0002 for <b2c3d4e5f6g7h8i9j0k1.l2m3n4o5p6q7r8s9@mail.evhost.app>;
+	Sun, 16 Aug 2026 09:14:52 +0000 (UTC)
+Authentication-Results: mx.mail.evhost.app;
+	dkim=pass header.i=@mail.turo.com header.s=s1 header.b=cDeFgHiJ;
+	dkim=pass header.i=@amazonses.com header.s=s2 header.b=kLmNoPqR;
+	spf=pass (mx.mail.evhost.app: domain of 0000000000000002-00000000-0000-0000-0000-000000000005-000000@return.mail.turo.com designates 198.51.100.11 as permitted sender) smtp.mailfrom=0000000000000002-00000000-0000-0000-0000-000000000005-000000@return.mail.turo.com;
+	dmarc=pass (p=REJECT sp=QUARANTINE dis=NONE) header.from=turo.com
+From: Turo <noreply@mail.turo.com>
+To: b2c3d4e5f6g7h8i9j0k1.l2m3n4o5p6q7r8s9@mail.evhost.app
+Subject: You've confirmed Morgan's change request with your Tesla Model 3
+Date: Sun, 16 Aug 2026 09:14:50 +0000
+Message-ID: <0000000000000002-00000000-0000-0000-0000-000000000005-000000@email.amazonses.com>
+MIME-Version: 1.0
+X-EVhost-Synthetic: true
+Content-Type: multipart/alternative; boundary="synth-boundary-change-0002"
+Driver-ID: 1000001
+Notification-Name: ApprovedChangeRequestBookedOwner
+Reservation-ID: 71298351
+
+--synth-boundary-change-0002
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+You've confirmed Morgan's change request with your Tesla Model 3.
+
+Reservation #71298351 now has a new pickup time: Aug 21, 2026, 10:00 AM.
+
+Review the request in your Turo dashboard.
+
+This is a synthetic fixture message and does not describe a real trip.
+
+--synth-boundary-change-0002
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+<html><body>
+<p>You've confirmed Morgan's change request with your Tesla Model 3.</p>
+<p>Reservation #71298351 now has a new pickup time: Aug 21, 2026, 10:00 AM.</p>
+<p>Review the request in your Turo dashboard.</p>
+<p><em>This is a synthetic fixture message and does not describe a real trip.</em></p>
+</body></html>
+
+--synth-boundary-change-0002--

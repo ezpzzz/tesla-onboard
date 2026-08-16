@@ -130,4 +130,15 @@ describe("owner integration capabilities", () => {
       ONLYEVS_OAUTH_STATE_SECRET: "o".repeat(32),
     }).googleCalendar.connectionEnabled).toBe(true);
   });
+
+  it("keeps Turo email intake disabled until the operator flag is explicitly enabled", () => {
+    const withoutFlag = deriveOwnerIntegrationCapabilities(baseEnv);
+    expect(withoutFlag.turoEmail).toEqual({ configured: true, intakeEnabled: false, automationEnabled: false });
+
+    const withFlag = deriveOwnerIntegrationCapabilities({
+      ...baseEnv,
+      EVHOST_EMAIL_INGEST_ENABLED: "true",
+    });
+    expect(withFlag.turoEmail.intakeEnabled).toBe(true);
+  });
 });

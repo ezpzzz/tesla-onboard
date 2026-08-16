@@ -1,0 +1,41 @@
+Return-Path: <marketing-bounce@mail.turo.com>
+Received: from mail.turo.com (mail.turo.com [198.51.100.14])
+	by mx.mail.evhost.app with ESMTPS id sYNTH0005 for <e5f6g7h8i9j0k1l2m3n4.o5p6q7r8s9t0u1v2@mail.evhost.app>;
+	Tue, 18 Aug 2026 12:00:11 +0000 (UTC)
+Authentication-Results: mx.mail.evhost.app;
+	dkim=none header.i=@mail.turo.com;
+	spf=neutral (mx.mail.evhost.app: 198.51.100.14 is neither permitted nor denied by domain of marketing-bounce@mail.turo.com) smtp.mailfrom=marketing-bounce@mail.turo.com;
+	dmarc=fail (p=REJECT sp=REJECT dis=NONE) header.from=mail.turo.com
+From: "Turo" <marketing-bounce@mail.turo.com>
+Reply-To: no-reply@mail.turo.com
+To: e5f6g7h8i9j0k1l2m3n4.o5p6q7r8s9t0u1v2@mail.evhost.app
+Subject: Reimbursement invoice
+Date: Tue, 18 Aug 2026 12:00:09 +0000
+Message-ID: <synthetic-noise-0005.20260818120009@mail.turo.com>
+MIME-Version: 1.0
+X-EVhost-Synthetic: true
+Content-Type: multipart/alternative; boundary="synth-boundary-noise-0005"
+Driver-ID: 1000001
+Notification-Name: ReimbursementSubmittedOwner
+
+--synth-boundary-noise-0005
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+A reimbursement invoice has been submitted for your review.
+
+See the full breakdown in your Turo dashboard.
+
+This is a synthetic fixture message and does not describe a real invoice.
+
+--synth-boundary-noise-0005
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+<html><body>
+<p>A reimbursement invoice has been submitted for your review.</p>
+<p>See the full breakdown in your Turo dashboard.</p>
+<p><em>This is a synthetic fixture message and does not describe a real invoice.</em></p>
+</body></html>
+
+--synth-boundary-noise-0005--

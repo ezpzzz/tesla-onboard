@@ -21,11 +21,53 @@ export interface OwnerInboxItem {
 export interface OwnerInboxCursor { occurredAt: number; source: OwnerInboxItem["source"]; id: string }
 export interface OwnerInboxPage { items: OwnerInboxItem[]; nextCursor: OwnerInboxCursor | null; hasMore: boolean }
 
+/**
+ * Pure scoping decision: given the integration rows resolved for a workspace+shop,
+ * decide whether the email-candidates query should run at all, and if so, which
+ * integration ids it must be scoped to. The tenant-security boundary is RLS
+ * (`has_minimum_role(workspace_id, ..., 'manager')`), which is workspace-scoped, not
+ * this function. This scoping exists to prevent within-workspace cross-shop
+ * presentation bleed — a manager who already has workspace access seeing another
+ * shop's email candidates in this view — by only passing through integration ids
+ * that belong to the *active* shop's rows.
+ */
+export function resolveEmailIntegrationScope(
+  integrationRows: Array<{ id: string }>,
+): { shouldQuery: false; integrationIds: [] } | { shouldQuery: true; integrationIds: string[] } {
+  const integrationIds = integrationRows.map((row) => row.id);
+  if (integrationIds.length === 0) return { shouldQuery: false, integrationIds: [] };
+  return { shouldQuery: true, integrationIds };
+}
+
+/**
+ * Pure merge/sort/paginate step shared by fetchOwnerInbox: combines already-shaped
+ * email + calendar items, sorts newest-first with a stable tiebreak, applies the
+ * cursor exclusion, and slices to a page of `pageSize` returning the next cursor.
+ */
+export function paginateInboxItems(
+  emailItems: OwnerInboxItem[],
+  calendarItems: OwnerInboxItem[],
+  before?: OwnerInboxCursor,
+  pageSize = 50,
+): OwnerInboxPage {
+  const ordered = [...emailItems, ...calendarItems]
+    .sort((a, b) => b.occurredAt - a.occurredAt || a.source.localeCompare(b.source) || a.id.localeCompare(b.id))
+    .filter((item) => !before || item.occurredAt < before.occurredAt || (item.occurredAt === before.occurredAt && (item.source > before.source || (item.source === before.source && item.id > before.id))));
+  const items = ordered.slice(0, pageSize);
+  const last = items.at(-1);
+  return { items, hasMore: ordered.length > items.length, nextCursor: last ? { occurredAt: last.occurredAt, source: last.source, id: last.id } : null };
+}
+
 export async function fetchOwnerInbox(scope: VehicleWorkspaceScope, snapshotAt = Date.now(), before?: OwnerInboxCursor): Promise<OwnerInboxPage> {
   const client = createClient();
   const ceiling = new Date(Math.min(snapshotAt, before?.occurredAt ?? snapshotAt)).toISOString();
+  const integrations = await client.from("onlyevs_email_integrations").select("id").eq("workspace_id", scope.workspaceId).eq("shop_slug", scope.shopSlug);
+  if (integrations.error) throw new Error(integrations.error.message);
+  const emailScope = resolveEmailIntegrationScope(integrations.data ?? []);
   const [emails, calendars, archives] = await Promise.all([
-    client.from("onlyevs_email_candidates").select("id,event_type,reservation_id,proposed_state,blocker_codes,state,occurred_at,revision").eq("workspace_id", scope.workspaceId).lte("occurred_at", ceiling).order("occurred_at", { ascending: false }).limit(100),
+    emailScope.shouldQuery
+      ? client.from("onlyevs_email_candidates").select("id,event_type,reservation_id,proposed_state,blocker_codes,state,occurred_at,revision").eq("workspace_id", scope.workspaceId).in("integration_id", emailScope.integrationIds).lte("occurred_at", ceiling).order("occurred_at", { ascending: false }).limit(100)
+      : { data: [], error: null },
     client.from("onlyevs_calendar_candidates").select("id,summary,starts_at,status,change_kind,source_updated_at,revision").eq("workspace_id", scope.workspaceId).eq("shop_slug", scope.shopSlug).or(`source_updated_at.lte.${ceiling},and(source_updated_at.is.null,starts_at.lte.${ceiling})`).order("source_updated_at", { ascending: false }).limit(100),
     client.from("onlyevs_inbox_archives").select("id,email_candidate_id,calendar_candidate_id").eq("workspace_id", scope.workspaceId),
   ]);
@@ -46,12 +88,7 @@ export async function fetchOwnerInbox(scope: VehicleWorkspaceScope, snapshotAt =
     const archiveId = archivedCalendar.get(row.id) ?? null;
     return { id: row.id, source: "google_calendar", occurredAt: Date.parse(row.source_updated_at ?? row.starts_at), title: row.summary, detail: new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(Date.parse(row.starts_at)), state: row.status, eventType: row.change_kind ?? "calendar_event", actionable: ["pending","needs_review"].includes(row.status), archived: Boolean(archiveId), archiveId, revision: row.revision, blockerCodes: [] };
   });
-  const ordered = [...emailItems, ...calendarItems]
-    .sort((a, b) => b.occurredAt - a.occurredAt || a.source.localeCompare(b.source) || a.id.localeCompare(b.id))
-    .filter((item) => !before || item.occurredAt < before.occurredAt || (item.occurredAt === before.occurredAt && (item.source > before.source || (item.source === before.source && item.id > before.id))));
-  const items = ordered.slice(0, 50);
-  const last = items.at(-1);
-  return { items, hasMore: ordered.length > items.length, nextCursor: last ? { occurredAt: last.occurredAt, source: last.source, id: last.id } : null };
+  return paginateInboxItems(emailItems, calendarItems, before);
 }
 
 export async function dismissEmailInboxItem(scope: VehicleWorkspaceScope, item: OwnerInboxItem) {
