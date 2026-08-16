@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — 2026-08-15
+
+- Add an always-available owner Integrations center with honest Tesla Fleet and Google Calendar connection health, actions, and setup states.
+- Keep safe, read-only Tesla fleet import available while commands, telemetry, and automatic access remain behind verified operations infrastructure.
+- Enable Google Calendar OAuth and initial event import independently of background operations, with imported events visible in the Trips review queue.
+- Keep trip confirmation and access scheduling fail-closed until the operations service passes its production gates.
+- Prevent cross-workspace connection-state flashes and validate credential keyrings with the same exact parser used by production encryption.
+- Improve OAuth recovery for origin mismatch, expired sessions, denied access, missing persistent grants, and workspace authorization changes.
+
+### For contributors
+
+- Add callback and capability coverage for OAuth state validation, provider configuration, initial import, empty calendars, encrypted persistence, ingestion failures, and operations-off behavior.
+- Document the provider-specific deployment gates and environment variables required for live integrations.
+
 ## 0.4.1 — 2026-08-15
 
 - Keep the mobile guest-invitation drawer within the viewport, including native date controls, and limit its scroll surface to vertical movement.
