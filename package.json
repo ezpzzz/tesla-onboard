@@ -9,7 +9,7 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:worker-email": "pnpm --filter @evhost/email-ingest-worker test",
+    "test:worker-email": "cd services/email-ingest-worker/workerd-tests && pnpm install --silent && pnpm vitest run",
     "test:e2e": "playwright test",
     "worker": "tsx services/onlyevs-worker/index.ts"
   },

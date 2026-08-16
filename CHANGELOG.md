@@ -11,7 +11,7 @@
 
 - Keep every email-ingestion feature flag default-false; no gate flips as part of this release.
 - `EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY` is renamed to the plural, versioned `EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEYS` (`"1:<key>,2:<key>"`; a bare value is still accepted as version 1). The code reads the old singular name as a temporary fallback when the plural one is unset, so this deploy will not start rejecting SendGrid webhook events on an environment that hasn't been updated yet — still update any configured deployment's env var name to the plural form at your convenience, since the fallback will be removed in a future release.
-- Run the new Workers-runtime suite with `pnpm test:worker-email`.
+- The Workers-runtime suite for the email-ingest handler lives in `services/email-ingest-worker/workerd-tests/`, an isolated, opt-in test harness kept **outside** the pnpm workspace (see that directory's README.md; it is not matched by any `pnpm-workspace.yaml` glob). Running `pnpm test:worker-email` installs `vitest` + `@cloudflare/vitest-pool-workers` — and transitively `workerd`, `miniflare`, and `wrangler` — into that harness only, via its own `pnpm-workspace.yaml` and lockfile. The root workspace dependency graph is unchanged from 0.6.0: `pnpm-lock.yaml` is byte-identical to 0.6.0's, and neither `@cloudflare/vitest-pool-workers` nor any of its transitive deps enter it.
 
 ## 0.6.0 — 2026-08-16
 

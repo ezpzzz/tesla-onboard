@@ -1,14 +1,16 @@
 import { env as realEnv } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { EMAIL_MAX_RAW_BYTES } from "@evhost/email-ingest-contract";
-import worker from "../src/index";
-// Reuse the existing synthetic fixture -- it's already reviewed content
-// (see test/fixtures/synthetic-turo-emails/README.md), never a real capture.
-// `?raw` is a Vite build-time string import: the Workers pool bundles the
-// content directly, since there is no filesystem inside workerd at runtime.
-import syntheticBookingEml from "./fixtures/synthetic-turo-emails/synthetic-booking-confirmed.eml?raw";
+import worker from "../../src/index";
+// Reuse the existing synthetic fixture from the workspace package's test
+// dir -- it's already reviewed content (see
+// ../../test/fixtures/synthetic-turo-emails/README.md), never a real
+// capture. `?raw` is a Vite build-time string import: the Workers pool
+// bundles the content directly, since there is no filesystem inside workerd
+// at runtime.
+import syntheticBookingEml from "../../test/fixtures/synthetic-turo-emails/synthetic-booking-confirmed.eml?raw";
 
-// Exercises the REAL `email()` handler in src/index.ts end-to-end inside
+// Exercises the REAL `email()` handler in ../../src/index.ts end-to-end inside
 // Miniflare/workerd -- authorize -> read/parse -> encrypt -> capture-init ->
 // R2 put -> capture-finalize -- against the real EMAIL_BUCKET R2 binding
 // declared in wrangler.jsonc. The app-origin HTTP calls the worker makes via

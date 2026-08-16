@@ -207,9 +207,12 @@ Miniflare/workerd against the real `EMAIL_BUCKET` R2 binding (not a Node
 mock), covering the happy path (authorize → encrypt → R2 put → finalize),
 intake-disabled reject, unknown-alias reject, oversize reject, and a
 malformed-phase-response collapsing into the same generic reject. Run it
-with `pnpm test:worker-email` from the repo root (wired to
-`services/email-ingest-worker`'s own `pnpm test`, using its package-local
-`vitest.config.ts` and `@cloudflare/vitest-pool-workers`). This suite is
+with `pnpm test:worker-email` from the repo root. As of the post-audit
+restructure, this suite lives in the standalone, opt-in
+`services/email-ingest-worker/workerd-tests/` harness (its own
+`pnpm-workspace.yaml`, `package.json`, and lockfile), kept outside the pnpm
+workspace so the workers-pool test tooling never enters the root
+`pnpm-lock.yaml` — see that directory's README.md. This suite is
 infrastructure/regression coverage for the ingest transport, not gate-2
 template-classification evidence, and carries no bearing on the fingerprint
 approval question below.

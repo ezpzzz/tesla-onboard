@@ -37,6 +37,7 @@
   ],
   "exclude": [
     "node_modules",
-    "services/**/*.workers.spec.ts"
+    "services/**/*.workers.spec.ts",
+    "services/email-ingest-worker/workerd-tests"
   ]
 }
