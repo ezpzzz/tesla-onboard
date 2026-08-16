@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.0 — 2026-08-16
+
+- Add the Turo email action executor: a manager-authenticated confirm/abort saga for booking, change, and cancellation candidates, with a 30-minute destructive-action brake before any provider-facing revoke proceeds. Still fully dark — automation stays behind the default-false `ONLYEVS_EMAIL_WORKER_ENABLED` and `ONLYEVS_EMAIL_AUTO_*` gates end to end; confirm/abort remain manual owner actions.
+- Enrich parsed Turo emails with guest avatar/phone/message, vehicle name/year, DST-aware pickup-address and trip-window facts, surfaced in the owner Inbox with a live countdown/Abort control for in-flight destructive actions and a real Confirm action for pending candidates.
+- Add Workers-runtime test coverage for the email-ingest handler running inside Miniflare/workerd against a real R2 binding, and close the cancellation-template evidence gap with a captured real sample.
+- Version the SendGrid Event Webhook's signing keyring and fix a per-source pagination-depth bug in the owner Inbox query.
+
+### For contributors
+
+- Keep every email-ingestion feature flag default-false; no gate flips as part of this release.
+- `EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY` is renamed to the plural, versioned `EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEYS` (`"1:<key>,2:<key>"`; a bare value is still accepted as version 1) — update any configured deployment's env var name at rollout time.
+- Run the new Workers-runtime suite with `pnpm test:worker-email`.
+
 ## 0.6.0 — 2026-08-16
 
 - Add a private Turo email intake pipeline for booking notifications, kept dark and Review-only behind default-false gates end to end.
