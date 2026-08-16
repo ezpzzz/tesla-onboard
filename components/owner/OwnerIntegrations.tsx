@@ -49,6 +49,7 @@ function oauthMessage(code: string): string {
     case "config": return "Google Calendar needs administrator setup before it can connect.";
     case "denied": return "Google Calendar access was cancelled. No changes were made.";
     case "session": return "Your owner session expired. Sign in and try again.";
+    case "workspace_access": return "You no longer have permission to manage integrations for this workspace.";
     case "origin_mismatch": return "Open evhost.app at its configured domain and try again.";
     case "persistent_grant_missing": return "Google did not grant background calendar access. Reconnect and approve the requested permission.";
     default: return "Google Calendar could not connect. Try again or contact support.";
@@ -61,7 +62,14 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
     () => vehicleWorkspaceScope(workspace?.tenantRef),
     [workspace?.tenantRef],
   );
-  const [integrations, setIntegrations] = useState<OwnerIntegration[]>([]);
+  const scopeKey = scope ? `${scope.workspaceId}:${scope.shopSlug}` : null;
+  const [connectionState, setConnectionState] = useState<{
+    scopeKey: string | null;
+    integrations: OwnerIntegration[];
+  }>({ scopeKey: null, integrations: [] });
+  const integrations = connectionState.scopeKey === scopeKey
+    ? connectionState.integrations
+    : [];
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<IntegrationProvider | null>(null);
@@ -70,13 +78,16 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
   const load = useCallback(async () => {
     const version = ++requestVersion.current;
     if (!scope) {
+      setConnectionState({ scopeKey: null, integrations: [] });
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
       const next = await fetchOwnerIntegrations(scope);
-      if (version === requestVersion.current) setIntegrations(next);
+      if (version === requestVersion.current) {
+        setConnectionState({ scopeKey, integrations: next });
+      }
     } catch (error) {
       if (version === requestVersion.current) {
         setMessage(error instanceof Error ? error.message : "Connections could not be loaded.");
@@ -84,7 +95,7 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
     } finally {
       if (version === requestVersion.current) setLoading(false);
     }
-  }, [scope]);
+  }, [scope, scopeKey]);
 
   useEffect(() => {
     setMessage(null);

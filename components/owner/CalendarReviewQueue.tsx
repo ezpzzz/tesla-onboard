@@ -22,7 +22,13 @@ function eventWindow(candidate: CalendarCandidate): string {
   return `${formatter.format(candidate.startAt)} – ${formatter.format(candidate.endAt)}`;
 }
 
-export function CalendarReviewQueue({ vehicles }: { vehicles: Vehicle[] }) {
+export function CalendarReviewQueue({
+  vehicles,
+  confirmationEnabled,
+}: {
+  vehicles: Vehicle[];
+  confirmationEnabled: boolean;
+}) {
   const { workspace } = useOwnerTenant();
   const scope = useMemo(
     () => vehicleWorkspaceScope(workspace?.tenantRef),
@@ -133,7 +139,9 @@ export function CalendarReviewQueue({ vehicles }: { vehicles: Vehicle[] }) {
           {candidates.length > 0 ? <Badge tone="warn">{candidates.length} pending</Badge> : null}
         </div>
         <p className="mt-1 text-sm text-muted">
-          Calendar events are suggestions. Confirm the guest and vehicle before access is scheduled; later provider changes require an explicit decision here.
+          {confirmationEnabled
+            ? "Calendar events are suggestions. Confirm the guest and vehicle before access is scheduled; later provider changes require an explicit decision here."
+            : "Calendar events are suggestions. Review or dismiss each import here. Trip confirmation becomes available after the operations service passes its production gates."}
         </p>
       </div>
       {message ? <div role="status" className="rounded-md border border-line bg-white p-3 text-sm text-ink-soft">{message}</div> : null}
@@ -172,7 +180,14 @@ export function CalendarReviewQueue({ vehicles }: { vehicles: Vehicle[] }) {
                 </>
               ) : (
                 <>
-                  <Button variant="secondary" onClick={() => begin(candidate)} disabled={busy || activeVehicles.length === 0}>Review</Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => begin(candidate)}
+                    disabled={busy || activeVehicles.length === 0 || !confirmationEnabled}
+                    title={confirmationEnabled ? undefined : "Trip confirmation requires the operations service"}
+                  >
+                    {confirmationEnabled ? "Review" : "Review unavailable"}
+                  </Button>
                   <Button variant="ghost" onClick={() => void dismiss(candidate)} disabled={busy}>Dismiss</Button>
                 </>
               )}

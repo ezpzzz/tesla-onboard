@@ -1,3 +1,5 @@
+import { parseCredentialKeyring } from "@/lib/owner/credential-envelope";
+
 export type TeslaConnectionMode = "durable" | "fleet_import" | "unavailable";
 
 export interface OwnerIntegrationCapabilities {
@@ -30,16 +32,12 @@ function validUrl(value: string | undefined): boolean {
 }
 
 function hasValidKeyring(value: string | undefined): boolean {
-  if (!value) return false;
-  return value.split(",").some((entry) => {
-    const separator = entry.indexOf(":");
-    if (separator < 1) return false;
-    try {
-      return Buffer.from(entry.slice(separator + 1), "base64").byteLength === 32;
-    } catch {
-      return false;
-    }
-  });
+  try {
+    parseCredentialKeyring(value ?? "");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -7,7 +7,7 @@ const baseEnv = {
   TESLA_CLIENT_SECRET: "tesla-secret",
   TESLA_OWNER_REDIRECT_URI: "https://evhost.app/auth/owner/tesla/callback",
   TESLA_SESSION_SECRET: "s".repeat(32),
-  ONLYEVS_DATA_ENCRYPTION_KEYS: `v1:${Buffer.alloc(32, 7).toString("base64")}`,
+  ONLYEVS_DATA_ENCRYPTION_KEYS: `1:${Buffer.alloc(32, 7).toString("base64")}`,
 };
 
 describe("owner integration capabilities", () => {
@@ -71,6 +71,18 @@ describe("owner integration capabilities", () => {
       connectionEnabled: false,
       automaticSyncEnabled: false,
     });
+  });
+
+  it("uses the production keyring parser instead of accepting a decodable but invalid entry", () => {
+    const capabilities = deriveOwnerIntegrationCapabilities({
+      ...baseEnv,
+      GOOGLE_CALENDAR_CLIENT_ID: "google-client",
+      GOOGLE_CALENDAR_CLIENT_SECRET: "google-secret",
+      GOOGLE_CALENDAR_REDIRECT_URI: "https://evhost.app/auth/owner/google/callback",
+      ONLYEVS_DATA_ENCRYPTION_KEYS: `not-a-version:${Buffer.alloc(32, 7).toString("base64")}`,
+    });
+
+    expect(capabilities.googleCalendar.connectionEnabled).toBe(false);
   });
 
   it("never advertises mock Tesla import in a production runtime", () => {

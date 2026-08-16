@@ -67,6 +67,13 @@ export async function GET(request: NextRequest) {
 
   try {
     await requireOwnerWorkspace(state.workspaceId, state.shopSlug, "admin");
+  } catch (error) {
+    return fail(error instanceof Error && error.message === "unauthenticated"
+      ? "session"
+      : "workspace_access");
+  }
+
+  try {
     if (!getOwnerIntegrationCapabilities().googleCalendar.connectionEnabled) {
       return fail("config");
     }
