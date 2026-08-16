@@ -297,9 +297,11 @@ prefilled-create handoff round-trip.
 ### M5 — Workers-runtime tests + DKIM analysis (analysis already delivered above)
 
 **Owns:**
-- `services/email-ingest-worker/package.json` — add `@cloudflare/vitest-pool-workers` (and `vitest`, matching the
-  root's `4.1.10` if compatible, else the nearest compatible pin) as devDependencies **local to this package**
-  (root `vitest` stays Node-only; do not add Workers pool config to the root `vitest.config`).
+- `services/email-ingest-worker/workerd-tests/` — an isolated, opt-in test harness living outside the pnpm
+  workspace. It installs `@cloudflare/vitest-pool-workers` (and `vitest`, matching the root's `4.1.10` if
+  compatible, else the nearest compatible pin) on demand when `pnpm test:worker-email` runs; the package is
+  **not** a workspace devDependency and does not appear in the workspace dependency graph (root `vitest` stays
+  Node-only; do not add Workers pool config to the root `vitest.config`).
 - New file: `services/email-ingest-worker/vitest.config.ts` using `@cloudflare/vitest-pool-workers`, configured
   against `wrangler.jsonc`'s existing `EMAIL_BUCKET` R2 binding with **isolated storage per test** (miniflare's
   isolated-storage mode) so tests never share R2 state across runs or across each other.
