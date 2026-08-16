@@ -9,6 +9,7 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:worker-email": "pnpm --filter @evhost/email-ingest-worker test",
     "test:e2e": "playwright test",
     "worker": "tsx services/onlyevs-worker/index.ts"
   },
