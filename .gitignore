@@ -44,3 +44,6 @@ yarn-error.log*
 
 # ...but keep the documented, secret-free template
 !.env.example
+
+# turo email examples
+.turo-email-examples

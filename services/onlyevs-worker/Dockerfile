@@ -11,6 +11,7 @@ RUN corepack enable
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY lib ./lib
+COPY packages ./packages
 COPY services/onlyevs-worker ./services/onlyevs-worker
 USER node
 CMD ["./node_modules/.bin/tsx", "services/onlyevs-worker/index.ts"]

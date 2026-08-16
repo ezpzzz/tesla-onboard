@@ -5,7 +5,7 @@ const ROUTES = [
   ["/owner/trips", "Trips"],
   ["/owner/drivers", "Guests"],
   ["/owner/vehicles", "Vehicles"],
-  ["/owner/insights", "Insights"],
+  ["/owner/inbox", "Inbox"],
   ["/owner/integrations", "Integrations"],
   ["/owner/settings", "Settings"],
   ["/owner/account", "Account"],
@@ -32,6 +32,7 @@ test("integrations stays useful when background operations are disabled", async 
 
   await expect(page.getByRole("heading", { name: "Tesla Fleet", level: 2 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Google Calendar", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Turo email forwarding", level: 2 })).toBeVisible();
   await expect(page.getByText("Operations integrations are disabled")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Import Tesla fleet" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Setup required" })).toBeDisabled();
@@ -58,6 +59,13 @@ test("Google Calendar OAuth outcomes are announced and removed from browser hist
   await expect(page).toHaveURL(/\/owner\/integrations$/);
 
   await page.goto("/owner/integrations?google_calendar_connected=1");
-  await expect(page.getByRole("status")).toContainText("Imported events are ready to review on Trips");
+  await expect(page.getByRole("status")).toContainText("Imported events are ready to review in Inbox");
   await expect(page).toHaveURL(/\/owner\/integrations$/);
+});
+
+test("legacy Insights routes into the responsive Inbox", async ({ page }) => {
+  await page.goto("/owner/insights");
+  await expect(page).toHaveURL("/owner/inbox");
+  await expect(page.getByRole("heading", { name: "Inbox", level: 1 })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: /Owner tabs|Owner navigation/ }).getByRole("link", { name: "Inbox" })).toHaveAttribute("aria-current", "page");
 });

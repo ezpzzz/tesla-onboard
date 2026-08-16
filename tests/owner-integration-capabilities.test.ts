@@ -8,6 +8,7 @@ const baseEnv = {
   TESLA_OWNER_REDIRECT_URI: "https://evhost.app/auth/owner/tesla/callback",
   TESLA_SESSION_SECRET: "s".repeat(32),
   ONLYEVS_DATA_ENCRYPTION_KEYS: `1:${Buffer.alloc(32, 7).toString("base64")}`,
+  EVHOST_EMAIL_ALIAS_HMAC_KEYS: `1:${Buffer.alloc(32, 8).toString("base64")}`,
 };
 
 describe("owner integration capabilities", () => {
@@ -23,6 +24,7 @@ describe("owner integration capabilities", () => {
       configured: true,
     });
     expect(capabilities.googleCalendar.connectionEnabled).toBe(false);
+    expect(capabilities.turoEmail).toEqual({ configured: true, intakeEnabled: false, automationEnabled: false });
   });
 
   it("allows an initial Google Calendar import without claiming automatic refresh", () => {
@@ -39,6 +41,7 @@ describe("owner integration capabilities", () => {
       connectionEnabled: true,
       automaticSyncEnabled: false,
     });
+    expect(capabilities.turoEmail.intakeEnabled).toBe(false);
   });
 
   it("enables durable Tesla operations and automatic calendar sync only behind the operations gate", () => {
@@ -52,6 +55,7 @@ describe("owner integration capabilities", () => {
 
     expect(capabilities.tesla.connectionMode).toBe("durable");
     expect(capabilities.googleCalendar.automaticSyncEnabled).toBe(true);
+    expect(capabilities.turoEmail.automationEnabled).toBe(false);
   });
 
   it("fails closed when credentials or encryption prerequisites are malformed", () => {
@@ -125,5 +129,16 @@ describe("owner integration capabilities", () => {
       ...googleEnv,
       ONLYEVS_OAUTH_STATE_SECRET: "o".repeat(32),
     }).googleCalendar.connectionEnabled).toBe(true);
+  });
+
+  it("keeps Turo email intake disabled until the operator flag is explicitly enabled", () => {
+    const withoutFlag = deriveOwnerIntegrationCapabilities(baseEnv);
+    expect(withoutFlag.turoEmail).toEqual({ configured: true, intakeEnabled: false, automationEnabled: false });
+
+    const withFlag = deriveOwnerIntegrationCapabilities({
+      ...baseEnv,
+      EVHOST_EMAIL_INGEST_ENABLED: "true",
+    });
+    expect(withFlag.turoEmail.intakeEnabled).toBe(true);
   });
 });

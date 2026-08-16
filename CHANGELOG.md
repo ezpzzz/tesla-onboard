@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 — 2026-08-16
+
+- Add a private Turo email intake pipeline for booking notifications, kept dark and Review-only behind default-false gates end to end.
+- Consolidate the owner Inbox on desktop and mobile, moving the calendar candidate review queue out of Trips into a single review surface.
+- Add the `onlyevs_email_ingestion` migration, the `@evhost/email-ingest-contract` package, and the `email-ingest-worker` service.
+- Fix the ingest worker's Dockerfile to include the workspace contract package, scope the owner Inbox per shop, close the mobile Inbox dialog correctly, guard the email capture handler with an explicit reject path, and enforce the intake gate server-side on the owner Turo-email API route.
+
+### For contributors
+
+- Keep every email-ingestion feature flag default-false; no gate flips as part of this release.
+
 ## 0.5.0 — 2026-08-15
 
 - Add an always-available owner Integrations center with honest Tesla Fleet and Google Calendar connection health, actions, and setup states.

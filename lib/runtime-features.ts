@@ -6,3 +6,6 @@
  */
 export const ONLYEVS_OPERATIONS_ENABLED =
   process.env.NEXT_PUBLIC_ONLYEVS_OPERATIONS_ENABLED === "true";
+
+export const EVHOST_EMAIL_INGEST_ENABLED =
+  process.env.EVHOST_EMAIL_INGEST_ENABLED === "true";

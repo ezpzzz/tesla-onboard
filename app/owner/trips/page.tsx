@@ -14,8 +14,6 @@ import { useOwnerState } from "@/lib/owner/owner-state";
 import { TripTable } from "@/components/owner/owner-ui";
 import { Card, Segmented } from "@/components/ui";
 import type { TripStatus } from "@/lib/owner/types";
-import { CalendarReviewQueue } from "@/components/owner/CalendarReviewQueue";
-import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 import { PageHeader, ReadinessRail, StatePanel, TripRibbon } from "@/components/evhost-ui";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import { ReminderButton } from "@/components/owner/ReminderButton";
@@ -75,11 +73,6 @@ export default function TripsPage() {
           onChange={setVehicleFilter}
         />
       )}
-
-      <CalendarReviewQueue
-        vehicles={vehicles}
-        confirmationEnabled={ONLYEVS_OPERATIONS_ENABLED}
-      />
 
       {operationalError ? <StatePanel tone="danger" title="Trip data is unavailable" detail={operationalError} /> : !hydrated ? <StatePanel title="Loading trips…" /> : (
         <>

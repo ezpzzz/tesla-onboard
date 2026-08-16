@@ -21,6 +21,11 @@ Production topology:
    per integration without blocking other workspaces.
 4. The database LOGIN used in `ONLYEVS_WORKER_DATABASE_URL` is provisioned
    outside migrations and receives only `GRANT onlyevs_worker`.
+5. The same worker can claim encrypted Turo email parse jobs in batches of five
+   with concurrency two. This lane remains inert while
+   `ONLYEVS_EMAIL_WORKER_ENABLED=false`. Raw MIME and its normalized manifest
+   are stored together in an authenticated `EVMAIL1` envelope in private R2;
+   the database holds hashes, object references, parser output, and audit state.
 
 The web app may complete a Google Calendar OAuth grant and its initial bounded
 event import before this worker is deployed. It must describe that state as an
@@ -40,6 +45,26 @@ the image placeholder with an immutable digest from Tesla's official
 the platform secret manager, and set `ONLYEVS_TESLA_COMMAND_PROXY_URL` to a
 private HTTPS name whose certificate the worker trusts. Never expose the proxy
 as a public unauthenticated service.
+
+## Private email intake rollout
+
+The Cloudflare Email Worker lives in `services/email-ingest-worker`. Its checked
+in Wrangler configuration has no route and keeps intake disabled. Do not attach
+`mail.evhost.app`, create or replace MX records, populate secrets, or enable any
+flag until `docs/spikes/2026-08-16-turo-email-ingestion-go-no-go.md` is approved.
+
+When approved, create a private R2 bucket with a verified 30-day lifecycle,
+inject the alias/capture/KEK keyrings through secret storage, deploy an immutable
+Worker version, and use a controlled address before adding the Email Routing
+catch-all. Enable web intake for that controlled workspace first. The parser
+worker and each of the four risk gates are separate later changes. SendGrid is
+outbound-only; its signed Event Webhook targets
+`/api/internal/sendgrid/events` and must pass a delivered-mail canary.
+
+Rollback is intentionally boring: disable web intake, all four Auto gates, and
+the parser worker; pause affected integrations; then detach the catch-all Worker.
+Do not delete audit rows or R2 objects manually—retention cleanup remains the
+source of truth.
 
 The vehicle configuration emitted by the app is deliberately bounded to
 `Soc`, `EstBatteryRange`, `Odometer`, `DetailedChargeState`, `Locked`, and

@@ -15,6 +15,7 @@ test("mobile owner navigation exposes five stable tabs and keeps workspace actio
   await expect(activeTab).toHaveAttribute("aria-current", "page");
   await expect(activeTab.locator(".bg-signal")).toHaveCount(0);
   await expect(navigation.getByRole("link", { name: "Settings" })).toHaveCount(0);
+  await expect(navigation.getByRole("link", { name: "Inbox" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Workspace settings" })).toHaveCount(0);
   const ownerHomeTarget = await page.getByRole("link", { name: "EVhost Today" }).boundingBox();
   expect(ownerHomeTarget?.height).toBeGreaterThanOrEqual(44);
