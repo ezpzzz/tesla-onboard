@@ -72,6 +72,10 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
     : [];
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const [oauthNotice, setOauthNotice] = useState<{
+    message: string;
+    scopeKey: string | null;
+  } | null>(null);
   const [busy, setBusy] = useState<IntegrationProvider | null>(null);
   const requestVersion = useRef(0);
 
@@ -104,11 +108,22 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
   }, [load]);
 
   useEffect(() => {
+    setOauthNotice((current) => {
+      if (!current || !scopeKey) return current;
+      if (current.scopeKey === null) return { ...current, scopeKey };
+      return current.scopeKey === scopeKey ? current : null;
+    });
+  }, [scopeKey]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const error = params.get("google_calendar_error");
-    if (error) setMessage(oauthMessage(error));
+    if (error) setOauthNotice({ message: oauthMessage(error), scopeKey });
     if (params.get("google_calendar_connected") === "1") {
-      setMessage("Google Calendar connected. Imported events are ready to review on Trips.");
+      setOauthNotice({
+        message: "Google Calendar connected. Imported events are ready to review on Trips.",
+        scopeKey,
+      });
       void load();
     }
     if (error || params.has("google_calendar_connected")) {
@@ -152,6 +167,10 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
 
   const tesla = integrations.find((item) => item.provider === "tesla");
   const google = integrations.find((item) => item.provider === "google_calendar");
+  const visibleOauthNotice = oauthNotice && (
+    oauthNotice.scopeKey === null || oauthNotice.scopeKey === scopeKey
+  ) ? oauthNotice.message : null;
+  const visibleMessage = visibleOauthNotice ?? message;
 
   return (
     <section className="space-y-4" aria-label="Workspace connections">
@@ -167,10 +186,10 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
         </div>
       </div>
 
-      {message ? (
+      {visibleMessage ? (
         <div role="status" aria-live="polite" className="flex items-start gap-2 rounded-lg border border-line bg-white p-3 text-sm text-ink-soft">
           <IconAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
-          <span className="min-w-0 break-words">{message}</span>
+          <span className="min-w-0 break-words">{visibleMessage}</span>
         </div>
       ) : null}
 

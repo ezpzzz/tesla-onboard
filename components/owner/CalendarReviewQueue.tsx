@@ -22,6 +22,20 @@ function eventWindow(candidate: CalendarCandidate): string {
   return `${formatter.format(candidate.startAt)} – ${formatter.format(candidate.endAt)}`;
 }
 
+export function calendarCandidateReviewControl(confirmationEnabled: boolean): {
+  label: "Review" | "Review unavailable";
+  disabled: boolean;
+  title: string | undefined;
+} {
+  return confirmationEnabled
+    ? { label: "Review", disabled: false, title: undefined }
+    : {
+        label: "Review unavailable",
+        disabled: true,
+        title: "Trip confirmation requires the operations service",
+      };
+}
+
 export function CalendarReviewQueue({
   vehicles,
   confirmationEnabled,
@@ -47,6 +61,7 @@ export function CalendarReviewQueue({
   const [message, setMessage] = useState<string | null>(null);
   const [guestUrl, setGuestUrl] = useState<string | null>(null);
   const requestVersion = useRef(0);
+  const reviewControl = calendarCandidateReviewControl(confirmationEnabled);
 
   const load = useCallback(async () => {
     const version = ++requestVersion.current;
@@ -183,10 +198,10 @@ export function CalendarReviewQueue({
                   <Button
                     variant="secondary"
                     onClick={() => begin(candidate)}
-                    disabled={busy || activeVehicles.length === 0 || !confirmationEnabled}
-                    title={confirmationEnabled ? undefined : "Trip confirmation requires the operations service"}
+                    disabled={busy || activeVehicles.length === 0 || reviewControl.disabled}
+                    title={reviewControl.title}
                   >
-                    {confirmationEnabled ? "Review" : "Review unavailable"}
+                    {reviewControl.label}
                   </Button>
                   <Button variant="ghost" onClick={() => void dismiss(candidate)} disabled={busy}>Dismiss</Button>
                 </>

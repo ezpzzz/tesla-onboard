@@ -40,3 +40,24 @@ test("integrations stays useful when background operations are disabled", async 
   await expect(page).toHaveURL(/\/owner\/setup$/);
   await expect(page.getByRole("heading", { name: "Connect your Tesla account" })).toBeVisible();
 });
+
+test("setup deep links accept known steps and ignore invalid ones", async ({ page }) => {
+  await page.goto("/owner/setup?step=connect");
+  await expect(page.getByRole("heading", { name: "Connect your Tesla account" })).toBeVisible();
+  await expect(page).toHaveURL(/\/owner\/setup$/);
+
+  await page.evaluate(() => window.localStorage.clear());
+  await page.goto("/owner/setup?step=unsupported");
+  await expect(page.getByRole("heading", { name: "Let's get your fleet set up." })).toBeVisible();
+  await expect(page).toHaveURL(/\/owner\/setup\?step=unsupported$/);
+});
+
+test("Google Calendar OAuth outcomes are announced and removed from browser history", async ({ page }) => {
+  await page.goto("/owner/integrations?google_calendar_error=denied");
+  await expect(page.getByRole("status")).toContainText("Google Calendar access was cancelled");
+  await expect(page).toHaveURL(/\/owner\/integrations$/);
+
+  await page.goto("/owner/integrations?google_calendar_connected=1");
+  await expect(page.getByRole("status")).toContainText("Imported events are ready to review on Trips");
+  await expect(page).toHaveURL(/\/owner\/integrations$/);
+});

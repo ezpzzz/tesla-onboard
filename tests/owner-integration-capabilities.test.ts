@@ -97,4 +97,33 @@ describe("owner integration capabilities", () => {
       connectionMode: "unavailable",
     });
   });
+
+  it("keeps local mock Tesla import available only in non-production development", () => {
+    const capabilities = deriveOwnerIntegrationCapabilities({
+      NODE_ENV: "development",
+      NEXT_PUBLIC_TESLA_AUTH_MODE: "mock",
+      NEXT_PUBLIC_ONLYEVS_OPERATIONS_ENABLED: "false",
+    });
+
+    expect(capabilities.tesla).toEqual({
+      configured: true,
+      connectionMode: "fleet_import",
+    });
+  });
+
+  it("requires an explicit 32-byte OAuth state secret when no Tesla session secret exists", () => {
+    const googleEnv = {
+      NEXT_PUBLIC_ONLYEVS_OPERATIONS_ENABLED: "false",
+      GOOGLE_CALENDAR_CLIENT_ID: "google-client",
+      GOOGLE_CALENDAR_CLIENT_SECRET: "google-secret",
+      GOOGLE_CALENDAR_REDIRECT_URI: "https://evhost.app/auth/owner/google/callback",
+      ONLYEVS_DATA_ENCRYPTION_KEYS: `1:${Buffer.alloc(32, 7).toString("base64")}`,
+    };
+
+    expect(deriveOwnerIntegrationCapabilities(googleEnv).googleCalendar.connectionEnabled).toBe(false);
+    expect(deriveOwnerIntegrationCapabilities({
+      ...googleEnv,
+      ONLYEVS_OAUTH_STATE_SECRET: "o".repeat(32),
+    }).googleCalendar.connectionEnabled).toBe(true);
+  });
 });
