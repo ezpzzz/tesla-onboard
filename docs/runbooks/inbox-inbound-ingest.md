@@ -187,6 +187,19 @@ attachment to `alexalford2@gmail.com`" instruction, since the Turo host
 mailbox already receives Turo mail directly and a forward step is
 unnecessary):**
 
+**Mailbox identity note (2026-08-16, under confirmation):** the connected
+`alexalford2@gmail.com` account shows zero Turo content on inspection,
+despite `Delivered-To` headers on captured fixtures naming it — either the
+mail was permanently deleted after an earlier export, or `alexalford2@gmail.com`
+is not actually the day-to-day Turo host mailbox and a different account is.
+Which of these is true is not yet confirmed. This does not block current
+work: captures today arrive by **direct `.eml` file drop** into the approved
+fixture folder (decision closed in
+`docs/rollouts/2026-08-16-email-ingest-rollout.md` §7) rather than by
+searching/downloading from `alexalford2@gmail.com` directly — that remains
+the supported capture method regardless of how the mailbox-identity question
+resolves.
+
 1. In the Turo host Gmail account, search for the target message:
    - Cancellation notices: search `"trip has been cancelled"` and
      `"canceled"`, and check **Trash** and **All Mail** — cancellation
@@ -201,13 +214,15 @@ unnecessary):**
    requires — it is not usable as fixture evidence; Download-original must
    be used, not a forward.**
 3. Place the downloaded `.eml` in the fixture folder: the local gitignored
-   `.turo-email-examples/` folder is the **interim** fixture location.
-   **Open question (undecided as of 2026-08-16):** the go/no-go doc's
-   "approved encrypted test-fixture location" phrasing may imply a stronger
-   bar than a gitignored folder on a FileVault-encrypted disk (e.g. a
-   dedicated encrypted volume) — whether FileVault-at-rest is sufficient is
-   an explicit open decision for Alex, not yet resolved. Never commit the
-   fixture, attach it to a PR, or paste its contents into an issue/ticket.
+   `.turo-email-examples/` folder on a FileVault-encrypted machine.
+   **Decided (Alex, 2026-08-16):** this folder **is** the approved encrypted
+   test-fixture location the go/no-go doc's "approved encrypted test-fixture
+   location" phrasing refers to; FileVault-at-rest is sufficient and no
+   separate dedicated encrypted volume is required (see
+   `docs/rollouts/2026-08-16-email-ingest-rollout.md` §7 for the full
+   decision record, including the retention note on deleting superseded raw
+   `.eml`s). Never commit the fixture, attach it to a PR, or paste its
+   contents into an issue/ticket.
 4. Record the required evidence fields (DKIM, SPF, DMARC, ARC, envelope
    recipient, Message-ID, relay address, HTML/text-part presence) alongside
    the stored fixture.
@@ -215,12 +230,13 @@ unnecessary):**
    process — adds a corresponding fingerprint to
    `EVHOST_TURO_APPROVED_TEMPLATE_FINGERPRINTS`.
 
-**Status as of 2026-08-16** (20 real `.emls` analyzed read-only from
+**Status as of 2026-08-16** (21 real `.emls` analyzed read-only from
 `.turo-email-examples/`): booking 5 distinct samples captured; guest message
 3 captured; schedule change partial (2 samples, same guest/reservation,
 covering only the host-approved `ApprovedChangeRequestBookedOwner`
 sub-template — the guest-initiated pre-approval request and Turo-initiated
-reschedule templates are still uncaptured); cancellation 0 captured, still
+reschedule templates are still uncaptured); cancellation 1 of 2 captured
+(`CancelledReservationOwner`), second sample from a different guest still
 needed. See `docs/rollouts/2026-08-16-email-ingest-rollout.md` §2 and §7 for
 the gate-status table and outstanding capture ask.
 

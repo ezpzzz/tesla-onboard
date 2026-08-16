@@ -145,8 +145,12 @@ Turo Terms of Service, verbatim ("Prohibited activities"):
 
 ## Sign-off block
 
-- **Name:** ____________________
-- **Date:** ____________________
-- **Decision:** ☐ Approved to proceed (single-host, own-email scope only) ☐ Approved with conditions (list below) ☐ Not approved — needs counsel first ☐ Not approved — needs Turo written confirmation first
+- **Name:** Alex (owner)
+- **Date:** 2026-08-16
+- **Decision:** ☑ Approved with conditions (list below) — **APPROVED for own-workspace, Review-only intake only**
 
 **Conditions / notes:**
+
+- Scope of this approval is strictly: Alex's own single-host workspace, own-received notification emails, Review-only intake (no automated/Auto-mode action of any kind — see the `ONLYEVS_EMAIL_AUTO_*` gates, all of which stay `false`).
+- **Counsel review remains required before multi-tenant (other-host) enablement of email ingestion, and before any Auto capability (auto-create, auto pre-trip, auto active-safe, or auto active-destructive) is enabled for any workspace, including Alex's own.** This sign-off does not substitute for that counsel review — it only unblocks evidence gate 4 for the own-workspace, Review-only scope described above.
+- This decision does not resolve the open questions in the "Open questions only Alex can answer" section above (data-residency of guests, retention window, use of Turo's first-party scheduled-messages feature, outreach to Turo for written confirmation, controller/processor role when productized) — those remain outstanding and gate later phases, not this one.
