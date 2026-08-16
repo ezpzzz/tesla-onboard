@@ -17,7 +17,7 @@ import {
 import { requireOwnerWorkspace } from "@/lib/owner/server-auth";
 import { createClient } from "@/lib/supabase/server";
 import { safeEqual, unseal } from "@/lib/tesla-server";
-import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
+import { getOwnerIntegrationCapabilities } from "@/lib/owner/integration-capabilities";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +37,6 @@ interface IntegrationRow {
 }
 
 export async function GET(request: NextRequest) {
-  if (!ONLYEVS_OPERATIONS_ENABLED) return NextResponse.redirect(new URL("/owner/settings?google_calendar_error=not_available", request.url));
   const url = new URL(request.url);
   const origin = url.origin;
   const secret = (() => {
@@ -49,7 +48,7 @@ export async function GET(request: NextRequest) {
     : null;
   const returnPath = state?.returnPath?.startsWith("/owner/")
     ? state.returnPath
-    : "/owner/settings";
+    : "/owner/integrations";
   const fail = (reason: string) => {
     const response = NextResponse.redirect(
       new URL(`${returnPath}?google_calendar_error=${reason}`, origin),
@@ -68,6 +67,16 @@ export async function GET(request: NextRequest) {
 
   try {
     await requireOwnerWorkspace(state.workspaceId, state.shopSlug, "admin");
+  } catch (error) {
+    return fail(error instanceof Error && error.message === "unauthenticated"
+      ? "session"
+      : "workspace_access");
+  }
+
+  try {
+    if (!getOwnerIntegrationCapabilities().googleCalendar.connectionEnabled) {
+      return fail("config");
+    }
     const config = getGoogleCalendarConfig();
     if (assertGoogleCalendarConfigured(config)) return fail("config");
     const token = await exchangeGoogleCalendarCode({

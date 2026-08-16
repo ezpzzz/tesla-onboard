@@ -22,6 +22,11 @@ Production topology:
 4. The database LOGIN used in `ONLYEVS_WORKER_DATABASE_URL` is provisioned
    outside migrations and receives only `GRANT onlyevs_worker`.
 
+The web app may complete a Google Calendar OAuth grant and its initial bounded
+event import before this worker is deployed. It must describe that state as an
+initial import only; automatic refresh is available only while the operations
+service is enabled and healthy.
+
 Before deployment, replace every `REPLACE_*` value, pin the worker image and
 official Tesla chart/image to immutable versions, create Kafka topics with
 retention appropriate to transient processing, provision TLS from a public CA,

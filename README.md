@@ -295,8 +295,11 @@ The additive background control plane is fail-closed behind
 `NEXT_PUBLIC_ONLYEVS_OPERATIONS_ENABLED`. Leave it `false` until the lifecycle
 migration, scoped worker, command proxy, Kafka/telemetry receiver, provider
 credentials, and live revocation/privacy canaries in `deploy/onlyevs/README.md`
-are all complete. With the flag off, the existing read-only Tesla fleet import
-continues to work and unfinished operational surfaces are not advertised.
+are all complete. The Integrations connection center remains available with the
+flag off: read-only Tesla fleet import continues to work, and Google Calendar
+may run an initial review-queue import when its OAuth credentials are configured.
+Live Tesla stats, commands, driver access, and automatic calendar refresh remain
+off until the background service passes its gates.
 
 Tutorial copy and the readiness checklist live in
 **[`lib/content.ts`](lib/content.ts)**.

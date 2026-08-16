@@ -9,20 +9,24 @@ import {
 import { oauthStateSecretFromEnv } from "@/lib/owner/credential-envelope";
 import { requireOwnerWorkspace } from "@/lib/owner/server-auth";
 import { seal } from "@/lib/tesla-server";
-import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
+import { getOwnerIntegrationCapabilities } from "@/lib/owner/integration-capabilities";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  if (!ONLYEVS_OPERATIONS_ENABLED) return NextResponse.json({ error: "Not available." }, { status: 404 });
   const url = new URL(request.url);
   const origin = url.origin;
   const workspaceId = url.searchParams.get("workspace") ?? "";
   const shopSlug = url.searchParams.get("shop") ?? "";
-  const returnPath = "/owner/settings";
+  const returnPath = "/owner/integrations";
   try {
     const owner = await requireOwnerWorkspace(workspaceId, shopSlug, "admin");
+    if (!getOwnerIntegrationCapabilities().googleCalendar.connectionEnabled) {
+      return NextResponse.redirect(
+        new URL(`${returnPath}?google_calendar_error=config`, origin),
+      );
+    }
     const config = getGoogleCalendarConfig();
     if (assertGoogleCalendarConfigured(config)) {
       return NextResponse.redirect(

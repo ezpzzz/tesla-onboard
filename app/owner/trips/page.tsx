@@ -76,7 +76,10 @@ export default function TripsPage() {
         />
       )}
 
-      {ONLYEVS_OPERATIONS_ENABLED ? <CalendarReviewQueue vehicles={vehicles} /> : null}
+      <CalendarReviewQueue
+        vehicles={vehicles}
+        confirmationEnabled={ONLYEVS_OPERATIONS_ENABLED}
+      />
 
       {operationalError ? <StatePanel tone="danger" title="Trip data is unavailable" detail={operationalError} /> : !hydrated ? <StatePanel title="Loading trips…" /> : (
         <>
