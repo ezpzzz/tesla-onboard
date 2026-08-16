@@ -4,8 +4,8 @@ import type { Pool, PoolClient } from "pg";
 import { decodeEvmailEnvelope, decodeEvmailPlaintext, evmailAad, type NormalizedEmailManifest } from "@evhost/email-ingest-contract";
 import { approvedTuroTemplateFingerprints, parseTuroEmail } from "@/lib/email/turo-parser";
 import { credentialKeyringFromEnv, decryptCredential, encryptCredential } from "@/lib/owner/credential-envelope";
-import { createEncryptedTripLink } from "@/lib/owner/trip-link-secret";
-import { sendGridConfigFromEnv, sendGridEmailAction, SendGridDeliveryError } from "@/lib/owner/sendgrid";
+import { createEncryptedTripLink } from "@/lib/owner/trip-link-secret-core";
+import { sendGridConfigFromEnv, sendGridEmailAction, SendGridDeliveryError } from "@/lib/owner/sendgrid-core";
 
 type EmailJobType = "parse" | "action" | "delivery" | "retention" | "reconcile" | "canary";
 interface EmailJob { id: string; workspace_id: string; entity_id: string; attempt_count: number; job_type: EmailJobType }

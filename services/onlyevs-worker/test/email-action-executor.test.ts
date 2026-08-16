@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Pool } from "pg";
 
-vi.mock("server-only", () => ({}));
-
-vi.mock("@/lib/owner/sendgrid", () => ({
+vi.mock("@/lib/owner/sendgrid-core", () => ({
   sendGridConfigFromEnv: vi.fn(() => ({ apiKey: "test-key", fromEmail: "trips@example.com", fromName: "EVhost Trips" })),
   sendGridEmailAction: vi.fn(async () => ({ messageId: "test-message-id" })),
   SendGridDeliveryError: class SendGridDeliveryError extends Error {
@@ -22,7 +20,7 @@ vi.mock("@/lib/owner/credential-envelope", () => ({
 }));
 
 const { actionJobProgressed, buildOwnerAlertMessage, sendOwnerAlertForAction } = await import("@/services/onlyevs-worker/email");
-const { sendGridEmailAction } = await import("@/lib/owner/sendgrid");
+const { sendGridEmailAction } = await import("@/lib/owner/sendgrid-core");
 
 describe("actionJobProgressed", () => {
   it("treats the first call (no prior state) as progress", () => {
