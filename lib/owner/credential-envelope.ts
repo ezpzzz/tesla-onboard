@@ -12,7 +12,7 @@ export interface CredentialAad {
   workspaceId: string;
   shopSlug: string;
   provider: IntegrationProvider | "evhost";
-  field: "provider_subject" | "refresh_token" | "invite_url" | "driver_id" | "location" | "trip_link";
+  field: "provider_subject" | "refresh_token" | "invite_url" | "driver_id" | "location" | "trip_link" | "owner_alert_email";
   /** Adds record-level binding for secrets that are not already scoped by a
    * provider-owned identifier. Omitted for legacy envelopes so existing
    * integration credentials retain byte-for-byte AAD compatibility. */

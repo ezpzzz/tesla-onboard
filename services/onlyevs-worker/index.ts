@@ -20,6 +20,7 @@ import {
   TeslaTelemetryClient,
   TeslaTelemetryError,
 } from "@/lib/owner/tesla-telemetry-client";
+import { processEmailJobs } from "./email";
 
 const TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -961,6 +962,7 @@ async function startTelemetryConsumer(): Promise<Consumer | null> {
 }
 
 async function runOnce() {
+  await processEmailJobs(pool, workerId);
   await Promise.all([
     pool.query("delete from private.onlyevs_vehicle_location_points where delete_after <= now()"),
     pool.query("select public.cleanup_onlyevs_expired_trip_link_secrets()"),

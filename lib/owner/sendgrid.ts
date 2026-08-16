@@ -8,6 +8,16 @@ interface SendGridConfig {
   fromName: string;
 }
 
+export interface SendGridMessage {
+  recipient: string;
+  subject: string;
+  text: string;
+  html: string;
+  replyTo?: string | null;
+  stableMessageId?: string;
+  customArgs?: Record<string, string>;
+}
+
 export function sendGridConfigFromEnv(): SendGridConfig | null {
   const apiKey = process.env.SENDGRID_API_KEY?.trim() ?? "";
   const fromEmail = process.env.SENDGRID_FROM_EMAIL?.trim().toLowerCase() ?? "";
@@ -22,17 +32,34 @@ export async function sendGridTripReminder(input: ReminderMessageInput & {
   config: SendGridConfig;
 }): Promise<{ messageId: string | null }> {
   const message = buildReminderMessage(input);
-  const replyTo = input.replyTo && /^\S+@\S+\.\S+$/.test(input.replyTo) ? { email: input.replyTo } : undefined;
+  return sendGridMessage(input.config, {
+    recipient: input.recipient,
+    replyTo: input.replyTo,
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+  });
+}
+
+export async function sendGridMessage(
+  config: SendGridConfig,
+  message: SendGridMessage,
+): Promise<{ messageId: string | null }> {
+  const replyTo = message.replyTo && /^\S+@\S+\.\S+$/.test(message.replyTo) ? { email: message.replyTo } : undefined;
+  if (!/^\S+@\S+\.\S+$/.test(message.recipient) || !message.subject.trim() || !message.text.trim() || !message.html.trim()) {
+    throw new Error("sendgrid_invalid_message");
+  }
   const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${input.config.apiKey}`,
+      Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      personalizations: [{ to: [{ email: input.recipient }] }],
-      from: { email: input.config.fromEmail, name: input.config.fromName },
+      personalizations: [{ to: [{ email: message.recipient }], ...(message.customArgs ? { custom_args: message.customArgs } : {}) }],
+      from: { email: config.fromEmail, name: config.fromName },
       ...(replyTo ? { reply_to: replyTo } : {}),
+      ...(message.stableMessageId ? { headers: { "Message-ID": message.stableMessageId } } : {}),
       subject: message.subject,
       content: [
         { type: "text/plain", value: message.text },

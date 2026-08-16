@@ -68,7 +68,7 @@ test("an authenticated owner can use every operational surface and detail route"
     ["/owner/trips", "Trips"],
     ["/owner/drivers", "Guests"],
     ["/owner/vehicles", "Vehicles"],
-    ["/owner/insights", "Insights"],
+    ["/owner/inbox", "Inbox"],
     ["/owner/integrations", "Integrations"],
     ["/owner/settings", "Settings"],
     ["/owner/account", "Account"],

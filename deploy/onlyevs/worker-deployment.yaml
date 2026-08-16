@@ -28,6 +28,18 @@ spec:
               value: onlyevs_V
             - name: ONLYEVS_KAFKA_CONNECTIVITY_TOPIC
               value: onlyevs_connectivity
+            # Email processing is a separate production gate. Its R2/KMS
+            # credentials come only from the secretRef above.
+            - name: ONLYEVS_EMAIL_WORKER_ENABLED
+              value: "false"
+            - name: ONLYEVS_EMAIL_AUTO_CREATE_ENABLED
+              value: "false"
+            - name: ONLYEVS_EMAIL_AUTO_PRETRIP_ENABLED
+              value: "false"
+            - name: ONLYEVS_EMAIL_AUTO_ACTIVE_SAFE_ENABLED
+              value: "false"
+            - name: ONLYEVS_EMAIL_AUTO_ACTIVE_DESTRUCTIVE_ENABLED
+              value: "false"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

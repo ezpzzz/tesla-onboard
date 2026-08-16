@@ -8,7 +8,7 @@ import { EvhostWordmark } from "@/components/evhost-ui";
 import { cn } from "@/components/ui";
 import {
   IconDrivers,
-  IconInsights,
+  IconMail,
   IconOverview,
   IconPlug,
   IconSettings,
@@ -24,7 +24,7 @@ const PRIMARY_NAV = [
   { href: "/owner/trips", label: "Trips", icon: IconTrips },
   { href: "/owner/drivers", label: "Guests", icon: IconDrivers },
   { href: "/owner/vehicles", label: "Vehicles", icon: IconVehicle },
-  { href: "/owner/insights", label: "Insights", icon: IconInsights },
+  { href: "/owner/inbox", label: "Inbox", icon: IconMail },
 ] as const;
 
 const WORKSPACE_NAV = [

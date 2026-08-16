@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
-import { IconAlert, IconBolt, IconCalendar, IconCheck, IconShield } from "@/components/icons";
+import { IconAlert, IconBolt, IconCalendar, IconCheck, IconMail, IconShield } from "@/components/icons";
 import { Badge, Button, Card, buttonClassName, cn } from "@/components/ui";
 import type { OwnerIntegrationCapabilities } from "@/lib/owner/integration-capabilities";
 import { connectHref } from "@/lib/owner/use-owner-tesla-connect";
@@ -121,7 +121,7 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
     if (error) setOauthNotice({ message: oauthMessage(error), scopeKey });
     if (params.get("google_calendar_connected") === "1") {
       setOauthNotice({
-        message: "Google Calendar connected. Imported events are ready to review on Trips.",
+        message: "Google Calendar connected. Imported events are ready to review in Inbox.",
         scopeKey,
       });
       void load();
@@ -271,8 +271,78 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
             )
           : null}
       />
+
+      <TuroEmailIntegration
+        scope={scope}
+        configured={capabilities.turoEmail.configured}
+        intakeEnabled={capabilities.turoEmail.intakeEnabled}
+        automationEnabled={capabilities.turoEmail.automationEnabled}
+      />
     </section>
   );
+}
+
+interface TuroEmailState {
+  id: string;
+  status: "pending_verification" | "testing" | "active" | "paused" | "error" | "disconnected";
+  mode: "review" | "auto";
+  alias_address: string;
+  last_receipt_at: string | null;
+  last_test_at: string | null;
+  last_error_code: string | null;
+  revision: number;
+}
+
+function TuroEmailIntegration({ scope, configured, intakeEnabled, automationEnabled }: {
+  scope: ReturnType<typeof vehicleWorkspaceScope>;
+  configured: boolean;
+  intakeEnabled: boolean;
+  automationEnabled: boolean;
+}) {
+  const [integration, setIntegration] = useState<TuroEmailState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    if (!scope || !configured) { setLoading(false); return; }
+    const params = new URLSearchParams({ workspace: scope.workspaceId, shop: scope.shopSlug });
+    try {
+      const response = await fetch(`/api/owner/integrations/turo-email?${params}`, { cache: "no-store" });
+      const result = await response.json() as { integration?: TuroEmailState | null; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Email forwarding setup could not be loaded.");
+      setIntegration(result.integration ?? null);
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Email forwarding setup could not be loaded."); }
+    finally { setLoading(false); }
+  }, [configured, scope]);
+  useEffect(() => { void load(); }, [load]);
+
+  async function change(action: "setup" | "rotate" | "test" | "pause" | "resume" | "disconnect" | "mode", mode?: "review" | "auto") {
+    if (!scope) return;
+    setBusy(true); setMessage(null);
+    const params = integration ? `?id=${encodeURIComponent(integration.id)}` : "";
+    try {
+      const response = await fetch(`/api/owner/integrations/turo-email${params}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workspaceId: scope.workspaceId, shopSlug: scope.shopSlug, action, revision: integration?.revision, mode }) });
+      const result = await response.json() as { integration?: TuroEmailState; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Email forwarding setup could not be changed.");
+      setIntegration(result.integration ?? null);
+      setMessage(action === "test" ? "Waiting for a forwarded Turo email. Send one to verify the full path." : action === "setup" ? "Private forwarding address created." : "Email forwarding settings updated.");
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Email forwarding setup could not be changed."); }
+    finally { setBusy(false); }
+  }
+
+  const connected = integration?.status === "active";
+  return <Card className="overflow-hidden"><div className="p-4 sm:p-5"><div className="flex items-start gap-3.5"><span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-lg", connected ? "bg-good/10 text-good" : "bg-brand/10 text-brand")}>{connected ? <IconCheck className="h-5 w-5" /> : <IconMail className="h-5 w-5" />}</span><div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">Booking intake</p><div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-lg font-semibold">Turo email forwarding</h2><Badge tone={connected ? "good" : integration ? "warn" : "neutral"}>{connected ? "Connected" : integration ? integration.status.replaceAll("_", " ") : configured ? "Ready to set up" : "Setup required"}</Badge></div><p className="mt-2 text-sm leading-relaxed text-muted">Forward Turo notices to a private workspace address so EVhost can place bookings and updates in Inbox.</p></div></div>
+    {message ? <div role="status" className="mt-4 rounded-md border border-line bg-surface p-3 text-sm">{message}</div> : null}
+    {!configured ? <div className="mt-4 rounded-md bg-surface p-3 text-sm text-muted">Administrator keyrings are required before an address can be generated.</div> : !integration ? <Button variant="brand" className="mt-4 w-full sm:w-auto" disabled={busy || loading} onClick={() => void change("setup")}>Create private address</Button> : <div className="mt-5 space-y-4">
+      <ol className="grid gap-3 text-sm sm:grid-cols-3"><SetupStep number="1" title="Copy address" done={Boolean(integration.alias_address)}><div className="mt-2 break-all rounded bg-white p-2 text-xs ring-1 ring-line">{integration.alias_address}</div><Button variant="ghost" className="mt-2" onClick={() => void navigator.clipboard.writeText(integration.alias_address)}>Copy</Button></SetupStep><SetupStep number="2" title="Forward Turo mail" done={connected}><p className="mt-2 text-muted">Add this address to the inbox that receives your Turo notifications.</p></SetupStep><SetupStep number="3" title="Verify" done={connected}><Button variant="secondary" className="mt-2" disabled={busy || !intakeEnabled} onClick={() => void change("test")}>{intakeEnabled ? "Send test" : "Intake is off"}</Button></SetupStep></ol>
+      <fieldset className="rounded-md border border-line p-4"><legend className="px-1 text-sm font-semibold">Handling mode</legend><label className="mt-2 flex gap-3"><input type="radio" checked={integration.mode === "review"} onChange={() => void change("mode", "review")} /><span><strong className="block text-sm">Review</strong><span className="text-xs text-muted">You approve booking changes in Inbox.</span></span></label><label className="mt-3 flex gap-3"><input type="radio" checked={integration.mode === "auto"} onChange={() => void change("mode", "auto")} /><span><strong className="block text-sm">Auto when verified</strong><span className="text-xs text-muted">Only approved templates and separately enabled risk gates can run automatically.{!automationEnabled ? " Automation is currently platform-disabled." : ""}</span></span></label></fieldset>
+      <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={busy} onClick={() => void change(integration.status === "paused" ? "resume" : "pause")}>{integration.status === "paused" ? "Resume" : "Pause"}</Button><Button variant="ghost" disabled={busy} onClick={() => void change("rotate")}>Rotate address</Button><Button variant="ghost" disabled={busy} onClick={() => void change("disconnect")}>Disconnect</Button></div>
+    </div>}
+  </div></Card>;
+}
+
+function SetupStep({ number, title, done, children }: { number: string; title: string; done: boolean; children: ReactNode }) {
+  return <li className="rounded-md bg-surface p-3"><div className="flex items-center gap-2"><span className={cn("flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold", done ? "bg-good text-white" : "bg-white text-muted ring-1 ring-line")}>{done ? "✓" : number}</span><strong>{title}</strong></div>{children}</li>;
 }
 
 function IntegrationCard({

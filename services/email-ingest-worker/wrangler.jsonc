@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "evhost-email-ingest",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "r2_buckets": [{ "binding": "EMAIL_BUCKET", "bucket_name": "evhost-email-private" }],
+  "vars": {
+    "EVHOST_APP_ORIGIN": "https://evhost.app",
+    "EVHOST_EMAIL_INGEST_ENABLED": "false",
+    "EMAIL_RETENTION_DAYS": "30"
+  }
+}

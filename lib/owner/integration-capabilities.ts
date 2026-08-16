@@ -13,6 +13,11 @@ export interface OwnerIntegrationCapabilities {
     connectionEnabled: boolean;
     automaticSyncEnabled: boolean;
   };
+  turoEmail: {
+    configured: boolean;
+    intakeEnabled: boolean;
+    automationEnabled: boolean;
+  };
 }
 
 type IntegrationEnvironment = Record<string, string | undefined>;
@@ -65,6 +70,8 @@ export function deriveOwnerIntegrationCapabilities(
     && encryptedCredentialsConfigured
     && (googleStateSecret?.length ?? 0) >= 32
   );
+  const turoEmailConfigured = hasValidKeyring(env.EVHOST_EMAIL_ALIAS_HMAC_KEYS)
+    && hasValidKeyring(env.ONLYEVS_DATA_ENCRYPTION_KEYS);
 
   return {
     operationsEnabled,
@@ -80,6 +87,11 @@ export function deriveOwnerIntegrationCapabilities(
       configured: googleConfigured,
       connectionEnabled: googleConfigured,
       automaticSyncEnabled: googleConfigured && operationsEnabled,
+    },
+    turoEmail: {
+      configured: turoEmailConfigured,
+      intakeEnabled: turoEmailConfigured && env.EVHOST_EMAIL_INGEST_ENABLED === "true",
+      automationEnabled: turoEmailConfigured && env.ONLYEVS_EMAIL_WORKER_ENABLED === "true",
     },
   };
 }
