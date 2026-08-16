@@ -22,6 +22,16 @@ export interface OwnerInboxCursor { occurredAt: number; source: OwnerInboxItem["
 export interface OwnerInboxPage { items: OwnerInboxItem[]; nextCursor: OwnerInboxCursor | null; hasMore: boolean }
 
 /**
+ * Per-source row cap for a single fetchOwnerInbox round. Deliberately well above
+ * pageSize (50): each round fully re-queries both sources from the current cursor
+ * (never resumes an existing offset), so this only needs to comfortably exceed one
+ * page's worth of rows from a single dominant source to guarantee the merged
+ * top-`pageSize` selection for that round is correct. Exported so a source with an
+ * unusually deep single-round backlog can be tuned without touching call sites.
+ */
+export const INBOX_SOURCE_FETCH_LIMIT = 200;
+
+/**
  * Pure scoping decision: given the integration rows resolved for a workspace+shop,
  * decide whether the email-candidates query should run at all, and if so, which
  * integration ids it must be scoped to. The tenant-security boundary is RLS
@@ -64,11 +74,27 @@ export async function fetchOwnerInbox(scope: VehicleWorkspaceScope, snapshotAt =
   const integrations = await client.from("onlyevs_email_integrations").select("id").eq("workspace_id", scope.workspaceId).eq("shop_slug", scope.shopSlug);
   if (integrations.error) throw new Error(integrations.error.message);
   const emailScope = resolveEmailIntegrationScope(integrations.data ?? []);
+  // Each source's query is pushed the exact cursor boundary (not just the date
+  // floor) so a round that already showed items down to `before` never re-spends
+  // its fetch budget re-fetching the boundary row itself, and a secondary `id`
+  // order makes the LIMIT slice deterministic across rounds when many rows tie on
+  // occurred_at — without either, a source with >INBOX_SOURCE_FETCH_LIMIT rows
+  // tied at the same timestamp could keep returning the same arbitrary window and
+  // never surface the rest. Cross-source ties are still resolved by
+  // paginateInboxItems's post-filter, which is the authority for what's "before".
+  let emailQuery = client.from("onlyevs_email_candidates").select("id,event_type,reservation_id,proposed_state,blocker_codes,state,occurred_at,revision").eq("workspace_id", scope.workspaceId).in("integration_id", emailScope.integrationIds);
+  emailQuery = before?.source === "turo_email"
+    ? emailQuery.or(`occurred_at.lt.${ceiling},and(occurred_at.eq.${ceiling},id.gt.${before.id})`)
+    : emailQuery.lte("occurred_at", ceiling);
+  let calendarQuery = client.from("onlyevs_calendar_candidates").select("id,summary,starts_at,status,change_kind,source_updated_at,revision").eq("workspace_id", scope.workspaceId).eq("shop_slug", scope.shopSlug);
+  calendarQuery = before?.source === "google_calendar"
+    ? calendarQuery.or(`source_updated_at.lt.${ceiling},and(source_updated_at.eq.${ceiling},id.gt.${before.id}),and(source_updated_at.is.null,starts_at.lt.${ceiling}),and(source_updated_at.is.null,starts_at.eq.${ceiling},id.gt.${before.id})`)
+    : calendarQuery.or(`source_updated_at.lte.${ceiling},and(source_updated_at.is.null,starts_at.lte.${ceiling})`);
   const [emails, calendars, archives] = await Promise.all([
     emailScope.shouldQuery
-      ? client.from("onlyevs_email_candidates").select("id,event_type,reservation_id,proposed_state,blocker_codes,state,occurred_at,revision").eq("workspace_id", scope.workspaceId).in("integration_id", emailScope.integrationIds).lte("occurred_at", ceiling).order("occurred_at", { ascending: false }).limit(100)
+      ? emailQuery.order("occurred_at", { ascending: false }).order("id", { ascending: true }).limit(INBOX_SOURCE_FETCH_LIMIT)
       : { data: [], error: null },
-    client.from("onlyevs_calendar_candidates").select("id,summary,starts_at,status,change_kind,source_updated_at,revision").eq("workspace_id", scope.workspaceId).eq("shop_slug", scope.shopSlug).or(`source_updated_at.lte.${ceiling},and(source_updated_at.is.null,starts_at.lte.${ceiling})`).order("source_updated_at", { ascending: false }).limit(100),
+    calendarQuery.order("source_updated_at", { ascending: false }).order("id", { ascending: true }).limit(INBOX_SOURCE_FETCH_LIMIT),
     client.from("onlyevs_inbox_archives").select("id,email_candidate_id,calendar_candidate_id").eq("workspace_id", scope.workspaceId),
   ]);
   const error = emails.error ?? calendars.error ?? archives.error;

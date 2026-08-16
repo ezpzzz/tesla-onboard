@@ -1,0 +1,17 @@
+{
+  "name": "evhost-workerd-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated, opt-in Workers-runtime test harness for services/email-ingest-worker. Not part of the pnpm workspace -- see README.md.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@evhost/email-ingest-contract": "link:../../../packages/email-ingest-contract"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.3",
+    "vitest": "^4.1.10"
+  }
+}

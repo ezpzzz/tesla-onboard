@@ -38,6 +38,40 @@ Content-Transfer-Encoding: 7bit
 <html><body>
 <p>You have a new message from your guest.</p>
 <p>Taylor: &quot;Hi! What time works best for an early pickup tomorrow?&quot;</p>
+<table class="trip-details-wrapper">
+  <tr><td><div style="text-transform:uppercase">Trip start</div></td></tr>
+  <tr><td><strong>8/9/26</strong></td></tr>
+  <tr><td style="color:#898989">8:00 AM</td></tr>
+</table>
+<table class="trip-details-wrapper">
+  <tr><td><div style="text-transform:uppercase">Trip end</div></td></tr>
+  <tr><td><strong>8/10/26</strong></td></tr>
+  <tr><td style="color:#898989">10:00 PM</td></tr>
+</table>
+<p style="font-weight:900"><a href="https://turo.com/us/en/car-rental/united-states/austin-tx/tesla/model-3/9990001">Tesla Model 3<span>2023</span></a></p>
+<div style="text-transform:uppercase">Location</div>
+<a href="http://maps.google.com/maps?f=q&amp;geocode=&amp;q=30.267200,-97.743100">
+  <table><tr><td align="center">100 Congress Avenue<br>Austin, TX</td></tr></table>
+</a>
+<p><a class="map-image-link" href="http://maps.google.com/maps?q=30.267200%2C-97.743100&amp;key=synthetic"><img src="http://maps.googleapis.com/maps/api/staticmap?center=30.267200%2C-97.743100&amp;zoom=16&amp;key=synthetic" border="0"></a></p>
+<style type="text/css">
+  @media only screen and (min-resolution: 2dppx) {
+    .map-image-link img {
+      content: url('http://maps.googleapis.com/maps/api/staticmap?center=30.267200%2C-97.743100&maptype=roadmap&zoom=16&size=360x186&scale=2&key=synthetic');
+    }
+  }
+</style>
+<table width="100%">
+  <tr><td class="message_box_green" width="100%" align="center">unrelated shared CSS variant, not guest-message content</td></tr>
+  <tr><td class="message_box_purple" width="100%" align="center">also unrelated shared CSS variant</td></tr>
+  <tr><td class="message_box_blurple" width="100%" align="center" style="padding:10px;border:1px solid #593CFB">
+        Hi! What time works best for an early pickup tomorrow?
+      </td></tr>
+</table>
+<div style="text-transform:uppercase">About the guest</div>
+<span><a href="https://turo.com/us/en/drivers/40010004"><img width="70" height="70" src="https://images.turo.com/media/driver/synth-avatar-taylor-msg.300x300.jpg" style="border-radius:35px" alt="Taylor" title="Taylor"/></a></span>
+<a href="https://turo.com/us/en/drivers/40010004">Taylor</a>
+<a href="tel:+15125550101">(512) 555-0101</a>
 <p>Reply from your Turo inbox to keep the conversation going.</p>
 <p><em>This is a synthetic fixture message and does not describe a real guest.</em></p>
 </body></html>

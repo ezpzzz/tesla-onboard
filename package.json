@@ -1,6 +1,6 @@
 {
   "name": "evhost-app",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "Adaptive onboarding for Turo Tesla rental guests",
   "scripts": {
@@ -9,6 +9,7 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:worker-email": "cd services/email-ingest-worker/workerd-tests && pnpm install --silent && pnpm vitest run",
     "test:e2e": "playwright test",
     "worker": "tsx services/onlyevs-worker/index.ts"
   },

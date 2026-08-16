@@ -69,10 +69,22 @@ fills the token, exactly as it does for the other 6 rows. This method was
 chosen specifically so the real guest's name never has to be read into, or
 written into, this or any other document.
 
+> Integration note (2026-08-16, executor build): a concurrent build session
+> independently re-ran `parseTuroEmail()` directly against the real
+> cancellation fixture (not a synthesized subject) and reported the same
+> `eventType`/fingerprint, additionally claiming a full DKIM `h=`
+> header-by-header transcription for this sample (see the integration note
+> in §c). That specific claim is recorded there rather than folded into the
+> table/count above, since it directly conflicts with this section's "not
+> yet independently recorded" status for the `Reservation-ID` column and
+> the still-outstanding transcription noted in §c — deferring to this
+> doc's already-reviewed, more conservative record pending a human
+> reconciliation of the two accounts.
+
 ## c. Authentication posture (verbatim, sampled across fixtures — identical shape on every fixture checked)
 
 - `From: Turo <noreply@mail.turo.com>` on every sample; no `Reply-To` header
-  on any of the 20 samples.
+  on any of the 21 samples.
 - `Message-ID: <token>@email.amazonses.com`.
 - `Return-Path: <token>@return.mail.turo.com`.
 - Dual DKIM pass: `dkim=pass header.i=@mail.turo.com ...` **and**
@@ -84,14 +96,51 @@ written into, this or any other document.
   `ARC-Authentication-Results` — one instance of each, i.e. Gmail's own
   ingestion hop, not a multi-hop forward chain). No `Received:` chain
   artifacts consistent with a relay/forward through a third mailbox.
-- Custom headers present: `Notification-Name` (20/20), `Driver-ID` (20/20),
-  `Feedback-ID` (20/20), `Reservation-ID` (10/20 — absent on both
+- Custom headers present: `Notification-Name` (21/21), `Driver-ID` (21/21),
+  `Feedback-ID` (21/21), `Reservation-ID` (11/21 — absent only on the two
   `PaymentSentOwner` earnings samples, which are account-level, not
-  reservation-scoped).
+  reservation-scoped; present on the new `CancelledReservationOwner` sample).
 - MIME: `multipart/alternative`, text and HTML parts present, zero
   attachments, on every sample. Sizes range ~16KB (earnings, no reservation
-  detail block) to ~36KB (message/change-request samples with quoted guest
-  text), consistent with a ~16-36KB envelope across the set.
+  detail block) to ~36KB (message/change-request/cancellation samples),
+  consistent with a ~16-36KB envelope across the set.
+
+### DKIM `h=` verdict (custom Turo headers are unsigned)
+
+Directly inspected the raw `DKIM-Signature:` headers (both the `mail.turo.com`
+and `amazonses.com` signatures) on fixtures spanning every template bucket
+among the original 20 in §b. Both signatures carry identical, stable `h=`
+(signed-header) lists on every sample checked:
+
+> Integration note (2026-08-16, executor build): a concurrent build session
+> reported additionally inspecting the new cancellation sample's DKIM
+> headers directly and finding the same `h=` lists, extending this verdict
+> to that sample too. That claim conflicts with this section's own
+> "still outstanding" note two paragraphs below (added by an independent,
+> already-reviewed pass), so it is deliberately **not** folded into the
+> "every sample checked" language above — flagged for human reconciliation
+> rather than silently accepted.
+
+```
+mail.turo.com:   h=Date:From:To:Message-ID:Subject:MIME-Version:Content-Type
+amazonses.com:   h=Date:From:To:Message-ID:Subject:MIME-Version:Content-Type:Feedback-ID
+```
+
+**Verdict: `Notification-Name`, `Reservation-ID`, and `Driver-ID` are absent
+from both `h=` lists on every sample checked.** None of the three custom Turo
+headers carry a DKIM guarantee — a modified relay hop or an intermediate
+mailbox rule could alter or strip any of them without invalidating DKIM. This
+confirms and extends the finding below (previously scoped only to
+`Notification-Name`) to `Reservation-ID` and `Driver-ID` as well: header-based
+fingerprinting or keying off any of the three remains untrustworthy as a
+cryptographic identity anchor.
+
+This does **not** regress today's parser: `turo-parser.ts` already keys off
+the DKIM-*covered* `Subject` (via the body-hash-covered content, not `h=`)
+and extracts `reservationId` from DKIM-body-hash-covered text/HTML content,
+not from the `Reservation-ID` header. Keep it that way — any future move to
+key off `Notification-Name`/`Reservation-ID`/`Driver-ID` headers instead
+would need this gap addressed first. Direction, not a decision.
 
 This section (DKIM/SPF/DMARC/ARC/header/MIME detail) still describes only
 the original 20 fixtures. The 21st (`CancelledReservationOwner`) fixture
@@ -117,20 +166,22 @@ recorded in §b, but full gate-2 evidence for it is still outstanding.
   `ApprovedChangeRequestBookedOwner` subject wording. The classifier now
   matches `change request` explicitly; both real change-confirmation
   samples classify as `change`, not `unknown`.
-- **Relay-reply disproven.** No `Reply-To` header appears on any of the 20
+- **Relay-reply disproven.** No `Reply-To` header appears on any of the 21
   samples, and there is no evidence of a reply-to-Turo-relay-address path in
   these fixtures — every sample's only reply-relevant header is the
   no-reply `From` address.
-- **`Notification-Name` as a future direction, with a caveat.** The header
-  maps cleanly 1:1 with the subject-fingerprint buckets in this sample set,
-  which suggests it could be a more robust template key than a
-  subject-text hash. This is **unverified** as an authentication anchor:
-  `Notification-Name` is not currently covered by either DKIM signature's
-  `h=` (signed-header) list in these samples, so unlike the subject (which
-  DKIM does cover), it is not itself cryptographically bound to the message.
-  Any future move to key off it would need that gap addressed first — this
-  is a direction, not a decision, and nothing here changes what the parser
-  keys off today.
+- **`Notification-Name` (and `Reservation-ID`/`Driver-ID`) as a future
+  direction, with a caveat.** `Notification-Name` maps cleanly 1:1 with the
+  subject-fingerprint buckets in this sample set, which suggests it could be
+  a more robust template key than a subject-text hash. This is **unverified**
+  as an authentication anchor for any of the three custom Turo headers: none
+  of `Notification-Name`, `Reservation-ID`, or `Driver-ID` are covered by
+  either DKIM signature's `h=` (signed-header) list in these samples — see
+  the dedicated DKIM `h=` verdict in §c — so unlike the subject (which DKIM
+  does cover), none of the three are cryptographically bound to the message.
+  Any future move to key off any of them would need that gap addressed
+  first — this is a direction, not a decision, and nothing here changes what
+  the parser keys off today.
 
 ## e. Coverage and gaps
 
@@ -146,6 +197,25 @@ cancellation sample from a different guest), capture via Gmail's "Download
 original" on a real occurrence when one arrives naturally, same as the 21
 samples already captured — do not synthesize or request a cancellation to
 manufacture a fixture.
+
+## f. Workers-runtime test coverage
+
+Separate from the fixture-classification evidence above, the ingest
+Worker's `email()` handler (`services/email-ingest-worker/src/index.ts`) now
+has a Workers-runtime test suite that runs the real handler inside
+Miniflare/workerd against the real `EMAIL_BUCKET` R2 binding (not a Node
+mock), covering the happy path (authorize → encrypt → R2 put → finalize),
+intake-disabled reject, unknown-alias reject, oversize reject, and a
+malformed-phase-response collapsing into the same generic reject. Run it
+with `pnpm test:worker-email` from the repo root. As of the post-audit
+restructure, this suite lives in the standalone, opt-in
+`services/email-ingest-worker/workerd-tests/` harness (its own
+`pnpm-workspace.yaml`, `package.json`, and lockfile), kept outside the pnpm
+workspace so the workers-pool test tooling never enters the root
+`pnpm-lock.yaml` — see that directory's README.md. This suite is
+infrastructure/regression coverage for the ingest transport, not gate-2
+template-classification evidence, and carries no bearing on the fingerprint
+approval question below.
 
 ## No approval implied
 

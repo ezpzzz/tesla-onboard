@@ -47,3 +47,7 @@ yarn-error.log*
 
 # turo email examples
 .turo-email-examples
+
+# isolated opt-in workerd test harness (never committed: see its README.md)
+/services/email-ingest-worker/workerd-tests/node_modules
+/services/email-ingest-worker/workerd-tests/pnpm-lock.yaml

@@ -37,6 +37,34 @@ Content-Transfer-Encoding: 7bit
 <p>We're sorry to tell you that your trip has been cancelled.</p>
 <p>Reservation ID: 71345678<br>Guest: Morgan Ellis</p>
 <p>You will not be charged for this cancellation.</p>
+<table class="trip-details-wrapper">
+  <tr><td><div style="text-transform:uppercase">Trip start</div></td></tr>
+  <tr><td><strong>9/1/26</strong></td></tr>
+  <tr><td style="color:#898989">1:00 pm</td></tr>
+</table>
+<table class="trip-details-wrapper">
+  <tr><td><div style="text-transform:uppercase">Trip end</div></td></tr>
+  <tr><td><strong>9/4/26</strong></td></tr>
+  <tr><td style="color:#898989">1:00 pm</td></tr>
+</table>
+<p style="font-weight:900"><a href="https://turo.com/us/en/car-rental/united-states/austin-tx/tesla/model-3/9990001">Tesla Model 3<span>2023</span></a></p>
+<div style="text-transform:uppercase">Location</div>
+<a href="http://maps.google.com/maps?f=q&amp;geocode=&amp;q=30.267200,-97.743100">
+  <table><tr><td align="center">100 Congress Avenue<br>Austin, TX</td></tr></table>
+</a>
+<p><a class="map-image-link" href="http://maps.google.com/maps?q=30.267200%2C-97.743100&amp;key=synthetic"><img src="http://maps.googleapis.com/maps/api/staticmap?center=30.267200%2C-97.743100&amp;zoom=16&amp;key=synthetic" border="0"></a></p>
+<style type="text/css">
+  @media only screen and (min-resolution: 2dppx) {
+    .map-image-link img {
+      content: url('http://maps.googleapis.com/maps/api/staticmap?center=30.267200%2C-97.743100&maptype=roadmap&zoom=16&size=360x186&scale=2&key=synthetic');
+    }
+  }
+</style>
+<!-- Real cancellation captures carry no tel: contact link once a trip is
+     cancelled — deliberately omitted here to match that. -->
+<div style="text-transform:uppercase">About the guest</div>
+<span><a href="https://turo.com/us/en/drivers/40010003"><img width="70" height="70" src="https://images.turo.com/media/driver/synth-avatar-ellis.300x300.jpg" style="border-radius:35px" alt="Morgan" title="Morgan"/></a></span>
+<a href="https://turo.com/us/en/drivers/40010003">Morgan</a>
 <p><em>This is a synthetic fixture message and does not describe a real cancellation.</em></p>
 </body></html>
 
