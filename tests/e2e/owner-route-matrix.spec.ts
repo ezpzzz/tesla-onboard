@@ -26,3 +26,17 @@ test("every owner destination uses the responsive shell without horizontal overf
     await expect(page.getByRole("navigation", { name: "Owner navigation" })).toBeVisible();
   }
 });
+
+test("integrations stays useful when background operations are disabled", async ({ page }) => {
+  await page.goto("/owner/integrations");
+
+  await expect(page.getByRole("heading", { name: "Tesla Fleet", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Google Calendar", level: 2 })).toBeVisible();
+  await expect(page.getByText("Operations integrations are disabled")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Import Tesla fleet" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Setup required" })).toBeDisabled();
+
+  await page.getByRole("link", { name: "Import Tesla fleet" }).click();
+  await expect(page).toHaveURL(/\/owner\/setup$/);
+  await expect(page.getByRole("heading", { name: "Connect your Tesla account" })).toBeVisible();
+});

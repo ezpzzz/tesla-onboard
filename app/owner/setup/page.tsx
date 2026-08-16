@@ -15,7 +15,7 @@
  * animate-rise) so it still *feels* like the guest walkthrough.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ProgressBar } from "@/components/ui";
 import { IconArrowLeft } from "@/components/icons";
 import {
@@ -35,10 +35,27 @@ import type { SetupNav, SetupStepProps } from "@/components/owner/setup/types";
 
 export default function OwnerSetupPage() {
   const { state, hydrated, update, reset } = useOwnerSetupState();
+  const [deepLinkHandled, setDeepLinkHandled] = useState(false);
 
   const setStep = useCallback((id: SetupStepId) => update({ step: id }), [update]);
 
-  if (!hydrated) {
+  useEffect(() => {
+    if (!hydrated || deepLinkHandled) return;
+    const url = new URL(window.location.href);
+    const requestedStep = url.searchParams.get("step");
+    if (requestedStep && SETUP_STEPS.some((step) => step.id === requestedStep)) {
+      setStep(requestedStep as SetupStepId);
+      url.searchParams.delete("step");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    }
+    setDeepLinkHandled(true);
+  }, [deepLinkHandled, hydrated, setStep]);
+
+  if (!hydrated || !deepLinkHandled) {
     return <div className="py-16 text-center text-sm text-muted">Loading…</div>;
   }
 
