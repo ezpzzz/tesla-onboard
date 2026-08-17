@@ -4,6 +4,41 @@ export const EMAIL_MAX_NORMALIZED_BYTES = 256 * 1024;
 export const EMAIL_SIGNATURE_WINDOW_SECONDS = 300;
 export const EVMAIL_MAGIC = "EVMAIL1" as const;
 
+// Workspace email alias local-part sizing. RFC 5321 §4.5.3.1.1 caps the
+// local-part (the part before "@") at 64 octets; Cloudflare's inbound MX
+// enforces this and rejects RCPT TO -- "500 5.5.2 ... Invalid email user" --
+// before the email worker ever runs, so this cap is a hard wire-protocol
+// limit, not a style preference. The local-part is `${token}.${signature}`:
+// a random hex token and an HMAC-SHA256 signature over it, both lowercase
+// and dot-atom-safe (hex is punctuation-free by construction; the signature
+// uses base64url -- alphabet a-z0-9-_, all dot-atom-legal per RFC 5322
+// atext -- lowercased so an intermediate MTA that case-folds envelope
+// addresses can never break verification).
+//
+// Sizes below keep the whole local-part at exactly 26 + 1 + 21 = 48 octets
+// (well under the 64-octet hard limit, with 16 octets/25% of headroom to
+// spare) while clearing both entropy floors with an explicit margin:
+//
+//  - EMAIL_ALIAS_TOKEN_BYTES (13 bytes -> 26 lowercase hex chars): 104 bits
+//    of raw randomness. Hex has no upper/lowercase collision, so this is an
+//    exact figure, not a worst case, comfortably above the >=96-bit floor
+//    (+8 bits of margin).
+//  - EMAIL_ALIAS_SIGNATURE_CHARS (21 chars): a prefix of the HMAC-SHA256
+//    digest's base64url encoding, i.e. 126 bits of the raw truncated MAC
+//    (truncating a MAC to >=120 bits is standard practice per NIST SP
+//    800-107, which permits truncation down to 32 bits -- this keeps a wide
+//    margin over that floor, +6 bits over our own 120-bit target). Because
+//    the signature is lowercased afterward for case-stability, two
+//    base64url symbols (upper and lower) can fold onto the same lowercase
+//    output character for the 52 of 64 alphabet positions that are letters,
+//    so the worst-case single-guess resistance of the *lowered* string is
+//    log2(64/2) = 5 bits/char, i.e. >=105 bits -- still computationally
+//    infeasible to brute force, and in any case the primary guarantee here
+//    is HMAC-SHA256 unforgeability (the signing key is never exposed), not
+//    guessing resistance over the encoded string alone.
+export const EMAIL_ALIAS_TOKEN_BYTES = 13;
+export const EMAIL_ALIAS_SIGNATURE_CHARS = 21;
+
 export type EmailCapturePhase = "authorize" | "init" | "finalize";
 export type EmailSourceKind = "turo_email" | "google_calendar";
 export type EmailCandidateEvent = "booking" | "change" | "cancellation" | "guest_message" | "noise" | "unknown";
@@ -222,5 +257,14 @@ export function decodeEvmailPlaintext(plaintext: Uint8Array): { rawMessage: Uint
 export function assertEmailAliasToken(value: string): string {
   const normalized = value.trim().toLowerCase();
   if (!/^[a-z0-9]{20,64}\.[a-z0-9_-]{16,86}$/.test(normalized)) throw new TypeError("email_alias_invalid");
+  // Belt-and-suspenders: the two character-class bounds above are each
+  // individually generous (kept wide for format flexibility), but their sum
+  // (64 + 1 + 86 = 151) does not itself enforce RFC 5321's 64-octet
+  // local-part cap -- a 69-octet alias would satisfy both bounds and still
+  // be rejected by Cloudflare's inbound MX before the email worker ever
+  // runs. Enforce the actual wire limit explicitly here too, so this
+  // validator can catch a future oversized mint even where the regex above
+  // would not.
+  if (normalized.length > 64) throw new TypeError("email_alias_invalid");
   return normalized;
 }

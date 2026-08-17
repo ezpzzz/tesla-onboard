@@ -1,7 +1,7 @@
 import PostalMime from "postal-mime";
 import {
   canonicalJsonBytes, encodeEvmailEnvelope, encodeEvmailPlaintext, evmailAad,
-  EMAIL_MAX_RAW_BYTES, type AuthorizeManifest, type CaptureFinalizeManifest,
+  EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_MAX_RAW_BYTES, type AuthorizeManifest, type CaptureFinalizeManifest,
   type CaptureInitManifest, type NormalizedEmailManifest,
 } from "@evhost/email-ingest-contract";
 import { normalizeParsedEmail } from "./normalize";
@@ -44,10 +44,16 @@ async function hmac(key: Uint8Array, value: Uint8Array): Promise<string> {
 }
 
 async function verifyAlias(localPart: string, keys: Map<number, Uint8Array>): Promise<boolean> {
+  // Token length is not checked here -- verifyAlias only requires it to be
+  // a non-empty run of characters before the ".", so it is already
+  // length-agnostic. EMAIL_ALIAS_SIGNATURE_CHARS is shared with
+  // lib/email/security.ts's createWorkspaceAlias via
+  // @evhost/email-ingest-contract so the two sides can never drift out of
+  // sync on the signature's truncation length.
   const [token, signature, extra] = localPart.toLowerCase().split(".");
   if (!token || !signature || extra !== undefined) return false;
   for (const key of keys.values()) {
-    const expected = (await hmac(key, encoder.encode(`evhost-email-alias-v1\u001f${token}`))).slice(0, 32).toLowerCase();
+    const expected = (await hmac(key, encoder.encode(`evhost-email-alias-v1\u001f${token}`))).slice(0, EMAIL_ALIAS_SIGNATURE_CHARS).toLowerCase();
     if (expected === signature) return true;
   }
   return false;

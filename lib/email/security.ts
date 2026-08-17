@@ -1,5 +1,10 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { captureSignaturePayload, EMAIL_SIGNATURE_WINDOW_SECONDS } from "@evhost/email-ingest-contract";
+import {
+  captureSignaturePayload,
+  EMAIL_ALIAS_SIGNATURE_CHARS,
+  EMAIL_ALIAS_TOKEN_BYTES,
+  EMAIL_SIGNATURE_WINDOW_SECONDS,
+} from "@evhost/email-ingest-contract";
 
 export interface VersionedKeyring {
   activeVersion: number;
@@ -33,12 +38,15 @@ export function createWorkspaceAlias(keyring: VersionedKeyring): {
   keyVersion: number;
 } {
   // Hex deliberately avoids punctuation so the local part satisfies the same
-  // fail-closed grammar in SQL, the Worker, and the shared contract.
-  const token = randomBytes(18).toString("hex");
+  // fail-closed grammar in SQL, the Worker, and the shared contract. Sizes
+  // (EMAIL_ALIAS_TOKEN_BYTES, EMAIL_ALIAS_SIGNATURE_CHARS) are shared with
+  // the Worker's verifyAlias and documented in @evhost/email-ingest-contract
+  // -- keep the local part comfortably under RFC 5321's 64-octet cap.
+  const token = randomBytes(EMAIL_ALIAS_TOKEN_BYTES).toString("hex");
   const keyVersion = keyring.activeVersion;
   const key = keyring.keys.get(keyVersion);
   if (!key) throw new Error("email_alias_key_missing");
-  const signature = createHmac("sha256", key).update(`evhost-email-alias-v1\u001f${token}`).digest("base64url").slice(0, 32).toLowerCase();
+  const signature = createHmac("sha256", key).update(`evhost-email-alias-v1\u001f${token}`).digest("base64url").slice(0, EMAIL_ALIAS_SIGNATURE_CHARS).toLowerCase();
   const localPart = `${token}.${signature}`;
   return {
     address: `${localPart}@mail.evhost.app`,
@@ -53,7 +61,7 @@ export function verifyWorkspaceAlias(localPart: string, keyring: VersionedKeyrin
   const [token, signature, extra] = normalized.split(".");
   if (extra !== undefined || !token || !signature) return false;
   for (const key of keyring.keys.values()) {
-    const expected = createHmac("sha256", key).update(`evhost-email-alias-v1\u001f${token}`).digest("base64url").slice(0, 32).toLowerCase();
+    const expected = createHmac("sha256", key).update(`evhost-email-alias-v1\u001f${token}`).digest("base64url").slice(0, EMAIL_ALIAS_SIGNATURE_CHARS).toLowerCase();
     if (expected.length === signature.length && timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) return true;
   }
   return false;

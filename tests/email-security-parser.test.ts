@@ -1,10 +1,31 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseEmailKeyring, createWorkspaceAlias, verifyWorkspaceAlias, signInternalCapture, verifyInternalCapture } from "@/lib/email/security";
 import { parseTuroEmail } from "@/lib/email/turo-parser";
 import { canAutoApply } from "@/lib/email/capabilities";
+import { EMAIL_ALIAS_SIGNATURE_CHARS } from "@/packages/email-ingest-contract/src";
 
 const keyring = parseEmailKeyring(`1:${Buffer.alloc(32, 7).toString("base64")}`, "TEST_KEYS");
+
+// Mirrors services/email-ingest-worker/src/index.ts's verifyAlias, the same
+// way the Workers-runtime test suite mirrors the mint side (that production
+// code is not exported for reuse across the Worker/Node boundary): it is
+// asserted here as "the" independent Cloudflare Worker verification path,
+// not the app's own lib/email/security.ts implementation being tested
+// against itself.
+function workerVerifyAlias(localPart: string, keys: ReadonlyMap<number, Buffer>): boolean {
+  const [token, signature, extra] = localPart.toLowerCase().split(".");
+  if (!token || !signature || extra !== undefined) return false;
+  for (const key of keys.values()) {
+    const expected = createHmac("sha256", key)
+      .update(`evhost-email-alias-v1${token}`)
+      .digest("base64url")
+      .slice(0, EMAIL_ALIAS_SIGNATURE_CHARS)
+      .toLowerCase();
+    if (expected === signature) return true;
+  }
+  return false;
+}
 
 describe("email security", () => {
   it("generates opaque, verifiable aliases", () => {
@@ -12,6 +33,47 @@ describe("email security", () => {
     const local = alias.address.split("@")[0];
     expect(verifyWorkspaceAlias(local, keyring)).toBe(true);
     expect(verifyWorkspaceAlias(`${local}x`, keyring)).toBe(false);
+  });
+
+  it("keeps the minted local-part comfortably inside RFC 5321's 64-octet cap", () => {
+    // The live delivery canary caught aliases at 69 octets (36-char token +
+    // "." + 32-char signature), which Cloudflare's inbound MX rejects with
+    // "500 5.5.2 ... Invalid email user" before the email worker ever runs.
+    // Assert well under the hard 64-octet limit, against many random mints,
+    // so no future size tweak can silently regress past the wire limit.
+    for (let i = 0; i < 500; i += 1) {
+      const alias = createWorkspaceAlias(keyring);
+      const local = alias.address.split("@")[0];
+      const octets = Buffer.byteLength(local, "utf8");
+      expect(octets).toBeLessThanOrEqual(48);
+      expect(octets).toBeLessThanOrEqual(64);
+      // Dot-atom-safe, lowercase, single separator: no leading/trailing/
+      // consecutive dots, exactly one "token.signature" split.
+      expect(local).toMatch(/^[a-z0-9]+\.[a-z0-9_-]+$/);
+    }
+  });
+
+  it("round-trips: an app-minted alias verifies via the Worker's independent verifyAlias logic", () => {
+    const alias = createWorkspaceAlias(keyring);
+    const local = alias.address.split("@")[0];
+    expect(workerVerifyAlias(local, keyring.keys)).toBe(true);
+  });
+
+  it("rejects a tampered signature", () => {
+    const alias = createWorkspaceAlias(keyring);
+    const [token, signature] = alias.address.split("@")[0].split(".");
+    const flippedChar = signature[0] === "a" ? "b" : "a";
+    const tampered = `${token}.${flippedChar}${signature.slice(1)}`;
+    expect(verifyWorkspaceAlias(tampered, keyring)).toBe(false);
+    expect(workerVerifyAlias(tampered, keyring.keys)).toBe(false);
+  });
+
+  it("rejects a signature minted under a foreign key", () => {
+    const foreignKeyring = parseEmailKeyring(`1:${Buffer.alloc(32, 9).toString("base64")}`, "FOREIGN_TEST_KEYS");
+    const foreignAlias = createWorkspaceAlias(foreignKeyring);
+    const local = foreignAlias.address.split("@")[0];
+    expect(verifyWorkspaceAlias(local, keyring)).toBe(false);
+    expect(workerVerifyAlias(local, keyring.keys)).toBe(false);
   });
 
   it("binds signatures to phase, body, key, nonce, and time", () => {

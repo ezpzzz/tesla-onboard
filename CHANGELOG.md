@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1 — 2026-08-16
+
+- Fix workspace email aliases minted by `createWorkspaceAlias` being RFC 5321-overlong (69-octet local-part: 36-char token + "." + 32-char signature) and therefore undeliverable -- Cloudflare's inbound MX rejected RCPT TO with "500 5.5.2 ... Invalid email user" before the email worker ever ran, so no mintable alias had ever actually delivered mail. The local-part format is shortened to 26-char token + "." + 21-char signature (48 octets total, comfortably under the 64-octet hard limit) while keeping the same HMAC keyring scheme, `token.signature` structure, and >= 96/120-bit entropy floors -- see the sizing comment on `EMAIL_ALIAS_TOKEN_BYTES`/`EMAIL_ALIAS_SIGNATURE_CHARS` in `packages/email-ingest-contract/src/index.ts`.
+
+### For contributors
+
+- Keep every email-ingestion feature flag default-false; no gate flips as part of this release.
+- There is no backward-compat constraint on the alias format: no alias minted before this fix could ever have been delivered, so nothing depends on the old 69-octet shape. The one existing prod integration record (minted under the old, undeliverable format) must be rotated after this ships -- use the integration's existing "rotate" action.
+
 ## 0.7.0 — 2026-08-16
 
 - Add the Turo email action executor: a manager-authenticated confirm/abort saga for booking, change, and cancellation candidates, with a 30-minute destructive-action brake before any provider-facing revoke proceeds. Still fully dark — automation stays behind the default-false `ONLYEVS_EMAIL_WORKER_ENABLED` and `ONLYEVS_EMAIL_AUTO_*` gates end to end; confirm/abort remain manual owner actions.
