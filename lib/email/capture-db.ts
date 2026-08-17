@@ -2,6 +2,8 @@ import "server-only";
 
 import { Pool, type PoolConfig, type QueryResultRow } from "pg";
 
+import { SUPABASE_POOLER_CA } from "./supabase-pooler-ca";
+
 /**
  * Direct-Postgres client for the internal Turo email capture routes
  * (authorize/capture) and the SendGrid delivery-event webhook. These routes
@@ -21,7 +23,7 @@ import { Pool, type PoolConfig, type QueryResultRow } from "pg";
 
 let pool: Pool | null = null;
 
-function resolveSsl(connectionString: string): PoolConfig["ssl"] {
+export function resolveSsl(connectionString: string): PoolConfig["ssl"] {
   try {
     const sslmode = new URL(connectionString).searchParams.get("sslmode");
     // A bare local/test Postgres (used by `pnpm test` fixtures and local
@@ -32,14 +34,45 @@ function resolveSsl(connectionString: string): PoolConfig["ssl"] {
     // Non-URL (libpq keyword/value) connection strings fall through to the
     // default below.
   }
-  // Supabase's Supavisor pooler presents a publicly-trusted certificate, so
-  // the Node default trust store verifies it without extra configuration --
-  // full chain verification stays on. If your pooler tier requires
-  // `uselibpqcompat=true`, append it to ONLYEVS_EMAIL_CAPTURE_DATABASE_URL
-  // itself (see .env.example): it's a pooler-side wire-compatibility flag
-  // read from the DSN, not a TLS trust setting, so it does not change
-  // verification behavior here.
-  return { rejectUnauthorized: true };
+  // Supabase's Supavisor pooler presents a leaf cert (`*.pooler.supabase.com`)
+  // chaining through "Supabase Intermediate 2021 CA" to a self-signed
+  // "Supabase Root 2021 CA" -- a private root that is NOT in Node's (or any
+  // OS's) default trust store. Verifying with only `rejectUnauthorized: true`
+  // and no `ca` fails every real connection with SELF_SIGNED_CERT_IN_CHAIN.
+  // Full chain verification stays on; we just also tell Node which root to
+  // trust. ONLYEVS_EMAIL_CAPTURE_DATABASE_SSL_CA (base64 PEM, see
+  // .env.example) replaces the bundled default below for future CA rotation.
+  // If your pooler tier requires `uselibpqcompat=true`, append it to
+  // ONLYEVS_EMAIL_CAPTURE_DATABASE_URL itself: it's a pooler-side
+  // wire-compatibility flag read from the DSN, not a TLS trust setting, so
+  // it does not change verification behavior here.
+  const caOverride = process.env.ONLYEVS_EMAIL_CAPTURE_DATABASE_SSL_CA?.trim();
+  const ca = caOverride ? Buffer.from(caOverride, "base64").toString("utf8") : SUPABASE_POOLER_CA;
+  return { rejectUnauthorized: true, ca: [ca] };
+}
+
+/**
+ * `pg`'s ConnectionParameters constructor re-parses `connectionString` and
+ * does `config = Object.assign({}, config, parse(config.connectionString))`
+ * -- since `parse()` (pg-connection-string) sees `sslmode` in the DSN, it
+ * derives its OWN `ssl` value (an empty `{}` for `require`, with no `ca`)
+ * and that spreads-in-last, silently clobbering whatever explicit `ssl`
+ * object we pass alongside `connectionString`. Left alone, that would
+ * discard our `ca` and fall back to Node's default trust store --
+ * reintroducing SELF_SIGNED_CERT_IN_CHAIN even with resolveSsl() "fixed".
+ * Stripping the ssl-related query params from the string handed to `Pool`
+ * (while `resolveSsl` above still inspects the *original* string) prevents
+ * pg's parser from ever setting `config.ssl` itself, so our explicit object
+ * survives the merge untouched.
+ */
+export function stripSslQueryParams(connectionString: string): string {
+  try {
+    const url = new URL(connectionString);
+    for (const key of ["sslmode", "sslcert", "sslkey", "sslrootcert"]) url.searchParams.delete(key);
+    return url.toString();
+  } catch {
+    return connectionString;
+  }
 }
 
 /** Returns null when ONLYEVS_EMAIL_CAPTURE_DATABASE_URL is unset, so callers fail closed like createServiceRoleClient() did. */
@@ -48,7 +81,7 @@ export function getEmailCaptureDbPool(): Pool | null {
   if (!connectionString) return null;
   if (!pool) {
     pool = new Pool({
-      connectionString,
+      connectionString: stripSslQueryParams(connectionString),
       max: 1,
       idleTimeoutMillis: 0,
       ssl: resolveSsl(connectionString),
