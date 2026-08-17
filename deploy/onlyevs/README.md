@@ -73,6 +73,19 @@ the parser worker; pause affected integrations; then detach the catch-all Worker
 Do not delete audit rows or R2 objects manually—retention cleanup remains the
 source of truth.
 
+Delivery is forward-first and fails open: when `EVHOST_EMAIL_FORWARD_TO` is
+set to a Cloudflare-verified destination address, mail to a valid workspace
+alias is forwarded to the owner's personal inbox *before* the capture
+pipeline runs. A forward failure (e.g. the destination isn't verified with
+Cloudflare yet) never blocks capture, and a capture failure after a
+successful forward is accepted rather than bounced -- the human already has
+the mail. Only unknown/invalid aliases are rejected (the spam gate for the
+catch-all) and only the case where *both* forward and capture fail results
+in a reject. This var is independent of the `ONLYEVS_EMAIL_AUTO_*` automation
+gates above, which stay false regardless of whether forwarding is enabled --
+forward-first only affects where the raw mail lands, not what the app does
+with the parsed capture.
+
 The vehicle configuration emitted by the app is deliberately bounded to
 `Soc`, `EstBatteryRange`, `Odometer`, `DetailedChargeState`, `Locked`, and
 `Location`. Baseline telemetry never requests Location. The worker adds it only

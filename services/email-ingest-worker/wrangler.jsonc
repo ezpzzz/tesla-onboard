@@ -7,6 +7,13 @@
   "vars": {
     "EVHOST_APP_ORIGIN": "https://evhost.app",
     "EVHOST_EMAIL_INGEST_ENABLED": "true",
-    "EMAIL_RETENTION_DAYS": "30"
+    "EMAIL_RETENTION_DAYS": "30",
+    // Forward-first delivery: when set to a Cloudflare-verified destination
+    // address, mail to a valid workspace alias is forwarded to the owner's
+    // personal inbox before the capture pipeline runs, so delivery fails
+    // open even if capture is down. Empty ("") disables forwarding
+    // (capture-only). Independent of the ONLYEVS_EMAIL_AUTO_*/
+    // ONLYEVS_EMAIL_WORKER_ENABLED automation gates, which stay false.
+    "EVHOST_EMAIL_FORWARD_TO": ""
   }
 }

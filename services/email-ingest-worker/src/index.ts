@@ -6,7 +6,7 @@ import {
 } from "@evhost/email-ingest-contract";
 import { normalizeParsedEmail } from "./normalize";
 
-interface EmailMessage { from: string; to: string; headers?: Headers; raw: ReadableStream<Uint8Array>; rawSize: number; setReject(reason: string): void }
+interface EmailMessage { from: string; to: string; headers?: Headers; raw: ReadableStream<Uint8Array>; rawSize: number; setReject(reason: string): void; forward(rcptTo: string, headers?: Headers): Promise<void> }
 interface R2Bucket { put(key: string, value: Uint8Array, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown> }
 interface Env {
   EMAIL_BUCKET: R2Bucket;
@@ -16,6 +16,17 @@ interface Env {
   EVHOST_EMAIL_CAPTURE_HMAC_KEYS: string;
   EVHOST_EMAIL_KEK_KEYS: string;
   EMAIL_RETENTION_DAYS: string;
+  // Forward-first delivery (deliberately independent of the authorize/DB
+  // capture path below): when non-empty, a verified-alias message is
+  // forwarded to this address FIRST via message.forward(), before any
+  // capture-pipeline work runs. Cloudflare only delivers forward() to a
+  // *verified* destination address -- until that verification completes for
+  // a given deployment, forward() throws and capture proceeds unaffected.
+  // Empty/unset disables forwarding entirely (capture-only, today's
+  // behavior). This does not gate or replace the ONLYEVS_EMAIL_AUTO_* /
+  // ONLYEVS_EMAIL_WORKER_ENABLED automation gates, which stay independently
+  // false.
+  EVHOST_EMAIL_FORWARD_TO: string;
 }
 
 const encoder = new TextEncoder();
@@ -130,10 +141,25 @@ export default {
     const localPart = message.to.toLowerCase().split("@")[0];
 
     let phase = "keyring_parse";
+    let forwarded = false;
     try {
       const aliasKeys = parseKeys(env.EVHOST_EMAIL_ALIAS_HMAC_KEYS);
       phase = "verify_alias";
       if (!(await verifyAlias(localPart, aliasKeys))) { message.setReject("Unknown EVhost address"); return; }
+
+      // Forward-first: deliver to the owner's personal inbox before any
+      // capture-pipeline work, so mail reaches a human even when capture is
+      // down. A forward failure (most commonly: destination not yet
+      // verified with Cloudflare) must never abort capture -- it's caught
+      // and logged here, independent of the capture try/catch below.
+      if (env.EVHOST_EMAIL_FORWARD_TO) {
+        try {
+          await message.forward(env.EVHOST_EMAIL_FORWARD_TO);
+          forwarded = true;
+        } catch (forwardError) {
+          console.error(`evhost email ingest: forward to owner inbox failed at phase "forward" (continuing to capture pipeline):`, forwardError);
+        }
+      }
 
       const requestedInboundId = crypto.randomUUID();
       const aliasHash = await sha256(localPart);
@@ -174,6 +200,16 @@ export default {
       const finalizeResponse = await signedPost(env, "finalize", "/api/internal/turo-email/capture?phase=finalize", canonicalJsonBytes(finalize));
       assertCaptureResponse(finalizeResponse, "finalize");
     } catch (error) {
+      if (forwarded) {
+        // The mail already reached the owner's inbox via forward() above --
+        // rejecting now would bounce a message the sender's MTA believes was
+        // delivered. Fail open here (accept, no setReject); the capture
+        // pipeline is the thing that failed, and automation reading from it
+        // stays independently gated off, so this is a delivery/logging
+        // decision only, not an automation one.
+        console.error(`evhost email ingest: capture failed at phase "${phase}" after forward already succeeded (accepting, mail delivered to owner inbox):`, error);
+        return;
+      }
       console.error(`evhost email ingest failed at phase "${phase}":`, error);
       message.setReject("EVhost email intake temporarily unavailable");
     }
