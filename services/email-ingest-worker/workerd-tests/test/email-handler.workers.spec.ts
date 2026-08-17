@@ -1,6 +1,6 @@
 import { env as realEnv } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_MAX_RAW_BYTES, lowerBase32Prefix } from "@evhost/email-ingest-contract";
+import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_ALIAS_TOKEN_CHARS, EMAIL_MAX_RAW_BYTES, lowerBase32Prefix } from "@evhost/email-ingest-contract";
 import worker from "../../src/index";
 // Reuse the existing synthetic fixture from the workspace package's test
 // dir -- it's already reviewed content (see
@@ -78,6 +78,12 @@ function keyringEnvValue(key: Uint8Array, version = 1): string {
   return `${version}:${toBase64(key)}`;
 }
 async function validAliasLocalPart(token: string, key: Uint8Array): Promise<string> {
+  // src/index.ts's verifyAlias now enforces EMAIL_ALIAS_TOKEN_CHARS exactly
+  // (not merely non-empty), so every fixture token passed in here must be
+  // exactly that many characters or the "happy path" tests below would
+  // start failing generic-alias-verification instead of exercising what
+  // they're named for.
+  if (token.length !== EMAIL_ALIAS_TOKEN_CHARS) throw new Error(`test fixture token must be ${EMAIL_ALIAS_TOKEN_CHARS} chars, got "${token}" (${token.length})`);
   const digest = await hmacSha256(key, encoder.encode(`evhost-email-alias-v1${token}`));
   const signature = lowerBase32Prefix(new Uint8Array(digest), EMAIL_ALIAS_SIGNATURE_CHARS);
   return `${token}.${signature}`;
@@ -152,7 +158,7 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
       "/api/internal/turo-email/capture?phase=finalize": () => ({ id: crypto.randomUUID(), state: "finalized" }),
     });
 
-    const to = `${await validAliasLocalPart("happytoken", aliasKey)}@mail.evhost.app`;
+    const to = `${await validAliasLocalPart("happytoken23456", aliasKey)}@mail.evhost.app`;
     const message = buildMessage({ to, raw: encoder.encode(syntheticBookingEml) });
 
     await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true" });
@@ -174,7 +180,7 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
     expect(baseEnv.EVHOST_EMAIL_INGEST_ENABLED).toBe("false");
     const fetchMock = stubFetch({});
 
-    const to = `${await validAliasLocalPart("disabledtoken", aliasKey)}@mail.evhost.app`;
+    const to = `${await validAliasLocalPart("disabledtoken27", aliasKey)}@mail.evhost.app`;
     const message = buildMessage({ to, raw: encoder.encode("irrelevant, never read") });
 
     await worker.email(message, baseEnv);
@@ -202,7 +208,7 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
       "/api/internal/turo-email/authorize": () => ({ inbound_id: crypto.randomUUID(), accepted_alias_revision: 1, object_key: objectKey }),
     });
 
-    const to = `${await validAliasLocalPart("oversizetoken", aliasKey)}@mail.evhost.app`;
+    const to = `${await validAliasLocalPart("oversizetoken27", aliasKey)}@mail.evhost.app`;
     // The size guard reads the envelope-declared size before streaming, so
     // the actual bytes here can stay tiny -- only `rawSize` needs to exceed
     // the cap to exercise the email_raw_too_large path.
@@ -226,7 +232,7 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
       "/api/internal/turo-email/capture?phase=init": () => ({}),
     });
 
-    const to = `${await validAliasLocalPart("malformedtoken", aliasKey)}@mail.evhost.app`;
+    const to = `${await validAliasLocalPart("malformedtoken2", aliasKey)}@mail.evhost.app`;
     const message = buildMessage({ to, raw: encoder.encode(syntheticBookingEml) });
 
     await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true" });

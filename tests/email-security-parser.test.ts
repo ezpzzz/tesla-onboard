@@ -3,7 +3,16 @@ import { describe, expect, it } from "vitest";
 import { parseEmailKeyring, createWorkspaceAlias, verifyWorkspaceAlias, signInternalCapture, verifyInternalCapture } from "@/lib/email/security";
 import { parseTuroEmail } from "@/lib/email/turo-parser";
 import { canAutoApply } from "@/lib/email/capabilities";
-import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_ALIAS_TOKEN_BYTES, lowerBase32Prefix } from "@/packages/email-ingest-contract/src";
+import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_ALIAS_TOKEN_BYTES, EMAIL_ALIAS_TOKEN_CHARS, lowerBase32Prefix } from "@/packages/email-ingest-contract/src";
+
+// WHATWG HTML5 <input type="email"> validation regex (the exact pattern
+// browsers/Turo-style form validators are built against), used below as a
+// Turo-compat regression guard: the previous 69-octet format was long
+// enough to be rejected by real-world validators even though it matched
+// this pattern, so passing it alone doesn't prove deliverability -- it's
+// combined with an explicit total-length assertion.
+const WHATWG_HTML5_EMAIL_REGEX =
+  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
 const keyring = parseEmailKeyring(`1:${Buffer.alloc(32, 7).toString("base64")}`, "TEST_KEYS");
 
@@ -16,6 +25,7 @@ const keyring = parseEmailKeyring(`1:${Buffer.alloc(32, 7).toString("base64")}`,
 function workerVerifyAlias(localPart: string, keys: ReadonlyMap<number, Buffer>): boolean {
   const [token, signature, extra] = localPart.toLowerCase().split(".");
   if (!token || !signature || extra !== undefined) return false;
+  if (token.length !== EMAIL_ALIAS_TOKEN_CHARS || signature.length !== EMAIL_ALIAS_SIGNATURE_CHARS) return false;
   for (const key of keys.values()) {
     const digest = createHmac("sha256", key)
       .update(`evhost-email-alias-v1${token}`)
@@ -34,50 +44,74 @@ describe("email security", () => {
     expect(verifyWorkspaceAlias(`${local}x`, keyring)).toBe(false);
   });
 
-  it("keeps the minted local-part comfortably inside RFC 5321's 64-octet cap", () => {
+  it("keeps the minted local-part at exactly the Turo-compatible 24-octet shape", () => {
     // The live delivery canary caught aliases at 69 octets (36-char token +
     // "." + 32-char signature), which Cloudflare's inbound MX rejects with
     // "500 5.5.2 ... Invalid email user" before the email worker ever runs.
-    // Assert well under the hard 64-octet limit, against many random mints,
-    // so no future size tweak can silently regress past the wire limit.
+    // There is no confirmed exact ceiling below 64 octets (the validator
+    // that rejected 69 is not publicly documented), so the format shrinks
+    // aggressively rather than to a "discovered" limit: assert the exact
+    // 15-char-token + "." + 8-char-signature shape, against many random
+    // mints, so no future size tweak can silently regress past either the
+    // Turo-compat margin or the RFC 5321 wire limit.
     for (let i = 0; i < 500; i += 1) {
       const alias = createWorkspaceAlias(keyring);
       const local = alias.address.split("@")[0];
       const octets = Buffer.byteLength(local, "utf8");
-      expect(octets).toBeLessThanOrEqual(52);
+      expect(octets).toBe(24);
       expect(octets).toBeLessThanOrEqual(64);
       // Dot-atom-safe, lowercase, single separator: no leading/trailing/
-      // consecutive dots, exactly one "token.signature" split. The signature
-      // half is lowercase base32 (a-z2-7), not base64url -- see the
-      // min-entropy floor test below for why.
+      // consecutive dots, exactly one "token.signature" split. Both halves
+      // are lowercase base32 (a-z2-7), not hex/base64url -- see the sizing
+      // comment on EMAIL_ALIAS_TOKEN_CHARS in @evhost/email-ingest-contract
+      // for why.
       const [token, signature] = local.split(".");
-      expect(local).toMatch(/^[a-z0-9]+\.[a-z0-9_-]+$/);
-      expect(token).toMatch(/^[a-z0-9]{26}$/);
-      expect(signature).toMatch(/^[a-z2-7]{25}$/);
+      expect(local).toMatch(/^[a-z2-7]+\.[a-z2-7]+$/);
+      expect(token).toMatch(/^[a-z2-7]{15}$/);
+      expect(signature).toMatch(/^[a-z2-7]{8}$/);
     }
   });
 
-  it("clears the >=120-bit post-folding min-entropy floor by construction, computed from the sizing constants", () => {
-    // Both createWorkspaceAlias and verifyWorkspaceAlias/verifyAlias
-    // unconditionally lowercase the signature before comparing it, so the
-    // guessing-resistance figure that matters is the min-entropy of the
-    // *lowered* alphabet, not the pre-lowering one. Base32's alphabet
-    // (a-z2-7, RFC 4648) has 32 symbols that are already all-lowercase and
-    // case-distinct, so lowercasing it folds nothing -- every char clears
-    // exactly log2(32) = 5 bits of min-entropy, with no post-folding
-    // penalty. (Contrast the bug this test guards against: base64url's 52
-    // letter positions collapse 2:1 under lowercasing, measured at ~4.994
-    // bits/char after folding -- the previous EMAIL_ALIAS_SIGNATURE_CHARS=21
-    // base64url chars measured ~104.9 bits, below this floor, despite a
-    // stale comment quoting the unfolded 126-bit figure.)
-    const FOLDED_MIN_ENTROPY_BITS_PER_CHAR = 5; // log2(32), exact for base32, not approximate
-    const signatureBits = EMAIL_ALIAS_SIGNATURE_CHARS * FOLDED_MIN_ENTROPY_BITS_PER_CHAR;
-    expect(signatureBits).toBeGreaterThanOrEqual(120);
+  it("computes the honest, intentionally-below-120-bit sizes from the sizing constants (mutation-detectable)", () => {
+    // This format deliberately does NOT clear a >=120-bit (signature) /
+    // >=96-bit (token) guessing floor -- that was the previous version of
+    // this file's model, and chasing it is what produced an alias too long
+    // for Turo's mail validators to accept. See the threat-model comment on
+    // EMAIL_ALIAS_SIGNATURE_CHARS in @evhost/email-ingest-contract for why
+    // HMAC unforgeability + SMTP-rate-limited guessing + Review-mode
+    // fingerprint gating is the real guarantee instead. This test only pins
+    // today's actual, intentional sizes -- computed from the constants, not
+    // hardcoded independently of them -- so a future accidental edit to
+    // either constant is caught without silently re-inflating the format.
+    const BITS_PER_BASE32_CHAR = 5; // log2(32), exact for base32, not approximate
 
-    // The hex token is never lowercased-with-collisions (0-9a-f has no
-    // uppercase form to fold), so its full raw entropy applies unmodified.
-    const tokenBits = EMAIL_ALIAS_TOKEN_BYTES * 8;
-    expect(tokenBits).toBeGreaterThanOrEqual(96);
+    // lowerBase32Prefix's own guard: bytes drawn must supply at least
+    // EMAIL_ALIAS_TOKEN_CHARS * 5 bits, or minting throws.
+    expect(EMAIL_ALIAS_TOKEN_BYTES * 8).toBeGreaterThanOrEqual(EMAIL_ALIAS_TOKEN_CHARS * BITS_PER_BASE32_CHAR);
+
+    const tokenBits = EMAIL_ALIAS_TOKEN_CHARS * BITS_PER_BASE32_CHAR;
+    const signatureBits = EMAIL_ALIAS_SIGNATURE_CHARS * BITS_PER_BASE32_CHAR;
+    // Literal targets from the format spec (not re-derived from the same
+    // constants being asserted), so a mutation to either constant flips
+    // one of these comparisons.
+    expect(tokenBits).toBe(75);
+    expect(signatureBits).toBe(40);
+    expect(EMAIL_ALIAS_TOKEN_BYTES).toBe(10);
+    expect(EMAIL_ALIAS_TOKEN_CHARS).toBe(15);
+    expect(EMAIL_ALIAS_SIGNATURE_CHARS).toBe(8);
+  });
+
+  it("mints an address that passes the WHATWG HTML5 email regex within the spec's 40-octet cap (Turo-compat regression guard)", () => {
+    // The previous 69-octet format satisfied every generic email-shape
+    // validator (including this one) and still got rejected by Turo's
+    // real-world delivery path, so passing this regex alone never proved
+    // deliverability. This guard combines it with the explicit total-length
+    // cap the shorter format exists to satisfy.
+    for (let i = 0; i < 50; i += 1) {
+      const alias = createWorkspaceAlias(keyring);
+      expect(alias.address).toMatch(WHATWG_HTML5_EMAIL_REGEX);
+      expect(Buffer.byteLength(alias.address, "utf8")).toBeLessThanOrEqual(40);
+    }
   });
 
   it("round-trips: an app-minted alias verifies via the Worker's independent verifyAlias logic", () => {
