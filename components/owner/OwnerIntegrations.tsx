@@ -282,6 +282,22 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
   );
 }
 
+/**
+ * Shared with tests: the four guided-setup step titles and the one-line
+ * summary of what "forwarding" actually does. Keeping these as named
+ * constants (rather than inline strings) lets render tests assert on the
+ * real UI copy without duplicating it.
+ */
+export const TURO_EMAIL_SETUP_STEPS = [
+  "Copy your private address",
+  "Paste it into Turo",
+  "Approve two verification emails",
+  "Send a test",
+] as const;
+
+export const TURO_EMAIL_FORWARDING_NOTE =
+  "Turo notices land in your personal inbox unchanged, and EVhost files a review card for each — approve or dismiss in Inbox.";
+
 interface TuroEmailState {
   id: string;
   status: "pending_verification" | "testing" | "active" | "paused" | "error" | "disconnected";
@@ -334,11 +350,45 @@ function TuroEmailIntegration({ scope, configured, intakeEnabled, automationEnab
   return <Card className="overflow-hidden"><div className="p-4 sm:p-5"><div className="flex items-start gap-3.5"><span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-lg", connected ? "bg-good/10 text-good" : "bg-brand/10 text-brand")}>{connected ? <IconCheck className="h-5 w-5" /> : <IconMail className="h-5 w-5" />}</span><div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">Booking intake</p><div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-lg font-semibold">Turo email forwarding</h2><Badge tone={connected ? "good" : integration ? "warn" : "neutral"}>{connected ? "Connected" : integration ? integration.status.replaceAll("_", " ") : configured ? "Ready to set up" : "Setup required"}</Badge></div><p className="mt-2 text-sm leading-relaxed text-muted">Forward Turo notices to a private workspace address so EVhost can place bookings and updates in Inbox.</p></div></div>
     {message ? <div role="status" className="mt-4 rounded-md border border-line bg-surface p-3 text-sm">{message}</div> : null}
     {!configured ? <div className="mt-4 rounded-md bg-surface p-3 text-sm text-muted">Administrator keyrings are required before an address can be generated.</div> : !integration ? <Button variant="brand" className="mt-4 w-full sm:w-auto" disabled={busy || loading} onClick={() => void change("setup")}>Create private address</Button> : <div className="mt-5 space-y-4">
-      <ol className="grid gap-3 text-sm sm:grid-cols-3"><SetupStep number="1" title="Copy address" done={Boolean(integration.alias_address)}><div className="mt-2 break-all rounded bg-white p-2 text-xs ring-1 ring-line">{integration.alias_address}</div><Button variant="ghost" className="mt-2" onClick={() => void navigator.clipboard.writeText(integration.alias_address)}>Copy</Button></SetupStep><SetupStep number="2" title="Forward Turo mail" done={connected}><p className="mt-2 text-muted">Add this address to the inbox that receives your Turo notifications.</p></SetupStep><SetupStep number="3" title="Verify" done={connected}><Button variant="secondary" className="mt-2" disabled={busy || !intakeEnabled} onClick={() => void change("test")}>{intakeEnabled ? "Send test" : "Intake is off"}</Button></SetupStep></ol>
+      <p className="text-sm leading-relaxed text-muted">{TURO_EMAIL_FORWARDING_NOTE}</p>
+      <ol className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+        <SetupStep number="1" title={TURO_EMAIL_SETUP_STEPS[0]} done={Boolean(integration.alias_address)}><div className="mt-2 break-all rounded bg-white p-2 text-xs ring-1 ring-line">{integration.alias_address}</div><Button variant="ghost" className="mt-2" onClick={() => void navigator.clipboard.writeText(integration.alias_address)}>Copy</Button></SetupStep>
+        <SetupStep number="2" title={TURO_EMAIL_SETUP_STEPS[1]} done={connected}><p className="mt-2 text-muted">In Turo, go to Account → Notification settings and set this as your booking email.</p></SetupStep>
+        <SetupStep number="3" title={TURO_EMAIL_SETUP_STEPS[2]} done={connected}>
+          <p className="mt-2 text-muted">Two automated emails may arrive in your personal inbox — click the link in each to finish.</p>
+          <TuroEmailVerificationDetail />
+        </SetupStep>
+        <SetupStep number="4" title={TURO_EMAIL_SETUP_STEPS[3]} done={connected}><Button variant="secondary" className="mt-2" disabled={busy || !intakeEnabled} onClick={() => void change("test")}>{intakeEnabled ? "Send test" : "Intake is off"}</Button></SetupStep>
+      </ol>
       <fieldset className="rounded-md border border-line p-4"><legend className="px-1 text-sm font-semibold">Handling mode</legend><label className="mt-2 flex gap-3"><input type="radio" checked={integration.mode === "review"} onChange={() => void change("mode", "review")} /><span><strong className="block text-sm">Review</strong><span className="text-xs text-muted">You approve booking changes in Inbox.</span></span></label><label className="mt-3 flex gap-3"><input type="radio" checked={integration.mode === "auto"} onChange={() => void change("mode", "auto")} /><span><strong className="block text-sm">Auto when verified</strong><span className="text-xs text-muted">Only approved templates and separately enabled risk gates can run automatically.{!automationEnabled ? " Automation is currently platform-disabled." : ""}</span></span></label></fieldset>
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={busy} onClick={() => void change(integration.status === "paused" ? "resume" : "pause")}>{integration.status === "paused" ? "Resume" : "Pause"}</Button><Button variant="ghost" disabled={busy} onClick={() => void change("rotate")}>Rotate address</Button><Button variant="ghost" disabled={busy} onClick={() => void change("disconnect")}>Disconnect</Button></div>
     </div>}
   </div></Card>;
+}
+
+/**
+ * Pure, static explainer for the two automated verification emails a host may
+ * see while wiring up Turo forwarding. Kept dependency-free (no hooks, no
+ * context) so it renders identically regardless of connection state and can
+ * be unit-tested with `react-dom/server` alone.
+ */
+export function TuroEmailVerificationDetail() {
+  return (
+    <details className="mt-2 rounded-md border border-line bg-white p-2 text-xs open:pb-3">
+      <summary className="cursor-pointer select-none font-semibold text-ink-soft">What are these emails?</summary>
+      <div className="mt-2 space-y-3 text-muted">
+        <div>
+          <p className="font-semibold text-ink-soft">Cloudflare &lt;noreply@notify.cloudflare.com&gt;</p>
+          <p>Subject: &quot;[Action required] Verify your Email Routing address&quot;</p>
+          <p className="mt-1">Sent because EVhost forwards your Turo mail to your personal inbox. The account name shown in the email (a short random string) is EVhost&apos;s mail infrastructure, not a mistake — it&apos;s expected. Click &quot;Verify email address.&quot;</p>
+        </div>
+        <div>
+          <p className="font-semibold text-ink-soft">Turo &mdash; &quot;Please verify your email address&quot;</p>
+          <p className="mt-1">Click Turo&apos;s link to confirm your booking address. The same notice also appears as a Review card in Inbox here.</p>
+        </div>
+      </div>
+    </details>
+  );
 }
 
 function SetupStep({ number, title, done, children }: { number: string; title: string; done: boolean; children: ReactNode }) {
