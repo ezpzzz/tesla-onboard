@@ -669,12 +669,19 @@ interface TripEvidenceBookendRow {
  *   before writing), so this reads by trip_id directly, no time-window math
  *   needed. Ciphertext is decrypted with the same keyring/AAD the worker
  *   used to encrypt it -- server-side, worker-only, never exposed -- and
- *   only the resulting COUNT is written to the payload; a point that fails
- *   to decrypt (e.g. a rotated-out key_version) is skipped from the count
- *   rather than aborting the whole packet, since the count is already a
- *   sampled signal (LOCATION_INTERVAL_SECONDS/LOCATION_MINIMUM_DELTA_METERS
- *   -- not a continuous track) and one unreadable sample does not make an
- *   aggregate dishonest. This is NOT gated by
+ *   only the resulting COUNT is written to the payload. A point that fails
+ *   to decrypt/parse (e.g. a rotated-out key_version, a KEK mismatch, or
+ *   targeted corruption) is never silently dropped from the count: doing so
+ *   would let exactly the failures that should count as "unknown" instead
+ *   quietly bias the number toward zero while the packet still looks
+ *   confident. So if ANY row for this trip fails to decrypt/parse, the whole
+ *   outOfAreaOccurrences degrades to the honest "unknown" (null) the payload
+ *   already supports (the UI renders its existing unknown state), and the
+ *   failure is logged (trip id + failed-row count, never coordinates). Only
+ *   when every row decrypts cleanly does this emit a real, checked count --
+ *   this is a correctness call, not a sampling-tolerance one (the sampled
+ *   nature of LOCATION_INTERVAL_SECONDS/LOCATION_MINIMUM_DELTA_METERS is
+ *   irrelevant to it). This is NOT gated by
  *   ONLYEVS_LOCATION_EVIDENCE_WORKSPACES: that allowlist gates user-visible
  *   *coordinate* viewing (Phase 4's route); this composer never emits a
  *   coordinate, only a count, which is exactly the safety bar the plan sets
@@ -787,6 +794,7 @@ export async function composeTripEvidencePacket(
     `, [t.workspace_id, t.id]);
     if (locationResult.rows.length > 0) {
       let count = 0;
+      let failedCount = 0;
       for (const point of locationResult.rows) {
         try {
           const plaintext = decryptCredential(point.coordinates_ciphertext, keyring, {
@@ -804,12 +812,21 @@ export async function composeTripEvidencePacket(
           }
         } catch {
           // A point that fails to decrypt/parse (e.g. a rotated-out key
-          // version) is skipped from the count, not counted either way --
-          // see the doc comment above on why this doesn't make the
-          // aggregate dishonest.
+          // version, or a KEK mismatch/targeted corruption) forces the
+          // whole count to the honest "unknown" state below rather than
+          // being silently skipped -- see the doc comment above.
+          failedCount += 1;
         }
       }
-      outOfAreaOccurrences = count;
+      if (failedCount > 0) {
+        // Never coordinates in this log -- trip id + failure count only.
+        console.warn(
+          `composeTripEvidencePacket: ${failedCount} of ${locationResult.rows.length} location point(s) failed to decrypt/parse for trip ${t.id} -- outOfAreaOccurrences forced to null`,
+        );
+        outOfAreaOccurrences = null;
+      } else {
+        outOfAreaOccurrences = count;
+      }
     }
   }
 
@@ -1640,6 +1657,14 @@ async function vehicleForVin(client: PoolClient, vin: string) {
     [vin],
   );
   // A VIN may never be attributed by guess if shared data is inconsistent.
+  // The skip itself is correct and stays -- but a duplicate-VIN state
+  // shouldn't be a silent black hole, so it's logged (VIN masked to its
+  // last 6 characters, never the full VIN).
+  if (result.rows.length > 1) {
+    console.warn(
+      `vehicleForVin: ambiguous VIN (ends ${vin.slice(-6)}) matched ${result.rows.length} active vehicles -- skipping attribution`,
+    );
+  }
   return result.rows.length === 1 ? result.rows[0] : null;
 }
 

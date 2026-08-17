@@ -144,17 +144,25 @@ describe("ingestTelemetry -- history append + split late-event policy (T2/T3)", 
     expect(queries.filter((q) => q.sql.includes("insert into"))).toHaveLength(0);
   });
 
-  it("ambiguous VIN: two active vehicles share it -- attribution is refused, nothing is written", async () => {
+  it("ambiguous VIN: two active vehicles share it -- attribution is refused, nothing is written, and the skip is logged (VIN masked to last 6 chars)", async () => {
     const { pool, queries } = makeFakePool((sql) => {
       if (sql.includes("from public.onlyevs_vehicles where vin")) {
         return { rows: [{ id: "veh-1", workspace_id: "ws-1" }, { id: "veh-2", workspace_id: "ws-2" }] };
       }
       return undefined;
     });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await ingestTelemetry(pool, baseUpdate(), "onlyevs_V:0:2");
 
     expect(queries.filter((q) => q.sql.includes("insert into"))).toHaveLength(0);
+    // baseUpdate()'s vin is "5YJ3E1EA7KF000001" -- masked to its last 6 chars.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("000001"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("2 active vehicles"));
+    // The full VIN is never logged, only the masked tail.
+    const warnedText = warnSpy.mock.calls.map((call) => String(call[0])).join(" ");
+    expect(warnedText).not.toContain("5YJ3E1EA7KF000001");
+    warnSpy.mockRestore();
   });
 
   it("split late-event policy: an event older than 24h still appends to history but never touches the live card", async () => {
@@ -751,17 +759,32 @@ describe("composeTripEvidencePacket -- Phase 6 immutable evidence packet (T9 wor
       expect(payload.outOfAreaOccurrences).toBe(0);
     });
 
-    it("a point that fails to decrypt (e.g. a rotated-out key version) is skipped from the count, not counted either way", async () => {
+    it("a point that fails to decrypt (e.g. a rotated-out key version) forces the count to null, not a possibly-biased number -- and logs a warning", async () => {
       const rows = [
         { coordinates_ciphertext: "oev1.99.bad.bad.bad" }, // unknown key version -> decrypt failure
         { coordinates_ciphertext: encryptPoint(OUTSIDE_POINT) },
       ];
       const { client, queries } = makeFakePool(makeHomeAreaHandler(rows));
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
       await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
       const insert = findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!;
       expect(insert).toBeDefined(); // packet composition still completes
       const payload = JSON.parse(insert.params[3] as string);
-      expect(payload.outOfAreaOccurrences).toBe(1); // only the decryptable outside point counts
+      // A KEK mismatch / targeted corruption on even one row must never
+      // silently bias the count toward zero while looking green -- the
+      // whole occurrence count degrades to the honest "unknown" instead.
+      expect(payload.outOfAreaOccurrences).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("trip-1"),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("1 of 2"),
+      );
+      // Never coordinates in the log.
+      const warnedText = warnSpy.mock.calls.map((call) => String(call[0])).join(" ");
+      expect(warnedText).not.toContain(String(OUTSIDE_POINT.latitude));
+      expect(warnedText).not.toContain(String(OUTSIDE_POINT.longitude));
+      warnSpy.mockRestore();
     });
   });
 });
