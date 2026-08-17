@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.3 — 2026-08-16
+
+- Add forward-first delivery to the email-ingest Worker (`services/email-ingest-worker/src/index.ts`): mail to a valid workspace alias is forwarded to the owner's personal inbox *before* the capture pipeline runs, so delivery fails open even when capture is down, while automation stays fail-closed. Handler order is now intake-gate -> alias verification (unchanged spam gate for the catch-all -- invalid aliases are still rejected before any forward is attempted) -> forward (if configured, wrapped in its own try/catch so a forward failure, e.g. an unverified destination, never blocks capture) -> capture. A capture failure after a successful forward is now accepted (logged via `console.error` with a stable phase tag, no `setReject`) rather than bounced, since the human already received the mail; only the case where both forward and capture fail still rejects, as before.
+- New optional Worker env var `EVHOST_EMAIL_FORWARD_TO` (`wrangler.jsonc`, default `""` = forwarding disabled). Deliberately independent of the authorize/DB capture path and of the `ONLYEVS_EMAIL_AUTO_*` automation gates.
+
+### For contributors
+
+- Keep every email-ingestion feature flag default-false; no gate flips as part of this release.
+- New workerd-runtime coverage in `services/email-ingest-worker/workerd-tests/test/email-handler.workers.spec.ts` for all forward/capture success/failure combinations, plus confirmation that an invalid alias still rejects without ever calling `message.forward()`.
+
 ## 0.7.2 — 2026-08-16
 
 - Fix the internal Turo email capture routes (`/api/internal/turo-email/{authorize,capture}`) and the SendGrid delivery-event webhook (`/api/internal/sendgrid/events`) 401/400-ing on every request in production: they authenticated via `createServiceRoleClient()`, which requires `SUPABASE_SERVICE_ROLE_KEY` -- correctly absent from the web deployment under the repo's "the web app never uses a service-role key" invariant. They now connect through a dedicated, narrow Postgres role, `onlyevs_email_capture_svc` (new migration `20260816160000_onlyevs_email_capture_role.sql`), granted `EXECUTE` on exactly the five RPCs those routes call and nothing else, over a direct connection (`ONLYEVS_EMAIL_CAPTURE_DATABASE_URL`) through the Supabase pooler -- the same scoped-role shape `onlyevs_worker` already uses. The service-role key remains banned from the web app; `createServiceRoleClient()` is untouched and still used solely by the owner trip-reminder route, which this fix does not change.

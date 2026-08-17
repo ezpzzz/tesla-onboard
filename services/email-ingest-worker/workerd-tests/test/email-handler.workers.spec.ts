@@ -28,6 +28,7 @@ interface TestEmailMessage {
   raw: ReadableStream<Uint8Array>;
   rawSize: number;
   setReject: ReturnType<typeof vi.fn>;
+  forward: ReturnType<typeof vi.fn>;
 }
 
 interface R2ObjectSummary {
@@ -54,6 +55,7 @@ interface WorkerEnv {
   EVHOST_EMAIL_CAPTURE_HMAC_KEYS: string;
   EVHOST_EMAIL_KEK_KEYS: string;
   EMAIL_RETENTION_DAYS: string;
+  EVHOST_EMAIL_FORWARD_TO: string;
 }
 
 const encoder = new TextEncoder();
@@ -98,7 +100,7 @@ function streamFrom(bytes: Uint8Array): ReadableStream<Uint8Array> {
   });
 }
 
-function buildMessage(input: { to: string; raw: Uint8Array; rawSize?: number }): TestEmailMessage {
+function buildMessage(input: { to: string; raw: Uint8Array; rawSize?: number; forwardImpl?: () => Promise<void> }): TestEmailMessage {
   return {
     from: "noreply@mail.turo.com",
     to: input.to,
@@ -106,6 +108,7 @@ function buildMessage(input: { to: string; raw: Uint8Array; rawSize?: number }):
     raw: streamFrom(input.raw),
     rawSize: input.rawSize ?? input.raw.byteLength,
     setReject: vi.fn<(reason: string) => void>(),
+    forward: vi.fn(input.forwardImpl ?? (async () => {})),
   };
 }
 
@@ -266,5 +269,135 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
     // authorize + init only -- never reaches r2 put or finalize.
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(await baseEnv.EMAIL_BUCKET.get(objectKey)).toBeNull();
+  });
+
+  describe("forward-first delivery (EVHOST_EMAIL_FORWARD_TO)", () => {
+    it("valid alias + forward configured + capture healthy: forward is called once AND capture completes", async () => {
+      const objectKey = `email/${crypto.randomUUID()}`;
+      const inboundId = crypto.randomUUID();
+      const fetchMock = stubFetch({
+        "/api/internal/turo-email/authorize": () => ({ inbound_id: inboundId, accepted_alias_revision: 1, object_key: objectKey }),
+        "/api/internal/turo-email/capture?phase=init": () => ({ id: crypto.randomUUID(), state: "init" }),
+        "/api/internal/turo-email/capture?phase=finalize": () => ({ id: crypto.randomUUID(), state: "finalized" }),
+      });
+
+      const to = `${await validAliasLocalPart("fwdhealthytoken", aliasKey)}@mail.evhost.app`;
+      const message = buildMessage({ to, raw: encoder.encode(syntheticBookingEml) });
+
+      await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true", EVHOST_EMAIL_FORWARD_TO: "owner@example.com" });
+
+      expect(message.forward).toHaveBeenCalledTimes(1);
+      expect(message.forward).toHaveBeenCalledWith("owner@example.com");
+      expect(message.setReject).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const stored = await baseEnv.EMAIL_BUCKET.get(objectKey);
+      expect(stored).not.toBeNull();
+    });
+
+    it("valid alias + forward configured + capture failing (authorize 500): forward called, NO setReject, console.error carries a phase tag", async () => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      // stubFetch() always returns a 200 JSON response, so it can't model a
+      // real HTTP 500 -- build the failure directly: signedPost() throws
+      // `capture_authorize_${status}` whenever `response.ok` is false.
+      const failingFetch = vi.fn(async (input: string | URL) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (`${url.pathname}${url.search}` === "/api/internal/turo-email/authorize") {
+          return new Response("{}", { status: 500 });
+        }
+        throw new Error(`unexpected fetch to ${url.pathname}${url.search}`);
+      });
+      vi.stubGlobal("fetch", failingFetch);
+
+      try {
+        const to = `${await validAliasLocalPart("fwdcapfailtoken", aliasKey)}@mail.evhost.app`;
+        const message = buildMessage({ to, raw: encoder.encode(syntheticBookingEml) });
+
+        await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true", EVHOST_EMAIL_FORWARD_TO: "owner@example.com" });
+
+        expect(message.forward).toHaveBeenCalledTimes(1);
+        expect(message.setReject).not.toHaveBeenCalled();
+        expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('phase "authorize"'), expect.anything());
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it("valid alias + forward THROWS + capture healthy: capture still completes, no reject", async () => {
+      const objectKey = `email/${crypto.randomUUID()}`;
+      const inboundId = crypto.randomUUID();
+      const fetchMock = stubFetch({
+        "/api/internal/turo-email/authorize": () => ({ inbound_id: inboundId, accepted_alias_revision: 1, object_key: objectKey }),
+        "/api/internal/turo-email/capture?phase=init": () => ({ id: crypto.randomUUID(), state: "init" }),
+        "/api/internal/turo-email/capture?phase=finalize": () => ({ id: crypto.randomUUID(), state: "finalized" }),
+      });
+
+      const to = `${await validAliasLocalPart("fwdthrowsoktokn", aliasKey)}@mail.evhost.app`;
+      const message = buildMessage({
+        to,
+        raw: encoder.encode(syntheticBookingEml),
+        forwardImpl: async () => { throw new Error("destination not verified"); },
+      });
+
+      await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true", EVHOST_EMAIL_FORWARD_TO: "owner@example.com" });
+
+      expect(message.forward).toHaveBeenCalledTimes(1);
+      expect(message.setReject).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const stored = await baseEnv.EMAIL_BUCKET.get(objectKey);
+      expect(stored).not.toBeNull();
+    });
+
+    it("valid alias + forward throws + capture fails: setReject (existing message)", async () => {
+      const fetchMock = stubFetch({
+        "/api/internal/turo-email/authorize": () => ({}), // missing object_key -> assertAuthorizeResponse throws
+      });
+
+      const to = `${await validAliasLocalPart("fwdthrowsfailto", aliasKey)}@mail.evhost.app`;
+      const message = buildMessage({
+        to,
+        raw: encoder.encode(syntheticBookingEml),
+        forwardImpl: async () => { throw new Error("destination not verified"); },
+      });
+
+      await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true", EVHOST_EMAIL_FORWARD_TO: "owner@example.com" });
+
+      expect(message.forward).toHaveBeenCalledTimes(1);
+      expect(message.setReject).toHaveBeenCalledTimes(1);
+      expect(message.setReject).toHaveBeenCalledWith("EVhost email intake temporarily unavailable");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("invalid alias + forward configured: reject, forward NEVER called (spam gate is unaffected)", async () => {
+      const fetchMock = stubFetch({});
+      const message = buildMessage({ to: "not-a-valid-alias@mail.evhost.app", raw: encoder.encode("irrelevant, never read") });
+
+      await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true", EVHOST_EMAIL_FORWARD_TO: "owner@example.com" });
+
+      expect(message.setReject).toHaveBeenCalledTimes(1);
+      expect(message.setReject).toHaveBeenCalledWith("Unknown EVhost address");
+      expect(message.forward).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("forward unconfigured: behavior identical to the current (pre-forward) suite", async () => {
+      const objectKey = `email/${crypto.randomUUID()}`;
+      const inboundId = crypto.randomUUID();
+      const fetchMock = stubFetch({
+        "/api/internal/turo-email/authorize": () => ({ inbound_id: inboundId, accepted_alias_revision: 1, object_key: objectKey }),
+        "/api/internal/turo-email/capture?phase=init": () => ({ id: crypto.randomUUID(), state: "init" }),
+        "/api/internal/turo-email/capture?phase=finalize": () => ({ id: crypto.randomUUID(), state: "finalized" }),
+      });
+
+      const to = `${await validAliasLocalPart("fwdunsettoken23", aliasKey)}@mail.evhost.app`;
+      const message = buildMessage({ to, raw: encoder.encode(syntheticBookingEml) });
+
+      await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true", EVHOST_EMAIL_FORWARD_TO: "" });
+
+      expect(message.forward).not.toHaveBeenCalled();
+      expect(message.setReject).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const stored = await baseEnv.EMAIL_BUCKET.get(objectKey);
+      expect(stored).not.toBeNull();
+    });
   });
 });
