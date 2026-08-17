@@ -349,6 +349,30 @@ function buildMessageText(email: NormalizedEmailManifest): string | null {
     : combined;
 }
 
+/**
+ * Domain of a From-header address, tolerating both a bare address
+ * ("noreply@mail.turo.com") and a display-name form
+ * ("Turo <noreply@mail.turo.com>"). services/email-ingest-worker/src/normalize.ts
+ * already reduces `from` to a bare address in production (it reads the parsed
+ * `.address` field, falling back to the envelope address), but
+ * NormalizedEmailManifest types `from` as a plain `string` with no guarantee
+ * baked into the type, and fixtures/tests use the display-name form -- so this
+ * stays tolerant of both rather than assuming the upstream shape.
+ */
+function fromDomain(from: string): string | null {
+  const bracketMatch = /<([^>]+)>\s*$/.exec(from);
+  const address = (bracketMatch ? bracketMatch[1] : from).trim();
+  const at = address.lastIndexOf("@");
+  if (at < 0 || at === address.length - 1) return null;
+  return address.slice(at + 1).trim().toLowerCase();
+}
+
+/** turo.com itself, or any subdomain of it (suffix match on ".turo.com"). */
+function isTuroSenderDomain(domain: string | null): boolean {
+  if (!domain) return false;
+  return domain === "turo.com" || domain.endsWith(".turo.com");
+}
+
 export function parseTuroEmail(
   email: NormalizedEmailManifest,
   approvedFingerprints: ReadonlySet<string> = new Set(),
@@ -361,7 +385,20 @@ export function parseTuroEmail(
   const blockerCodes = new Set<string>();
   if (!approvedFingerprints.has(templateFingerprint)) blockerCodes.add("template_not_allowlisted");
   if (!reservationId && !["noise", "unknown"].includes(type)) blockerCodes.add("reservation_id_missing");
-  if (email.receiverAuth.dmarc !== "pass" && email.receiverAuth.dkim !== "pass") blockerCodes.add("sender_auth_unverified");
+  // DMARC-aligned From-domain binding: the visible From header is only as
+  // trustworthy as the domain DMARC actually aligned to. A DMARC "pass"
+  // alone doesn't say *which* domain passed, so this also requires the
+  // visible From address to be turo.com or a turo.com subdomain -- clearing
+  // the blocker for a DMARC-pass message from an unrelated domain (SPF/DKIM
+  // aligned to that domain, not Turo's) would be exactly the spoofing this
+  // blocker exists to catch. TODO(sender-auth): bind the literal DKIM d=
+  // domain instead of/in addition to this once a real Cloudflare-origin
+  // Authentication-Results header sample is captured -- NormalizedEmailManifest
+  // currently only carries the boolean receiverAuth.dkim verdict, not the d=
+  // value itself, so a DKIM-only path can't be domain-bound yet.
+  if (email.receiverAuth.dmarc !== "pass" || !isTuroSenderDomain(fromDomain(email.from))) {
+    blockerCodes.add("sender_auth_unverified");
+  }
   if (type === "unknown") blockerCodes.add("event_type_unknown");
 
   const proposedState: Record<string, string> = { subject: email.subject, sender: email.from };
