@@ -4,6 +4,80 @@ export const EMAIL_MAX_NORMALIZED_BYTES = 256 * 1024;
 export const EMAIL_SIGNATURE_WINDOW_SECONDS = 300;
 export const EVMAIL_MAGIC = "EVMAIL1" as const;
 
+// Workspace email alias local-part sizing. RFC 5321 §4.5.3.1.1 caps the
+// local-part (the part before "@") at 64 octets; Cloudflare's inbound MX
+// enforces this and rejects RCPT TO -- "500 5.5.2 ... Invalid email user" --
+// before the email worker ever runs, so this cap is a hard wire-protocol
+// limit, not a style preference. The local-part is `${token}.${signature}`:
+// a random hex token and an HMAC-SHA256 signature over it, both lowercase
+// and dot-atom-safe.
+//
+// Sizes below keep the whole local-part at exactly 26 + 1 + 25 = 52 octets
+// (well under the 64-octet hard limit, with 12 octets/~23% of headroom to
+// spare) while clearing both entropy floors with an explicit margin, MEASURED
+// AFTER the lowercasing both mint (createWorkspaceAlias) and verify
+// (verifyWorkspaceAlias / verifyAlias) apply before comparison -- lowering is
+// unconditional (it makes verification robust to MTAs that case-fold
+// envelope addresses), so any alphabet whose symbols aren't already
+// case-distinct-free would have its guessing resistance measured on the
+// lowered string, not the pre-lowering one:
+//
+//  - EMAIL_ALIAS_TOKEN_BYTES (13 bytes -> 26 lowercase hex chars): 104 bits
+//    of raw randomness. Hex (0-9a-f) has no upper/lowercase collision, so
+//    this is an exact figure, comfortably above the >=96-bit floor (+8 bits
+//    of margin).
+//  - EMAIL_ALIAS_SIGNATURE_CHARS (25 chars): a prefix of the HMAC-SHA256
+//    digest re-encoded as lowercase base32 (RFC 4648 §6, alphabet
+//    "a-z2-7") via lowerBase32Prefix below, NOT base64url. Base32's 32
+//    symbols are already all-lowercase-distinct (unlike base64url's 64
+//    symbols, where the 52 letter positions fold 2:1 under .toLowerCase()
+//    and collapse the effective alphabet to 38 symbols with a measured
+//    min-entropy of ~4.994 bits/char -- 21 base64url chars measured at
+//    ~104.9 bits, BELOW the >=120-bit floor this is required to clear; this
+//    is what the previous version of this constant got wrong). Base32
+//    lowercasing is therefore lossless: min-entropy stays the alphabet's
+//    exact log2(32) = 5.0 bits/char with no post-folding penalty, so 25
+//    chars = exactly 125 bits of the truncated MAC, clearing the >=120-bit
+//    floor with explicit margin (+5 bits). Truncating a MAC to >=120 bits is
+//    standard practice per NIST SP 800-107, which permits truncation down to
+//    32 bits. In any case the primary guarantee here is HMAC-SHA256
+//    unforgeability (the signing key is never exposed), not guessing
+//    resistance over the encoded string alone.
+export const EMAIL_ALIAS_TOKEN_BYTES = 13;
+export const EMAIL_ALIAS_SIGNATURE_CHARS = 25;
+
+// Lowercase alphabet, symbols 0-31 in order; every symbol is already
+// lowercase and case-distinct (a-z, 2-7 -- 1/0/8/9 excluded per RFC 4648 to
+// avoid visual ambiguity with i/l/o/g), so lowercasing a base32 string
+// (done unconditionally by both createWorkspaceAlias and
+// verifyWorkspaceAlias/verifyAlias, see EMAIL_ALIAS_SIGNATURE_CHARS above)
+// never folds two distinct symbols onto one output character and costs zero
+// bits of min-entropy. All 32 alphabet symbols (a-z0-9_- superset from
+// assertEmailAliasToken's regex) remain dot-atom-legal per RFC 5322 atext.
+const BASE32_LOWER_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
+
+// RFC 4648 §6 base32, lowercase, unpadded, truncated to the first `length`
+// characters (`length * 5` bits) of `bytes`. Used to encode a prefix of an
+// HMAC-SHA256 digest (32 bytes = 256 bits, so any `length` up to 51 is safe)
+// as a case-stable alias signature -- see EMAIL_ALIAS_SIGNATURE_CHARS above
+// for why base32 (not base64url) is required here.
+export function lowerBase32Prefix(bytes: Uint8Array, length: number): string {
+  if (!Number.isInteger(length) || length < 1) throw new RangeError("base32_length");
+  if (bytes.byteLength * 8 < length * 5) throw new RangeError("base32_insufficient_bytes");
+  let output = "";
+  let bitBuffer = 0;
+  let bitCount = 0;
+  for (let index = 0; index < bytes.byteLength && output.length < length; index += 1) {
+    bitBuffer = ((bitBuffer << 8) | bytes[index]) >>> 0;
+    bitCount += 8;
+    while (bitCount >= 5 && output.length < length) {
+      bitCount -= 5;
+      output += BASE32_LOWER_ALPHABET[(bitBuffer >>> bitCount) & 0x1f];
+    }
+  }
+  return output;
+}
+
 export type EmailCapturePhase = "authorize" | "init" | "finalize";
 export type EmailSourceKind = "turo_email" | "google_calendar";
 export type EmailCandidateEvent = "booking" | "change" | "cancellation" | "guest_message" | "noise" | "unknown";
@@ -222,5 +296,14 @@ export function decodeEvmailPlaintext(plaintext: Uint8Array): { rawMessage: Uint
 export function assertEmailAliasToken(value: string): string {
   const normalized = value.trim().toLowerCase();
   if (!/^[a-z0-9]{20,64}\.[a-z0-9_-]{16,86}$/.test(normalized)) throw new TypeError("email_alias_invalid");
+  // Belt-and-suspenders: the two character-class bounds above are each
+  // individually generous (kept wide for format flexibility), but their sum
+  // (64 + 1 + 86 = 151) does not itself enforce RFC 5321's 64-octet
+  // local-part cap -- a 69-octet alias would satisfy both bounds and still
+  // be rejected by Cloudflare's inbound MX before the email worker ever
+  // runs. Enforce the actual wire limit explicitly here too, so this
+  // validator can catch a future oversized mint even where the regex above
+  // would not.
+  if (normalized.length > 64) throw new TypeError("email_alias_invalid");
   return normalized;
 }

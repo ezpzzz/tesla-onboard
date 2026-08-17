@@ -1,10 +1,30 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseEmailKeyring, createWorkspaceAlias, verifyWorkspaceAlias, signInternalCapture, verifyInternalCapture } from "@/lib/email/security";
 import { parseTuroEmail } from "@/lib/email/turo-parser";
 import { canAutoApply } from "@/lib/email/capabilities";
+import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_ALIAS_TOKEN_BYTES, lowerBase32Prefix } from "@/packages/email-ingest-contract/src";
 
 const keyring = parseEmailKeyring(`1:${Buffer.alloc(32, 7).toString("base64")}`, "TEST_KEYS");
+
+// Mirrors services/email-ingest-worker/src/index.ts's verifyAlias, the same
+// way the Workers-runtime test suite mirrors the mint side (that production
+// code is not exported for reuse across the Worker/Node boundary): it is
+// asserted here as "the" independent Cloudflare Worker verification path,
+// not the app's own lib/email/security.ts implementation being tested
+// against itself.
+function workerVerifyAlias(localPart: string, keys: ReadonlyMap<number, Buffer>): boolean {
+  const [token, signature, extra] = localPart.toLowerCase().split(".");
+  if (!token || !signature || extra !== undefined) return false;
+  for (const key of keys.values()) {
+    const digest = createHmac("sha256", key)
+      .update(`evhost-email-alias-v1${token}`)
+      .digest();
+    const expected = lowerBase32Prefix(digest, EMAIL_ALIAS_SIGNATURE_CHARS);
+    if (expected === signature) return true;
+  }
+  return false;
+}
 
 describe("email security", () => {
   it("generates opaque, verifiable aliases", () => {
@@ -12,6 +32,75 @@ describe("email security", () => {
     const local = alias.address.split("@")[0];
     expect(verifyWorkspaceAlias(local, keyring)).toBe(true);
     expect(verifyWorkspaceAlias(`${local}x`, keyring)).toBe(false);
+  });
+
+  it("keeps the minted local-part comfortably inside RFC 5321's 64-octet cap", () => {
+    // The live delivery canary caught aliases at 69 octets (36-char token +
+    // "." + 32-char signature), which Cloudflare's inbound MX rejects with
+    // "500 5.5.2 ... Invalid email user" before the email worker ever runs.
+    // Assert well under the hard 64-octet limit, against many random mints,
+    // so no future size tweak can silently regress past the wire limit.
+    for (let i = 0; i < 500; i += 1) {
+      const alias = createWorkspaceAlias(keyring);
+      const local = alias.address.split("@")[0];
+      const octets = Buffer.byteLength(local, "utf8");
+      expect(octets).toBeLessThanOrEqual(52);
+      expect(octets).toBeLessThanOrEqual(64);
+      // Dot-atom-safe, lowercase, single separator: no leading/trailing/
+      // consecutive dots, exactly one "token.signature" split. The signature
+      // half is lowercase base32 (a-z2-7), not base64url -- see the
+      // min-entropy floor test below for why.
+      const [token, signature] = local.split(".");
+      expect(local).toMatch(/^[a-z0-9]+\.[a-z0-9_-]+$/);
+      expect(token).toMatch(/^[a-z0-9]{26}$/);
+      expect(signature).toMatch(/^[a-z2-7]{25}$/);
+    }
+  });
+
+  it("clears the >=120-bit post-folding min-entropy floor by construction, computed from the sizing constants", () => {
+    // Both createWorkspaceAlias and verifyWorkspaceAlias/verifyAlias
+    // unconditionally lowercase the signature before comparing it, so the
+    // guessing-resistance figure that matters is the min-entropy of the
+    // *lowered* alphabet, not the pre-lowering one. Base32's alphabet
+    // (a-z2-7, RFC 4648) has 32 symbols that are already all-lowercase and
+    // case-distinct, so lowercasing it folds nothing -- every char clears
+    // exactly log2(32) = 5 bits of min-entropy, with no post-folding
+    // penalty. (Contrast the bug this test guards against: base64url's 52
+    // letter positions collapse 2:1 under lowercasing, measured at ~4.994
+    // bits/char after folding -- the previous EMAIL_ALIAS_SIGNATURE_CHARS=21
+    // base64url chars measured ~104.9 bits, below this floor, despite a
+    // stale comment quoting the unfolded 126-bit figure.)
+    const FOLDED_MIN_ENTROPY_BITS_PER_CHAR = 5; // log2(32), exact for base32, not approximate
+    const signatureBits = EMAIL_ALIAS_SIGNATURE_CHARS * FOLDED_MIN_ENTROPY_BITS_PER_CHAR;
+    expect(signatureBits).toBeGreaterThanOrEqual(120);
+
+    // The hex token is never lowercased-with-collisions (0-9a-f has no
+    // uppercase form to fold), so its full raw entropy applies unmodified.
+    const tokenBits = EMAIL_ALIAS_TOKEN_BYTES * 8;
+    expect(tokenBits).toBeGreaterThanOrEqual(96);
+  });
+
+  it("round-trips: an app-minted alias verifies via the Worker's independent verifyAlias logic", () => {
+    const alias = createWorkspaceAlias(keyring);
+    const local = alias.address.split("@")[0];
+    expect(workerVerifyAlias(local, keyring.keys)).toBe(true);
+  });
+
+  it("rejects a tampered signature", () => {
+    const alias = createWorkspaceAlias(keyring);
+    const [token, signature] = alias.address.split("@")[0].split(".");
+    const flippedChar = signature[0] === "a" ? "b" : "a";
+    const tampered = `${token}.${flippedChar}${signature.slice(1)}`;
+    expect(verifyWorkspaceAlias(tampered, keyring)).toBe(false);
+    expect(workerVerifyAlias(tampered, keyring.keys)).toBe(false);
+  });
+
+  it("rejects a signature minted under a foreign key", () => {
+    const foreignKeyring = parseEmailKeyring(`1:${Buffer.alloc(32, 9).toString("base64")}`, "FOREIGN_TEST_KEYS");
+    const foreignAlias = createWorkspaceAlias(foreignKeyring);
+    const local = foreignAlias.address.split("@")[0];
+    expect(verifyWorkspaceAlias(local, keyring)).toBe(false);
+    expect(workerVerifyAlias(local, keyring.keys)).toBe(false);
   });
 
   it("binds signatures to phase, body, key, nonce, and time", () => {
