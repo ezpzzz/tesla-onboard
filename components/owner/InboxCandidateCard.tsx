@@ -14,7 +14,9 @@
  *
  * proposed_state key contract, matching `lib/email/turo-parser.ts`'s actual
  * output (`guestAvatarUrl`, `guestFirstName`, `guestPhoneE164`,
- * `guestMessageText`, `pickupAddress`, `pickupLat`/`pickupLng`,
+ * `guestMessageText`, `messageText` (subject + plain-text body, present on
+ * every candidate including `unknown`-template ones that have no other
+ * extraction), `pickupAddress`, `pickupLat`/`pickupLng`,
  * `tripStartAt`/`tripEndAt`/`tripTimeZone`, `tripStartLocalText`/
  * `tripEndLocalText`). `parseEmailCandidateFacts` also accepts a few
  * alternate key spellings so a future parser tweak degrades to "field not
@@ -49,6 +51,13 @@ export interface EmailCandidateFacts {
   tripEndLocalText: string | null;
   currentTripStartsAt: string | null;
   currentTripEndsAt: string | null;
+  /** Subject + plain-text body captured for *every* candidate by
+   *  `lib/email/turo-parser.ts`'s `buildMessageText` (unknown-template
+   *  candidates included, since those get no other structured extraction at
+   *  all) -- the raw-content fallback so a metadata-only card still shows
+   *  the owner something readable, e.g. Turo's "Please verify your email
+   *  address" notice, whose verification link only lives in this text. */
+  messageText: string | null;
 }
 
 const EMPTY_FACTS: EmailCandidateFacts = {
@@ -66,6 +75,7 @@ const EMPTY_FACTS: EmailCandidateFacts = {
   tripEndLocalText: null,
   currentTripStartsAt: null,
   currentTripEndsAt: null,
+  messageText: null,
 };
 
 function firstString(record: Record<string, unknown>, ...keys: string[]): string | null {
@@ -98,7 +108,26 @@ export function parseEmailCandidateFacts(proposedState: unknown, correctionFacts
     tripEndLocalText: firstString(proposed, "tripEndLocalText"),
     currentTripStartsAt: firstString(current, "currentTripStartsAt", "tripStartAt", "tripStartsAt"),
     currentTripEndsAt: firstString(current, "currentTripEndsAt", "tripEndAt", "tripEndsAt"),
+    messageText: firstString(proposed, "messageText"),
   };
+}
+
+/**
+ * Which raw-message content (if any) belongs in the "Message" section.
+ * `guest_message` candidates already show the guest's own short in-app text
+ * (`facts.guestMessage`, extracted from the template's dedicated message
+ * block) right above this section, so showing the full subject+body there
+ * too would just duplicate it — this suppresses `messageText` in that one
+ * case and otherwise shows it, which is what surfaces content for every
+ * other candidate that has no better extraction (unknown-template candidates
+ * most of all, since those have nothing else).
+ */
+export function selectDisplayMessage(
+  facts: Pick<EmailCandidateFacts, "guestMessage" | "messageText">,
+  eventType: OwnerInboxItem["eventType"],
+): string | null {
+  if (eventType === "guest_message" && facts.guestMessage) return null;
+  return facts.messageText;
 }
 
 /**
@@ -272,6 +301,7 @@ export function CandidateMeta({
   const mapHref = facts.locationLat && facts.locationLng
     ? `https://www.google.com/maps?q=${encodeURIComponent(facts.locationLat)},${encodeURIComponent(facts.locationLng)}`
     : null;
+  const displayMessage = selectDisplayMessage(facts, eventType);
   return (
     <dl className="space-y-3 text-sm">
       {window ? (
@@ -319,6 +349,17 @@ export function CandidateMeta({
               ? `${facts.guestMessage.slice(0, MESSAGE_EXCERPT_LIMIT)}…`
               : facts.guestMessage}
           </dd>
+        </div>
+      ) : null}
+      {displayMessage ? (
+        <div className="flex items-start gap-2">
+          <IconMail className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">Message</dt>
+            <dd className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface p-3 text-ink-soft">
+              {displayMessage}
+            </dd>
+          </div>
         </div>
       ) : null}
     </dl>

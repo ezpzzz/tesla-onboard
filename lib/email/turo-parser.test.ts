@@ -300,6 +300,56 @@ describe("parseTuroEmail — pickup_location_unresolved blocker", () => {
   });
 });
 
+describe("parseTuroEmail — messageText (subject+body fallback for every candidate)", () => {
+  it("carries subject+body for an unknown-template candidate, which gets no other extraction at all", () => {
+    const parsed = parseTuroEmail(manifest({
+      subject: "Please verify your email address",
+      text: "Synthetic body: click https://turo.example/verify?token=abc123 to verify your email.",
+      html: null,
+    }));
+    expect(parsed.eventType).toBe("unknown");
+    expect(parsed.proposedState.messageText).toBe(
+      "Subject: Please verify your email address\n\nSynthetic body: click https://turo.example/verify?token=abc123 to verify your email.",
+    );
+  });
+
+  it("falls back to a stripped, line-broken version of html when there's no text part", () => {
+    const parsed = parseTuroEmail(manifest({
+      subject: "Please verify your email address",
+      text: "",
+      html: "<html><body><p>Line one.</p><p>Line two with a <a href=\"https://turo.example/verify?token=abc123\">verify link</a>.</p></body></html>",
+    }));
+    expect(parsed.proposedState.messageText).toBe(
+      "Subject: Please verify your email address\n\nLine one.\nLine two with a verify link.",
+    );
+  });
+
+  it("is also present on a known event type (additive to its structured extraction, not a replacement)", () => {
+    const parsed = parseTuroEmail(manifest({
+      subject: "Riley's trip with your Tesla Model 3 is booked!",
+      text: "Reservation ID #71234567. Riley's trip with your Tesla Model 3 is booked!",
+      html: null,
+    }));
+    expect(parsed.eventType).toBe("booking");
+    expect(parsed.proposedState.messageText).toContain("Reservation ID #71234567");
+  });
+
+  it("truncates to the documented bound instead of writing an unbounded jsonb value", () => {
+    const parsed = parseTuroEmail(manifest({
+      subject: "Please verify your email address",
+      text: "x".repeat(25_000),
+      html: null,
+    }));
+    expect(parsed.proposedState.messageText!.length).toBeLessThanOrEqual(20_000 + 1);
+    expect(parsed.proposedState.messageText!.endsWith("…")).toBe(true);
+  });
+
+  it("omits messageText entirely (rather than an empty string) when there's nothing readable", () => {
+    const parsed = parseTuroEmail(manifest({ subject: "", text: "", html: null }));
+    expect(parsed.proposedState.messageText).toBeUndefined();
+  });
+});
+
 describe("parseTuroEmail — earnings total", () => {
   it("extracts PaymentSentOwner's actual payment amount and keeps it unlinkable to a reservation", () => {
     const parsed = parseTuroEmail(manifest({

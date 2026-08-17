@@ -288,6 +288,67 @@ export function resolveLocalInstant(local: LocalDateTime, timeZone: string): Tri
   return { kind: "resolved", utcMs: [...validUtcInstants][0] };
 }
 
+// ---------------------------------------------------------------------------
+// Full-message text -- the readable "subject + body" fallback carried on
+// *every* candidate, unknown-template included. Without this, a candidate
+// whose subject doesn't match any known Turo template (`eventType()` above
+// falls through to "unknown") gets no template-specific extraction at all —
+// proposedState held only `subject`/`sender` (~80 bytes) and the owner inbox
+// card had nothing to show but metadata, even for a message the owner
+// actually needs to read (e.g. Turo's "Please verify your email address"
+// notice, which carries a verification link only in the body). Known types
+// keep their richer structured extraction above; this is additive, not a
+// replacement for it.
+// ---------------------------------------------------------------------------
+
+/** Hard cap on the combined subject+body text stored in proposedState.messageText,
+ * matching the executor spec's "sane bound" -- generous enough for any real Turo
+ * template while keeping a single jsonb value bounded regardless of what an inbound
+ * message contains. */
+export const MESSAGE_TEXT_MAX_CHARS = 20_000;
+
+/**
+ * Best-effort HTML → readable plain text: a simple tag-strip, not a full HTML
+ * renderer. Block-level tags become line breaks first (so paragraphs/list items/table
+ * rows don't run together into one unreadable line) before the remaining markup is
+ * discarded and entities are decoded. Only used when the message has no `text` part
+ * to fall back on.
+ */
+function htmlToReadableText(html: string): string {
+  const withBreaks = html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, "")
+    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "");
+  return decodeHtmlEntities(withBreaks)
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Subject + plain-text body for every candidate. Prefers the message's own `text`
+ * part (already plain text per the email-ingest contract); falls back to stripping
+ * tags from `html` only when no text part was captured. Returns null when there's
+ * nothing readable at all (no subject-less email exists, but text/html can both be
+ * empty), matching every other optional proposedState field's "omit rather than
+ * write an empty string" convention.
+ */
+function buildMessageText(email: NormalizedEmailManifest): string | null {
+  const body = email.text.trim().length > 0
+    ? email.text.trim()
+    : email.html
+      ? htmlToReadableText(email.html)
+      : "";
+  if (!body && !email.subject.trim()) return null;
+  const combined = `Subject: ${email.subject}\n\n${body}`.trim();
+  return combined.length > MESSAGE_TEXT_MAX_CHARS
+    ? `${combined.slice(0, MESSAGE_TEXT_MAX_CHARS)}…`
+    : combined;
+}
+
 export function parseTuroEmail(
   email: NormalizedEmailManifest,
   approvedFingerprints: ReadonlySet<string> = new Set(),
@@ -304,6 +365,8 @@ export function parseTuroEmail(
   if (type === "unknown") blockerCodes.add("event_type_unknown");
 
   const proposedState: Record<string, string> = { subject: email.subject, sender: email.from };
+  const messageText = buildMessageText(email);
+  if (messageText) proposedState.messageText = messageText;
   const html = email.html;
 
   // The avatar/phone/vehicle/trip-window/location partial is shared across every
