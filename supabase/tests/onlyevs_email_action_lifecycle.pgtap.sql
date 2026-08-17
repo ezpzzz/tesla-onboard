@@ -885,6 +885,7 @@ select throws_ok(
     repeat('0', 64), null, now()
   )$$,
   '23514',
+  null,
   'a cancel_trip action cannot be inserted with a non-destructive capability_name'
 );
 
@@ -930,6 +931,7 @@ select throws_ok(
     set state = 'revocation_pending'
     where candidate_id = '86000000-0000-4000-8000-000000000302'$$,
   '23514',
+  null,
   'a destructive action cannot reach revocation_pending without a brake_deadline'
 );
 -- Same row, brake_deadline set alongside the transition: allowed.
