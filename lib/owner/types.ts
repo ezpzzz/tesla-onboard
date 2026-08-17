@@ -11,7 +11,7 @@
 import type { ExperienceLevel } from "@/lib/tesla";
 import type { ProgressSummary } from "@/lib/flow";
 
-export type TripStatus = "upcoming" | "active" | "completed";
+export type TripStatus = "upcoming" | "active" | "completed" | "cancelled";
 
 export type DriverStatus = "not-started" | "in-progress" | "ready" | "stalled";
 

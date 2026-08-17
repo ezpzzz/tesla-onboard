@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseStoredProgress } from "@/lib/owner/trip-repository";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cancelTrip, parseStoredProgress } from "@/lib/owner/trip-repository";
 
 const valid = {
   stepId: "module-charging",
@@ -36,5 +36,41 @@ describe("parseStoredProgress", () => {
       pathMode: null,
       pct: 62.5,
     });
+  });
+});
+
+describe("cancelTrip", () => {
+  const tripId = "00000000-0000-4000-8000-000000000001";
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("posts a trimmed reason to the owner cancel route", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+
+    await cancelTrip(tripId, "  guest requested  ");
+
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/owner/trips/${tripId}/cancel`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ reason: "guest requested" }),
+      }),
+    );
+  });
+
+  it("surfaces the route's error message on failure", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "This trip can no longer be cancelled." }),
+    });
+
+    await expect(cancelTrip(tripId)).rejects.toThrow("This trip can no longer be cancelled.");
   });
 });
