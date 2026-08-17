@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 import { Pool, type PoolClient } from "pg";
 import { Kafka, logLevel, type Consumer } from "kafkajs";
 import { reconcileNewInvitation, TESLA_INVITE_LIFETIME_MS } from "@/lib/owner/access-lifecycle";
@@ -7,8 +8,29 @@ import { credentialKeyringFromEnv, decryptCredential, encryptCredential } from "
 import { TeslaAccessClient, TeslaAccessError } from "@/lib/owner/tesla-access-client";
 import { isReservedCustomHostname } from "@/lib/custom-domain";
 import { addProjectDomain, DomainProviderError, removeProjectDomain, verifyProjectDomain } from "@/lib/vercel-domain-server";
-import { parseConnectivityPayload, parseTelemetryPayload, type TelemetryUpdate } from "@/lib/owner/telemetry-ingest";
-import { LOCATION_RETENTION_MS } from "@/lib/owner/telemetry-policy";
+import {
+  isWithinCurrentStatsFreshnessWindow,
+  parseConnectivityPayload,
+  parseTelemetryPayload,
+  type TelemetryUpdate,
+} from "@/lib/owner/telemetry-ingest";
+import {
+  BOOKEND_END_TRACKING_GRACE_MS,
+  CHARGING_SYNC_INTERVAL_MS,
+  CHARGING_SYNC_LOOKBACK_MS,
+  CHARGING_SYNC_RETRY_MS,
+  HISTORY_RETENTION_MS,
+  LOCATION_RETENTION_MS,
+} from "@/lib/owner/telemetry-policy";
+import {
+  captureBookendField,
+  deriveBookendDelta,
+  isBookendWindowDue,
+  isEndBookendStillTracking,
+} from "@/lib/owner/bookends";
+import type { BookendEdge } from "@/lib/owner/access-types";
+import { segmentChargeSessions } from "@/lib/owner/charge-sessions";
+import { parseTeslaChargingHistory } from "@/lib/owner/tesla-charging-client";
 import {
   normalizeGoogleCalendarEvent,
   type CalendarCandidateInput,
@@ -20,6 +42,8 @@ import {
   TeslaTelemetryClient,
   TeslaTelemetryError,
 } from "@/lib/owner/tesla-telemetry-client";
+import { linkTripToGuest, type GuestIdentityCandidateKey, type GuestLinkingStore } from "@/lib/owner/guest-linking";
+import { PgGuestLinkingStore } from "./guest-linking-store";
 import { processEmailJobs } from "./email";
 
 const TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
@@ -28,6 +52,7 @@ const workerId = process.env.ONLYEVS_WORKER_ID?.trim() || `onlyevs-${randomUUID(
 const databaseUrl = process.env.ONLYEVS_WORKER_DATABASE_URL?.trim();
 if (!databaseUrl) throw new Error("ONLYEVS_WORKER_DATABASE_URL is required.");
 const pool = new Pool({ connectionString: databaseUrl, max: 4, statement_timeout: 15_000, application_name: workerId });
+const guestLinkingStore = new PgGuestLinkingStore(pool);
 const keyring = credentialKeyringFromEnv();
 const tripBindingSecret = process.env.ONLYEVS_TRIP_BINDING_HMAC_SECRET?.trim() ?? "";
 if (tripBindingSecret.length < 32) throw new Error("ONLYEVS_TRIP_BINDING_HMAC_SECRET is required.");
@@ -63,6 +88,11 @@ interface GrantContext {
   key_version: number;
   tesla_subject_hmac: string;
   revision: number;
+  // Trip window (not the grant's own issue/revoke schedule, which is offset
+  // by INVITE_LEAD_MS/REVOCATION_GRACE_MS) -- the bookend freshness spec is
+  // "within 30 minutes of the edge", i.e. of these, not of grant timing.
+  trip_starts_at: Date;
+  trip_ends_at: Date;
 }
 
 interface DomainRow {
@@ -294,7 +324,7 @@ async function grantContext(client: PoolClient, id: string): Promise<GrantContex
     select g.id, g.workspace_id, g.trip_id, g.vehicle_id, g.status, g.issue_at,
            g.revoke_at, g.provider_invitation_id, g.provider_reconciliation,
            g.revision,
-           t.shop_slug, v.vin,
+           t.shop_slug, t.starts_at as trip_starts_at, t.ends_at as trip_ends_at, v.vin,
            i.id as integration_id, i.region_base_url,
            c.refresh_token_ciphertext, c.key_version, b.tesla_subject_hmac
     from public.onlyevs_access_grants g
@@ -307,6 +337,433 @@ async function grantContext(client: PoolClient, id: string): Promise<GrantContex
     where g.id = $1 and v.vin is not null and b.tesla_subject_hmac is not null
   `, [id]);
   return result.rows[0] ?? null;
+}
+
+/** pg returns `numeric` columns as strings so precision survives round-trips
+ * -- this is the one place in the bookend/history path that turns one back
+ * into a JS number, never silently coercing a malformed value into 0.
+ * Exported (with the functions below) for contract tests -- each takes an
+ * injected PoolClient/Pool rather than closing over the module-scope pool,
+ * so a fake client is enough to test them without a real database. */
+export function numberOrNull(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+interface VehicleStatsSnapshotRow {
+  odometer_mi: string | null;
+  odometer_observed_at: Date | null;
+  battery_pct: string | null;
+  battery_observed_at: Date | null;
+}
+
+async function currentVehicleStatsSnapshot(
+  client: PoolClient,
+  workspaceId: string,
+  vehicleId: string,
+): Promise<VehicleStatsSnapshotRow | null> {
+  const result = await client.query<VehicleStatsSnapshotRow>(`
+    select odometer_mi, odometer_observed_at, battery_pct, battery_observed_at
+    from public.onlyevs_vehicle_stats_current
+    where workspace_id = $1 and vehicle_id = $2
+  `, [workspaceId, vehicleId]);
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Trip-bookend capture (Phase 2, T1/T5). Reads the latest streamed values
+ * off onlyevs_vehicle_stats_current (never a direct vehicle_data poll --
+ * "no vehicle wake by default"), applies the absent-data + freshness rule
+ * (lib/owner/bookends.ts captureBookendField) against `edgeAtMs` (the
+ * trip's own starts_at/ends_at, per the plan's "within 30 minutes of the
+ * edge" freshness spec -- not wall-clock write time), and writes the row.
+ *
+ * `mode` enforces the idempotency/reissue rule at the call site: "start" is
+ * always written `insert_only` (first-write-wins, `on conflict do
+ * nothing`) regardless of caller (sweep or grant-issue) so a later reissue
+ * or guest-link rotation never overwrites the true pickup snapshot; "end"
+ * is always written `upsert` (latest-write-wins) so a late-return sweep or
+ * an actual grant-revoke keeps refining it until tracking stops.
+ */
+export async function captureBookendEdge(
+  client: PoolClient,
+  trip: { id: string; workspaceId: string; vehicleId: string },
+  edge: BookendEdge,
+  edgeAtMs: number,
+  mode: "insert_only" | "upsert",
+): Promise<void> {
+  const stats = await currentVehicleStatsSnapshot(client, trip.workspaceId, trip.vehicleId);
+  const odometer = captureBookendField(
+    {
+      value: numberOrNull(stats?.odometer_mi ?? null),
+      observedAt: stats?.odometer_observed_at ? stats.odometer_observed_at.getTime() : null,
+    },
+    edgeAtMs,
+  );
+  const battery = captureBookendField(
+    {
+      value: numberOrNull(stats?.battery_pct ?? null),
+      observedAt: stats?.battery_observed_at ? stats.battery_observed_at.getTime() : null,
+    },
+    edgeAtMs,
+  );
+  const stale = odometer.stale || battery.stale;
+  const params = [
+    trip.workspaceId,
+    trip.id,
+    edge,
+    odometer.value,
+    odometer.observedAt !== null ? new Date(odometer.observedAt) : null,
+    battery.value,
+    battery.observedAt !== null ? new Date(battery.observedAt) : null,
+    new Date(),
+    stale,
+  ];
+  if (mode === "insert_only") {
+    await client.query(`
+      insert into private.onlyevs_trip_bookends
+        (workspace_id, trip_id, edge, odometer_mi, odometer_observed_at, battery_pct, battery_observed_at, captured_at, stale)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      on conflict (trip_id, edge) do nothing
+    `, params);
+  } else {
+    await client.query(`
+      insert into private.onlyevs_trip_bookends
+        (workspace_id, trip_id, edge, odometer_mi, odometer_observed_at, battery_pct, battery_observed_at, captured_at, stale)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      on conflict (trip_id, edge) do update set
+        odometer_mi = excluded.odometer_mi,
+        odometer_observed_at = excluded.odometer_observed_at,
+        battery_pct = excluded.battery_pct,
+        battery_observed_at = excluded.battery_observed_at,
+        captured_at = excluded.captured_at,
+        stale = excluded.stale
+    `, params);
+  }
+}
+
+interface BookendSweepCandidateRow {
+  id: string;
+  workspace_id: string;
+  vehicle_id: string;
+  starts_at: Date;
+  ends_at: Date;
+  status: string;
+}
+
+/**
+ * Sweep trigger (eng-review Issue 1, 1A): every trip has a schedule, so
+ * every trip gets bookends, grant or not. Runs every runOnce() pass.
+ *
+ * Start candidates are restricted to non-terminal, non-completed trips so a
+ * trip that already finished before this code shipped is never given a
+ * fabricated "captured just now" start snapshot (rollout straddle rule) --
+ * it keeps rendering the honest "Start not captured (pre-telemetry)" state
+ * forever, since `not exists (... edge = 'start')` will always be true for
+ * it and no code path ever backfills one.
+ *
+ * End candidates exclude 'completed' so the late-return grace window
+ * (BOOKEND_END_TRACKING_GRACE_MS) is enforced by the status-transition
+ * query in runOnce() (which flips a trip to 'completed' only once
+ * ends_at + grace has elapsed) -- isEndBookendStillTracking is still
+ * consulted per row for defense-in-depth and to keep one shared, tested
+ * decision function as the single source of truth.
+ */
+export async function sweepTripBookends(pool: Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    const nowMs = Date.now();
+
+    const startCandidates = await client.query<BookendSweepCandidateRow>(`
+      select t.id, t.workspace_id, t.vehicle_id, t.starts_at, t.ends_at, t.status
+      from public.onlyevs_trips t
+      where t.status in ('confirmed', 'armed', 'active')
+        and not exists (
+          select 1 from private.onlyevs_trip_bookends b
+          where b.trip_id = t.id and b.edge = 'start'
+        )
+    `);
+    for (const row of startCandidates.rows) {
+      const startsAtMs = row.starts_at.getTime();
+      const endsAtMs = row.ends_at.getTime();
+      if (!isBookendWindowDue("start", { nowMs, startsAtMs, endsAtMs })) continue;
+      await captureBookendEdge(
+        client,
+        { id: row.id, workspaceId: row.workspace_id, vehicleId: row.vehicle_id },
+        "start",
+        startsAtMs,
+        "insert_only",
+      );
+    }
+
+    const endCandidates = await client.query<BookendSweepCandidateRow>(`
+      select t.id, t.workspace_id, t.vehicle_id, t.starts_at, t.ends_at, t.status
+      from public.onlyevs_trips t
+      where t.status not in ('cancelled', 'conflict', 'completed')
+        and t.ends_at <= now()
+    `);
+    for (const row of endCandidates.rows) {
+      const startsAtMs = row.starts_at.getTime();
+      const endsAtMs = row.ends_at.getTime();
+      if (!isBookendWindowDue("end", { nowMs, startsAtMs, endsAtMs })) continue;
+      if (!isEndBookendStillTracking({ nowMs, endsAtMs, tripCompleted: row.status === "completed" })) continue;
+      await captureBookendEdge(
+        client,
+        { id: row.id, workspaceId: row.workspace_id, vehicleId: row.vehicle_id },
+        "end",
+        endsAtMs,
+        "upsert",
+      );
+    }
+  } finally {
+    client.release();
+  }
+}
+
+interface GuestLinkCandidateRow {
+  trip_id: string;
+  workspace_id: string;
+  guest_name: string;
+  verified_email_hash: string | null;
+  tesla_subject_hmac: string | null;
+}
+
+/**
+ * Durable guest auto-linking sweep (Phase 7, T11 worker half). Runs every
+ * runOnce() pass, right after the bookend sweep. Exact-match only, by the
+ * same rule lib/owner/guest-linking.ts documents: a trip only ever links to
+ * an existing/new guest via an equal `email_hash`/`tesla_subject_hmac`
+ * key, never a fuzzy match.
+ *
+ * Candidates are trips with `guest_id is null` joined to their guest
+ * binding -- the identical shape the migration's one-time backfill `do $$`
+ * block used, except this runs continuously so every trip created *after*
+ * that backfill (every real trip, going forward) still gets linked. A trip
+ * whose binding carries neither key (e.g. not yet guest-bound) is skipped
+ * this pass and picked up automatically on a later sweep once binding
+ * completes -- never a fabricated link from an empty key.
+ */
+export async function sweepGuestLinking(pool: Pool, store: GuestLinkingStore): Promise<void> {
+  const candidates = await pool.query<GuestLinkCandidateRow>(`
+    select t.id as trip_id, t.workspace_id, t.guest_name,
+      b.verified_email_hash, b.tesla_subject_hmac
+    from public.onlyevs_trips t
+    join private.onlyevs_guest_bindings b
+      on b.workspace_id = t.workspace_id and b.trip_id = t.id
+    where t.guest_id is null
+  `);
+  for (const row of candidates.rows) {
+    const candidateKeys: GuestIdentityCandidateKey[] = [];
+    if (row.verified_email_hash) candidateKeys.push({ keyType: "email_hash", keyValue: row.verified_email_hash });
+    if (row.tesla_subject_hmac) candidateKeys.push({ keyType: "tesla_subject_hmac", keyValue: row.tesla_subject_hmac });
+    if (candidateKeys.length === 0) continue;
+    await linkTripToGuest(store, {
+      workspaceId: row.workspace_id,
+      tripId: row.trip_id,
+      candidateKeys,
+      fallbackDisplayName: row.guest_name,
+    });
+  }
+}
+
+interface TripEvidenceBookendRow {
+  edge: string;
+  odometer_mi: string | null;
+  odometer_observed_at: Date | null;
+  battery_pct: string | null;
+  battery_observed_at: Date | null;
+  stale: boolean;
+}
+
+/**
+ * Evidence packet composition (Phase 6, T9 worker half). Composed once,
+ * exactly at the moment a trip transitions to 'completed' (see runOnce()),
+ * from data already durable in this workspace: the trip window and both
+ * bookends (this lane, complete) plus the miles/battery delta
+ * (deriveBookendDelta, this lane). Deliberately contains no coordinates --
+ * the packet is safe to render anywhere owner-side without touching the
+ * sealed location table.
+ *
+ * Charging-session segmentation (lib/owner/charge-sessions.ts) is owned by
+ * the parallel data-layer lane (T10) and is a stub that throws until that
+ * lane lands. Calling it is wrapped so a not-yet-implemented dependency
+ * degrades to an honest "not yet derived" marker (chargingSessionsDerived:
+ * false) rather than a fabricated empty result claiming zero charging
+ * occurred -- once that lane ships, this composition starts populating
+ * chargingSessions with no further changes needed here.
+ *
+ * Versioned supersede model (G4): the migration's `unique(trip_id, version)`
+ * constraint (schema lane) makes a correction representable as a genuine new
+ * row rather than an impossible second insert under the old `unique(trip_id)`
+ * shape. Every call computes `next version = max(version for this trip) + 1`
+ * and inserts that row -- insert-only, never a mutation of an earlier
+ * version. In normal operation composeTripEvidencePacket is only ever
+ * called once per trip (the 'completed' transition in
+ * advanceTripStatusesAndComposePackets below), so it produces version 1;
+ * calling it again for the same trip (a future correction trigger, not yet
+ * wired to any caller) naturally produces version 2, 3, ... without any
+ * special-case "is this a correction" branch. The current packet for a trip
+ * is always the row with the highest version (see
+ * components/owner/packet-evidence-card.tsx's selectLatestPacketPerTrip).
+ *
+ * Delivery (G3): the plan's second channel -- reusing the trip-reminder
+ * outbound path (app/api/owner/trips/[id]/reminder/route.ts) -- is genuinely
+ * route/session-bound: it authenticates via `supabase.auth.getUser()`,
+ * enforces per-caller reminder rate limits through RPCs scoped to an
+ * authenticated request, and checks `isSameOriginRequest`. None of that
+ * exists in this worker's non-interactive context, so that exact route
+ * cannot be called from here. The honest alternative the plan allows: the
+ * owner Inbox card (components/owner/packet-evidence-card.tsx's
+ * PacketEvidenceQueue, already wired into OwnerInbox.tsx) is the primary and
+ * sole delivery channel -- it "arrives ready" with no external dependency.
+ * The delivery *attempt* is still durably recorded (never silently
+ * un-tracked): onlyevs_trip_evidence_packets carries no delivery-tracking
+ * column and adding one is a migration change outside this lane's file
+ * ownership this wave, so recordPacketInboxDelivery below reuses the
+ * already-provisioned, unconstrained-`entity_type` public.
+ * onlyevs_integration_audit_events table (the same table `audit()` below
+ * writes to for grant events) instead of inventing new schema.
+ */
+export async function composeTripEvidencePacket(
+  client: PoolClient,
+  trip: { id: string; workspaceId: string },
+): Promise<void> {
+  const tripResult = await client.query<{
+    id: string;
+    workspace_id: string;
+    vehicle_id: string;
+    guest_name: string;
+    starts_at: Date;
+    ends_at: Date;
+  }>(`
+    select id, workspace_id, vehicle_id, guest_name, starts_at, ends_at
+    from public.onlyevs_trips
+    where workspace_id = $1 and id = $2
+  `, [trip.workspaceId, trip.id]);
+  const t = tripResult.rows[0];
+  if (!t) return;
+
+  const bookendResult = await client.query<TripEvidenceBookendRow>(`
+    select edge, odometer_mi, odometer_observed_at, battery_pct, battery_observed_at, stale
+    from private.onlyevs_trip_bookends
+    where workspace_id = $1 and trip_id = $2
+  `, [t.workspace_id, t.id]);
+  const start = bookendResult.rows.find((row) => row.edge === "start") ?? null;
+  const end = bookendResult.rows.find((row) => row.edge === "end") ?? null;
+
+  const delta = deriveBookendDelta({
+    startOdometerMi: numberOrNull(start?.odometer_mi ?? null),
+    endOdometerMi: numberOrNull(end?.odometer_mi ?? null),
+    startBatteryPct: numberOrNull(start?.battery_pct ?? null),
+    endBatteryPct: numberOrNull(end?.battery_pct ?? null),
+  });
+
+  let chargingSessionsDerived = false;
+  let chargingSessions: unknown[] = [];
+  try {
+    const historyResult = await client.query<{
+      observed_at: Date;
+      battery_pct: string | null;
+      estimated_range_mi: string | null;
+      odometer_mi: string | null;
+      charging_state: string | null;
+      locked: boolean | null;
+    }>(`
+      select observed_at, battery_pct, estimated_range_mi, odometer_mi, charging_state, locked
+      from public.onlyevs_vehicle_stats_history
+      where workspace_id = $1 and vehicle_id = $2 and observed_at between $3 and $4
+      order by observed_at
+    `, [t.workspace_id, t.vehicle_id, t.starts_at, t.ends_at]);
+    chargingSessions = segmentChargeSessions({
+      vehicleId: t.vehicle_id,
+      history: historyResult.rows.map((row) => ({
+        vehicleId: t.vehicle_id,
+        observedAt: row.observed_at.getTime(),
+        batteryPct: numberOrNull(row.battery_pct),
+        estimatedRangeMi: numberOrNull(row.estimated_range_mi),
+        odometerMi: numberOrNull(row.odometer_mi),
+        chargingState: row.charging_state,
+        locked: row.locked,
+      })),
+      tripWindows: [{ tripId: t.id, startsAtMs: t.starts_at.getTime(), endsAtMs: t.ends_at.getTime() }],
+    });
+    chargingSessionsDerived = true;
+  } catch {
+    // Not implemented yet in the data-layer lane's charge-sessions.ts --
+    // leave the honest "not yet derived" marker (see docstring above).
+  }
+
+  const bookendPayload = (row: TripEvidenceBookendRow | null) => row ? {
+    odometerMi: numberOrNull(row.odometer_mi),
+    odometerObservedAt: row.odometer_observed_at ? row.odometer_observed_at.toISOString() : null,
+    batteryPct: numberOrNull(row.battery_pct),
+    batteryObservedAt: row.battery_observed_at ? row.battery_observed_at.toISOString() : null,
+    stale: row.stale,
+  } : null;
+
+  const payload = {
+    tripId: t.id,
+    guestName: t.guest_name,
+    startsAt: t.starts_at.toISOString(),
+    endsAt: t.ends_at.toISOString(),
+    bookends: { start: bookendPayload(start), end: bookendPayload(end) },
+    milesDriven: delta.milesDriven,
+    batteryDeltaPct: delta.batteryDeltaPct,
+    odometerRegression: delta.odometerRegression,
+    chargingSessionsDerived,
+    chargingSessions,
+  };
+
+  const versionResult = await client.query<{ next_version: string }>(`
+    select coalesce(max(version), 0) + 1 as next_version
+    from public.onlyevs_trip_evidence_packets
+    where workspace_id = $1 and trip_id = $2
+  `, [t.workspace_id, t.id]);
+  const version = Number(versionResult.rows[0]?.next_version ?? 1);
+
+  const insertResult = await client.query<{ id: string }>(`
+    insert into public.onlyevs_trip_evidence_packets (workspace_id, trip_id, version, composed_at, payload)
+    values ($1, $2, $3, now(), $4::jsonb)
+    on conflict (trip_id, version) do nothing
+    returning id
+  `, [t.workspace_id, t.id, version, JSON.stringify(payload)]);
+
+  const packetId = insertResult.rows[0]?.id;
+  if (packetId) {
+    await recordPacketInboxDelivery(client, {
+      workspaceId: t.workspace_id,
+      tripId: t.id,
+      packetId,
+      version,
+    });
+  }
+}
+
+/**
+ * Durable record of the evidence-packet delivery attempt (G3 -- see the
+ * composeTripEvidencePacket doc comment above for why the Inbox card is the
+ * chosen channel and why this reuses onlyevs_integration_audit_events rather
+ * than a new packets-table column). `result: 'success'` here means "the
+ * packet reached its delivery surface" (the Inbox, which reads this table
+ * directly and cannot itself fail to "arrive") -- not a network send that
+ * can fail, which is the honest distinction from the reminder-email path's
+ * definite/ambiguous/failed states.
+ */
+async function recordPacketInboxDelivery(
+  client: PoolClient,
+  args: { workspaceId: string; tripId: string; packetId: string; version: number },
+): Promise<void> {
+  await client.query(`
+    insert into public.onlyevs_integration_audit_events
+      (workspace_id, actor_type, actor_id_hash, entity_type, entity_id, action, result, details)
+    values ($1, 'worker', encode(extensions.digest($2, 'sha256'), 'hex'), 'trip_evidence_packet', $3, 'inbox_delivery', 'success', $4::jsonb)
+  `, [
+    args.workspaceId,
+    workerId,
+    args.packetId,
+    JSON.stringify({ tripId: args.tripId, version: args.version, channel: "owner_inbox" }),
+  ]);
 }
 
 async function audit(client: PoolClient, context: GrantContext, action: string, result: string, details: Record<string, unknown> = {}) {
@@ -451,6 +908,17 @@ async function issueAccess(client: PoolClient, context: GrantContext, tesla: Tes
     return;
   }
   await audit(client, context, "invitation_create", "success");
+  // Grant-issue also attempts the start write (Phase 2 capture contract,
+  // 1A): whichever edge fires first between this and the window sweep wins
+  // via on-conflict-do-nothing, so a grantless trip still gets its start
+  // bookend from the sweep alone.
+  await captureBookendEdge(
+    client,
+    { id: context.trip_id, workspaceId: context.workspace_id, vehicleId: context.vehicle_id },
+    "start",
+    context.trip_starts_at.getTime(),
+    "insert_only",
+  );
 }
 
 async function revokeAccess(client: PoolClient, context: GrantContext, tesla: TeslaAccessClient) {
@@ -464,6 +932,16 @@ async function revokeAccess(client: PoolClient, context: GrantContext, tesla: Te
     await client.query("delete from private.onlyevs_access_secrets where grant_id = $1", [context.id]);
     await setGrant(client, context.id, { status: "revoked", next_action_at: null, last_error_code: null, last_provider_request_id: result.requestId });
     await audit(client, context, "invitation_revoke", "success");
+    // Final grant-revoke also upserts the end bookend (latest-write-wins):
+    // an actual-return revoke after the scheduled end supersedes whatever
+    // the window sweep last captured.
+    await captureBookendEdge(
+      client,
+      { id: context.trip_id, workspaceId: context.workspace_id, vehicleId: context.vehicle_id },
+      "end",
+      context.trip_ends_at.getTime(),
+      "upsert",
+    );
   } catch (error) {
     if (error instanceof TeslaAccessError && error.status === 404) {
       // A redeemed invite disappears. Attribute the driver by the HMAC of the
@@ -491,6 +969,13 @@ async function revokeAccess(client: PoolClient, context: GrantContext, tesla: Te
         last_provider_request_id: removed.requestId,
       });
       await audit(client, context, "driver_remove", "success");
+      await captureBookendEdge(
+        client,
+        { id: context.trip_id, workspaceId: context.workspace_id, vehicleId: context.vehicle_id },
+        "end",
+        context.trip_ends_at.getTime(),
+        "upsert",
+      );
       return;
     }
     throw error;
@@ -684,6 +1169,142 @@ async function processTelemetry(row: TelemetryRow) {
   }
 }
 
+interface ChargingSyncRow {
+  id: string;
+}
+
+interface ChargingSyncContext extends TeslaCredentialContext {
+  region_base_url: string;
+}
+
+async function chargingSyncContext(client: PoolClient, integrationId: string): Promise<ChargingSyncContext | null> {
+  const result = await client.query<ChargingSyncContext>(`
+    select i.workspace_id, i.shop_slug, i.id as integration_id, i.region_base_url,
+           c.refresh_token_ciphertext
+    from public.onlyevs_integrations i
+    join private.onlyevs_integration_credentials c
+      on c.workspace_id = i.workspace_id and c.integration_id = i.id
+    where i.id = $1 and i.provider = 'tesla' and i.status = 'connected'
+      and i.region_base_url is not null
+  `, [integrationId]);
+  return result.rows[0] ?? null;
+}
+
+/** Sync lookback/interval/retry thresholds now live in
+ * lib/owner/telemetry-policy.ts (imported above) per the plan's
+ * cross-cutting no-inline-threshold rule (Issue 2, 2A). */
+
+/**
+ * Charging-invoice sync (T10 worker half, same claim-queue pattern as
+ * processTelemetry/processCalendar). Per integration: refresh the Tesla
+ * token, pull each active vehicle's charging-history invoices for the
+ * lookback window, and upsert them into onlyevs_charging_invoices
+ * (idempotent on (workspace_id, provider_invoice_id) — a resync never
+ * double-counts). Reconciliation to derived sessions happens at read time
+ * in lib/owner/charge-session-repository.ts, never here — this job's only
+ * job is durably storing what Tesla returned.
+ *
+ * A single vehicle's fetch failing (e.g. a car this integration doesn't
+ * actually have a charging-history record for) never aborts the rest of
+ * the integration's vehicles; only a 401/403 (token no longer valid for
+ * this scope) is treated as terminal for the whole sync attempt, matching
+ * processTelemetry's reauth handling. Takes `pool` as a parameter (unlike
+ * processGrant/processTelemetry/processCalendar, which close over the
+ * module-scope pool) so it can be contract-tested with a fake pool, the
+ * same convention sweepTripBookends/ingestTelemetry already use.
+ */
+export async function syncChargingInvoices(pool: Pool, row: ChargingSyncRow) {
+  const client = await pool.connect();
+  let lockedIntegrationId: string | null = null;
+  try {
+    if (!await acquireIntegrationLock(client, row.id)) {
+      await client.query(`update public.onlyevs_integrations
+        set next_sync_at = now() + interval '30 seconds', last_error_code = 'tesla_integration_busy',
+            claimed_by = null, claim_expires_at = null
+        where id = $1`, [row.id]);
+      return;
+    }
+    lockedIntegrationId = row.id;
+    const context = await chargingSyncContext(client, row.id);
+    if (!context) {
+      await client.query(`update public.onlyevs_integrations
+        set next_sync_at = now() + interval '365 days', last_error_code = 'tesla_integration_unavailable',
+            claimed_by = null, claim_expires_at = null
+        where id = $1`, [row.id]);
+      return;
+    }
+    const tokens = await refreshTeslaToken(context.refresh_token_ciphertext, context);
+    await persistRotatedTeslaToken(client, context, tokens);
+
+    const vehicles = await client.query<{ id: string; vin: string }>(`
+      select id, vin from public.onlyevs_vehicles
+      where workspace_id = $1 and shop_slug = $2 and status = 'active' and vin is not null
+    `, [context.workspace_id, context.shop_slug]);
+
+    const sinceMs = Date.now() - CHARGING_SYNC_LOOKBACK_MS;
+    for (const vehicle of vehicles.rows) {
+      const url = new URL("api/1/dx/charging/history", `${context.region_base_url.replace(/\/$/, "")}/`);
+      url.searchParams.set("vin", vehicle.vin);
+      url.searchParams.set("startTime", new Date(sinceMs).toISOString());
+      url.searchParams.set("endTime", new Date().toISOString());
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          const error = new Error(`tesla_charging_history_${response.status}`);
+          (error as Error & { reauth?: boolean }).reauth = true;
+          throw error;
+        }
+        // Non-fatal per vehicle (e.g. no charging-history record for this
+        // car): skip it this cycle, keep syncing the rest.
+        continue;
+      }
+      const body = await response.json().catch(() => null);
+      const invoices = parseTeslaChargingHistory(body);
+      for (const invoice of invoices) {
+        await client.query(`
+          insert into public.onlyevs_charging_invoices
+            (workspace_id, vehicle_id, provider_invoice_id, started_at, ended_at, kwh_added, cost_usd, synced_at)
+          values ($1, $2, $3, $4, $5, $6, $7, now())
+          on conflict (workspace_id, provider_invoice_id) do update set
+            started_at = excluded.started_at, ended_at = excluded.ended_at,
+            kwh_added = excluded.kwh_added, cost_usd = excluded.cost_usd, synced_at = now()
+        `, [
+          context.workspace_id, vehicle.id, invoice.providerInvoiceId,
+          new Date(invoice.startedAtMs), new Date(invoice.endedAtMs), invoice.kWhAdded, invoice.costUsd,
+        ]);
+      }
+    }
+
+    await client.query(`update public.onlyevs_integrations
+      set next_sync_at = now() + make_interval(secs => $2::float8 / 1000),
+          last_sync_at = now(), last_error_code = null,
+          claimed_by = null, claim_expires_at = null
+      where id = $1`, [row.id, CHARGING_SYNC_INTERVAL_MS]);
+  } catch (error) {
+    const reauth = Boolean((error as Error & { reauth?: boolean }).reauth);
+    if (reauth) {
+      await client.query("update public.onlyevs_integrations set status = 'reauth_required', last_error_code = 'tesla_refresh_failed' where id = $1", [row.id]).catch(() => undefined);
+    }
+    await client.query(`update public.onlyevs_integrations
+      set next_sync_at = now() + make_interval(secs => $2::float8 / 1000),
+          last_error_code = $3, claimed_by = null, claim_expires_at = null
+      where id = $1`, [
+      row.id,
+      CHARGING_SYNC_RETRY_MS,
+      error instanceof Error ? error.message.slice(0, 160) : "charging_sync_failed",
+    ]).catch(() => undefined);
+  } finally {
+    if (lockedIntegrationId) {
+      await releaseIntegrationLock(client, lockedIntegrationId).catch(() => undefined);
+    }
+    client.release();
+  }
+}
+
 async function calendarContext(client: PoolClient, integrationId: string): Promise<CalendarContext | null> {
   const result = await client.query<CalendarContext>(`
     select i.workspace_id, i.shop_slug, i.id as integration_id,
@@ -835,39 +1456,62 @@ async function vehicleForVin(client: PoolClient, vin: string) {
   return result.rows.length === 1 ? result.rows[0] : null;
 }
 
-async function ingestTelemetry(update: TelemetryUpdate, sourceMessageId: string) {
+/**
+ * Split late-event policy (T3, outside-voice Issue 7A): history is
+ * append-only and always accepts whatever the parser already let through
+ * (up to HISTORY_LATE_EVENT_BACKFILL_MS -- see telemetry-ingest.ts), keyed
+ * idempotent on (workspace_id, source_message_id) so a Kafka redelivery
+ * after a collector outage never double-counts. onlyevs_vehicle_stats_current
+ * additionally requires isWithinCurrentStatsFreshnessWindow (24h) before
+ * this function touches it at all -- an event outside that window still
+ * reaches history, just never regresses or refreshes the live card.
+ */
+export async function ingestTelemetry(pool: Pool, update: TelemetryUpdate, sourceMessageId: string) {
   const client = await pool.connect();
   try {
     const vehicle = await vehicleForVin(client, update.vin);
     if (!vehicle) return;
+
     await client.query(`
-      insert into public.onlyevs_vehicle_stats_current
-        (workspace_id, vehicle_id, battery_pct, estimated_range_mi, odometer_mi, charging_state, locked,
-         connectivity, battery_observed_at, range_observed_at, odometer_observed_at,
-         charging_observed_at, locked_observed_at, connectivity_observed_at, observed_at, source)
-      values ($1, $2, $3, $4, $5, $6, $7, 'connected',
-        case when $3::numeric is not null then $8::timestamptz end,
-        case when $4::numeric is not null then $8::timestamptz end,
-        case when $5::numeric is not null then $8::timestamptz end,
-        case when $6::text is not null then $8::timestamptz end,
-        case when $7::boolean is not null then $8::timestamptz end,
-        $8, $8, 'fleet_telemetry')
-      on conflict (workspace_id, vehicle_id) do update set
-        battery_pct = coalesce(excluded.battery_pct, onlyevs_vehicle_stats_current.battery_pct),
-        estimated_range_mi = coalesce(excluded.estimated_range_mi, onlyevs_vehicle_stats_current.estimated_range_mi),
-        odometer_mi = coalesce(excluded.odometer_mi, onlyevs_vehicle_stats_current.odometer_mi),
-        charging_state = coalesce(excluded.charging_state, onlyevs_vehicle_stats_current.charging_state),
-        locked = coalesce(excluded.locked, onlyevs_vehicle_stats_current.locked),
-        battery_observed_at = coalesce(excluded.battery_observed_at, onlyevs_vehicle_stats_current.battery_observed_at),
-        range_observed_at = coalesce(excluded.range_observed_at, onlyevs_vehicle_stats_current.range_observed_at),
-        odometer_observed_at = coalesce(excluded.odometer_observed_at, onlyevs_vehicle_stats_current.odometer_observed_at),
-        charging_observed_at = coalesce(excluded.charging_observed_at, onlyevs_vehicle_stats_current.charging_observed_at),
-        locked_observed_at = coalesce(excluded.locked_observed_at, onlyevs_vehicle_stats_current.locked_observed_at),
-        connectivity_observed_at = excluded.connectivity_observed_at,
-        connectivity = 'connected', observed_at = excluded.observed_at, ingested_at = now(), source = 'fleet_telemetry'
-      where onlyevs_vehicle_stats_current.observed_at is null or excluded.observed_at >= onlyevs_vehicle_stats_current.observed_at
-    `, [vehicle.workspace_id, vehicle.id, update.batteryPct ?? null, update.estimatedRangeMi ?? null,
-      update.odometerMi ?? null, update.chargingState ?? null, update.locked ?? null, new Date(update.observedAt)]);
+      insert into public.onlyevs_vehicle_stats_history
+        (workspace_id, vehicle_id, observed_at, battery_pct, estimated_range_mi, odometer_mi,
+         charging_state, locked, source_message_id, delete_after)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      on conflict (workspace_id, source_message_id) do nothing
+    `, [vehicle.workspace_id, vehicle.id, new Date(update.observedAt), update.batteryPct ?? null,
+      update.estimatedRangeMi ?? null, update.odometerMi ?? null, update.chargingState ?? null,
+      update.locked ?? null, sourceMessageId, new Date(update.observedAt + HISTORY_RETENTION_MS)]);
+
+    if (isWithinCurrentStatsFreshnessWindow(update.observedAt)) {
+      await client.query(`
+        insert into public.onlyevs_vehicle_stats_current
+          (workspace_id, vehicle_id, battery_pct, estimated_range_mi, odometer_mi, charging_state, locked,
+           connectivity, battery_observed_at, range_observed_at, odometer_observed_at,
+           charging_observed_at, locked_observed_at, connectivity_observed_at, observed_at, source)
+        values ($1, $2, $3, $4, $5, $6, $7, 'connected',
+          case when $3::numeric is not null then $8::timestamptz end,
+          case when $4::numeric is not null then $8::timestamptz end,
+          case when $5::numeric is not null then $8::timestamptz end,
+          case when $6::text is not null then $8::timestamptz end,
+          case when $7::boolean is not null then $8::timestamptz end,
+          $8, $8, 'fleet_telemetry')
+        on conflict (workspace_id, vehicle_id) do update set
+          battery_pct = coalesce(excluded.battery_pct, onlyevs_vehicle_stats_current.battery_pct),
+          estimated_range_mi = coalesce(excluded.estimated_range_mi, onlyevs_vehicle_stats_current.estimated_range_mi),
+          odometer_mi = coalesce(excluded.odometer_mi, onlyevs_vehicle_stats_current.odometer_mi),
+          charging_state = coalesce(excluded.charging_state, onlyevs_vehicle_stats_current.charging_state),
+          locked = coalesce(excluded.locked, onlyevs_vehicle_stats_current.locked),
+          battery_observed_at = coalesce(excluded.battery_observed_at, onlyevs_vehicle_stats_current.battery_observed_at),
+          range_observed_at = coalesce(excluded.range_observed_at, onlyevs_vehicle_stats_current.range_observed_at),
+          odometer_observed_at = coalesce(excluded.odometer_observed_at, onlyevs_vehicle_stats_current.odometer_observed_at),
+          charging_observed_at = coalesce(excluded.charging_observed_at, onlyevs_vehicle_stats_current.charging_observed_at),
+          locked_observed_at = coalesce(excluded.locked_observed_at, onlyevs_vehicle_stats_current.locked_observed_at),
+          connectivity_observed_at = excluded.connectivity_observed_at,
+          connectivity = 'connected', observed_at = excluded.observed_at, ingested_at = now(), source = 'fleet_telemetry'
+        where onlyevs_vehicle_stats_current.observed_at is null or excluded.observed_at >= onlyevs_vehicle_stats_current.observed_at
+      `, [vehicle.workspace_id, vehicle.id, update.batteryPct ?? null, update.estimatedRangeMi ?? null,
+        update.odometerMi ?? null, update.chargingState ?? null, update.locked ?? null, new Date(update.observedAt)]);
+    }
 
     if (!update.location) return;
     const tripResult = await client.query<{ trip_id: string; shop_slug: string }>(`
@@ -953,7 +1597,7 @@ async function startTelemetryConsumer(): Promise<Consumer | null> {
     }
     if (topic === vehicleTopic) {
       const update = parseTelemetryPayload(body);
-      if (update) await ingestTelemetry(update, `${topic}:${partition}:${message.offset}`);
+      if (update) await ingestTelemetry(pool, update, `${topic}:${partition}:${message.offset}`);
     } else {
       await ingestConnectivity(body);
     }
@@ -961,18 +1605,31 @@ async function startTelemetryConsumer(): Promise<Consumer | null> {
   return consumer;
 }
 
-async function runOnce() {
-  await processEmailJobs(pool, workerId);
-  await Promise.all([
-    pool.query("delete from private.onlyevs_vehicle_location_points where delete_after <= now()"),
-    pool.query("select public.cleanup_onlyevs_expired_trip_link_secrets()"),
-    pool.query(`update public.onlyevs_vehicle_stats_current
-      set connectivity = 'stale', ingested_at = now()
-      where connectivity = 'connected' and observed_at < now() - interval '5 minutes'`),
-    pool.query(`with desired as (
+/** 13-month history retention sweep (Phase 1), same pattern as the
+ * location-points sweep in runOnce(); delete_after is set once per row at
+ * ingest time from HISTORY_RETENTION_MS. Exported standalone (rather than
+ * inlined in runOnce()) so it's independently contract-testable with a
+ * fake pool. */
+export async function sweepHistoryRetention(pool: Pool): Promise<void> {
+  await pool.query("delete from public.onlyevs_vehicle_stats_history where delete_after <= now()");
+}
+
+/**
+ * Status transition + Phase 6 packet trigger. 'active' -> 'completed'
+ * waits until ends_at + BOOKEND_END_TRACKING_GRACE_MS, not bare ends_at
+ * (late-return rule, 6B) -- a trip stays 'active' through the grace window
+ * so sweepTripBookends() keeps refining its end bookend with a late
+ * return's extra miles instead of freezing at the scheduled end. The
+ * RETURNING rows drive Phase 6 evidence-packet composition: a packet
+ * composes exactly once, at the moment a trip's status becomes
+ * 'completed' -- never for any other transition.
+ */
+export async function advanceTripStatusesAndComposePackets(pool: Pool): Promise<void> {
+  const completedTrips = await pool.query<{ id: string; workspace_id: string; next_status: string }>(`
+    with desired as (
       select t.id,
         case
-          when t.ends_at <= now() then 'completed'
+          when t.ends_at + make_interval(secs => $1::float8 / 1000) <= now() then 'completed'
           when t.starts_at <= now() then 'active'
           when g.status in ('invite_ready', 'redeemed') then 'armed'
           else 'confirmed'
@@ -985,8 +1642,41 @@ async function runOnce() {
     update public.onlyevs_trips t
     set status = desired.next_status, revision = t.revision + 1, updated_at = now()
     from desired
-    where t.id = desired.id and t.status <> desired.next_status`),
+    where t.id = desired.id and t.status <> desired.next_status
+    returning t.id, t.workspace_id, desired.next_status
+  `, [BOOKEND_END_TRACKING_GRACE_MS]);
+
+  const justCompletedTrips = completedTrips.rows.filter((row) => row.next_status === "completed");
+  if (justCompletedTrips.length === 0) return;
+  const packetClient = await pool.connect();
+  try {
+    for (const row of justCompletedTrips) {
+      await composeTripEvidencePacket(packetClient, { id: row.id, workspaceId: row.workspace_id });
+    }
+  } finally {
+    packetClient.release();
+  }
+}
+
+async function runOnce() {
+  await processEmailJobs(pool, workerId);
+  await Promise.all([
+    pool.query("delete from private.onlyevs_vehicle_location_points where delete_after <= now()"),
+    sweepHistoryRetention(pool),
+    pool.query("select public.cleanup_onlyevs_expired_trip_link_secrets()"),
+    pool.query(`update public.onlyevs_vehicle_stats_current
+      set connectivity = 'stale', ingested_at = now()
+      where connectivity = 'connected' and observed_at < now() - interval '5 minutes'`),
   ]);
+
+  // Bookend sweep runs before the status transition below so a trip's very
+  // last pre-completion sweep still sees it as non-'completed' and gets one
+  // final, freshest end-bookend write before the transition freezes it
+  // (late-return rule, 6B).
+  await sweepTripBookends(pool);
+  await advanceTripStatusesAndComposePackets(pool);
+  await sweepGuestLinking(pool, guestLinkingStore);
+
   await pool.query(`
     insert into public.onlyevs_telemetry_enrollments (workspace_id, vehicle_id, integration_id)
     select v.workspace_id, v.id, i.id
@@ -1004,17 +1694,31 @@ async function runOnce() {
     from public.onlyevs_vehicles v
     where v.workspace_id = e.workspace_id and v.id = e.vehicle_id and v.status <> 'active'
       and e.status <> 'removal_requested'`);
-  const [grants, domains, telemetry, calendars] = await Promise.all([
+
+  // Seed the charging-invoice sync schedule (T10) for any tesla integration
+  // that has re-consented vehicle_charging_cmds but has never been
+  // scheduled yet -- never resets an integration that's already scheduled,
+  // so this doesn't fight with syncChargingInvoices' own next_sync_at
+  // updates.
+  await pool.query(`update public.onlyevs_integrations
+    set next_sync_at = now()
+    where provider = 'tesla' and status = 'connected'
+      and granted_scopes @> array['vehicle_charging_cmds']::text[]
+      and next_sync_at is null`);
+
+  const [grants, domains, telemetry, calendars, chargingSyncs] = await Promise.all([
     pool.query<GrantRow>("select * from private.claim_onlyevs_due_access_grants($1, $2)", [workerId, 25]),
     pool.query<DomainRow>("select * from private.claim_onlyevs_due_domains($1, $2)", [workerId, 10]),
     pool.query<TelemetryRow>("select * from private.claim_onlyevs_due_telemetry($1, $2)", [workerId, 25]),
     pool.query<CalendarRow>("select * from private.claim_onlyevs_due_calendar($1, $2)", [workerId, 10]),
+    pool.query<ChargingSyncRow>("select * from private.claim_onlyevs_due_charging_sync($1, $2)", [workerId, 10]),
   ]);
   await Promise.allSettled([
     ...grants.rows.map(processGrant),
     ...domains.rows.map(processDomain),
     ...telemetry.rows.map(processTelemetry),
     ...calendars.rows.map(processCalendar),
+    ...chargingSyncs.rows.map((row) => syncChargingInvoices(pool, row)),
   ]);
 }
 
@@ -1031,10 +1735,28 @@ async function main() {
   }
 }
 
-void main()
-  .then(() => pool.end())
-  .catch(async (error) => {
-    console.error(error instanceof Error ? error.message : error);
-    await pool.end().catch(() => undefined);
-    process.exitCode = 1;
-  });
+// Only auto-run the worker loop when this file is the process entry point
+// (`tsx services/onlyevs-worker/index.ts`, matching the `pnpm worker` script
+// and the Dockerfile's CMD) -- never when another module imports it, which
+// is what lets contract tests import the exported functions above (with
+// ONLYEVS_WORKER_DATABASE_URL/ONLYEVS_TRIP_BINDING_HMAC_SECRET set so the
+// module-scope Pool/keyring construction above doesn't throw) without also
+// starting a real Kafka consumer and an infinite claim loop against a
+// database that doesn't exist in the test environment.
+const isMainModule = (() => {
+  try {
+    return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]!).href;
+  } catch {
+    return false;
+  }
+})();
+
+if (isMainModule) {
+  void main()
+    .then(() => pool.end())
+    .catch(async (error) => {
+      console.error(error instanceof Error ? error.message : error);
+      await pool.end().catch(() => undefined);
+      process.exitCode = 1;
+    });
+}
