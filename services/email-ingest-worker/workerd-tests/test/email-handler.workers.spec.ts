@@ -174,21 +174,45 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
     expect(stored!.customMetadata?.format).toBe("EVMAIL1");
   });
 
-  it("rejects generically when email intake is disabled (the dark-ship default, no overrides)", async () => {
-    // Deliberately uses baseEnv unmodified: EVHOST_EMAIL_INGEST_ENABLED comes
-    // straight from wrangler.jsonc's committed "false" default.
-    expect(baseEnv.EVHOST_EMAIL_INGEST_ENABLED).toBe("false");
+  it("rejects generically when email intake is disabled (fail-closed gate behavior)", async () => {
+    // The gate's fail-closed behavior is the thing under test, not any
+    // particular deployment's committed wrangler.jsonc value -- intake is a
+    // live deployment decision (see PR #27) and can legitimately be "true"
+    // in the checked-in config. So this test pins the gate explicitly rather
+    // than relying on -- or asserting -- what's currently committed.
     const fetchMock = stubFetch({});
 
     const to = `${await validAliasLocalPart("disabledtoken27", aliasKey)}@mail.evhost.app`;
     const message = buildMessage({ to, raw: encoder.encode("irrelevant, never read") });
 
-    await worker.email(message, baseEnv);
+    await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "false" });
 
     expect(message.setReject).toHaveBeenCalledTimes(1);
     expect(message.setReject).toHaveBeenCalledWith("EVhost email intake is paused");
     expect(fetchMock).not.toHaveBeenCalled();
     expect((await baseEnv.EMAIL_BUCKET.list()).objects).toHaveLength(0);
+  });
+
+  it("proceeds past the intake gate when enabled (twin of the disabled-gate test above)", async () => {
+    // Confirms the gate is a genuine on/off switch, not a test that happens
+    // to pass because the fixture's alias/app-origin plumbing never gets
+    // exercised. This mirrors the happy-path test's setup but asserts only
+    // on gate behavior (reaching authorize), not the full pipeline.
+    const objectKey = `email/${crypto.randomUUID()}`;
+    const inboundId = crypto.randomUUID();
+    const fetchMock = stubFetch({
+      "/api/internal/turo-email/authorize": () => ({ inbound_id: inboundId, accepted_alias_revision: 1, object_key: objectKey }),
+      "/api/internal/turo-email/capture?phase=init": () => ({ id: crypto.randomUUID(), state: "init" }),
+      "/api/internal/turo-email/capture?phase=finalize": () => ({ id: crypto.randomUUID(), state: "finalized" }),
+    });
+
+    const to = `${await validAliasLocalPart("enabledtoken234", aliasKey)}@mail.evhost.app`;
+    const message = buildMessage({ to, raw: encoder.encode(syntheticBookingEml) });
+
+    await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true" });
+
+    expect(message.setReject).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/internal/turo-email/authorize"), expect.anything());
   });
 
   it("rejects generically for an unknown/invalid alias, without ever reaching the app origin", async () => {
