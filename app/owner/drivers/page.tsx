@@ -13,6 +13,9 @@ import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { driverStatus } from "@/lib/owner/derive";
 import type { DriverStatus } from "@/lib/owner/types";
 import { DriverTable } from "@/components/owner/owner-ui";
+import { findPossibleDuplicateGuestGroups } from "@/components/owner/guest-duplicate-hints";
+import { useOwnerTenant } from "@/components/owner/OwnerTenantProvider";
+import { applyGuestLinks, EMPTY_GUEST_LINKS, fetchWorkspaceGuestLinks, type WorkspaceGuestLinks } from "./guest-roster";
 import { Card, Segmented } from "@/components/ui";
 import { PageHeader } from "@/components/evhost-ui";
 
@@ -33,14 +36,39 @@ const FILTER_OPTIONS: { value: Filter; label: string }[] = [
 const SSR_FALLBACK_NOW = 0;
 
 export default function DriversPage() {
-  const { drivers, trips, operationalError } = useOwnerData();
+  const { drivers: rawDrivers, trips: rawTrips, operationalError } = useOwnerData();
+  const { workspace } = useOwnerTenant();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [now, setNow] = useState(SSR_FALLBACK_NOW);
+  const [guestLinks, setGuestLinks] = useState<WorkspaceGuestLinks>(EMPTY_GUEST_LINKS);
 
   useEffect(() => {
     setNow(Date.now());
   }, []);
+
+  // Durable-guest roster (Phase 7, workspace mode only) — see
+  // ./guest-roster.ts for why this is a self-contained read rather than a
+  // change to useOwnerData(). Demo mode (no workspace) never fetches and
+  // keeps today's per-trip synthesized rows, honestly.
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspace) {
+      setGuestLinks(EMPTY_GUEST_LINKS);
+      return;
+    }
+    fetchWorkspaceGuestLinks({ workspaceId: workspace.id, shopSlug: workspace.shopSlug }).then((links) => {
+      if (!cancelled) setGuestLinks(links);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace]);
+
+  const { drivers, trips } = useMemo(
+    () => applyGuestLinks(rawDrivers, rawTrips, guestLinks),
+    [rawDrivers, rawTrips, guestLinks],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -52,6 +80,13 @@ export default function DriversPage() {
       );
     });
   }, [drivers, filter, query, now]);
+
+  // Phase 7 "possible duplicate" hint (design review Issue 5 calibration
+  // rule): a real, non-fabricated signal computed from data already on this
+  // page — two driver records sharing the same email look like the same
+  // guest under exact-match linking. This is a hint, never a claim of
+  // completeness; review happens on the guest's own detail page.
+  const duplicateGroups = useMemo(() => findPossibleDuplicateGuestGroups(drivers), [drivers]);
 
   return (
     <div className="space-y-5">
@@ -81,6 +116,15 @@ export default function DriversPage() {
           className="field min-h-[44px] w-full px-4 text-[16px] sm:w-64 sm:text-[14px]"
         />
       </div>
+
+      {duplicateGroups.length > 0 ? (
+        <Card className="border-brand/20 bg-brand/[0.04] p-4 text-sm text-ink-soft" role="status">
+          {duplicateGroups.length === 1
+            ? "1 possible duplicate guest — review and merge."
+            : `${duplicateGroups.length} possible duplicate guests — review and merge.`}{" "}
+          Open a guest below sharing an email with another to review.
+        </Card>
+      ) : null}
 
       {!operationalError ? <DriverTable drivers={filtered} trips={trips} now={now} /> : null}
     </div>

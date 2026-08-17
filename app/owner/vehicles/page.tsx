@@ -15,7 +15,8 @@ import { useVehicleState } from "@/lib/owner/vehicle-state";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { useOwnerSetupState } from "@/lib/owner/setup-state";
-import { vehicleStats, formatMiles, formatUsd, formatPct } from "@/lib/owner/derive";
+import { vehicleStats, formatMiles, formatPct, parseReturnPolicyPct } from "@/lib/owner/derive";
+import { buildLedgerRows, formatKwh, lifetimeKwh } from "@/components/owner/ledger-view";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconChevronRight } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
@@ -37,6 +38,7 @@ function VehicleCard({
   vehicle,
   trips,
   chargingSessions,
+  policyPct,
   isGuestVehicle,
   guestSnapshotCurrent,
   telemetry,
@@ -44,11 +46,18 @@ function VehicleCard({
   vehicle: Vehicle;
   trips: Trip[];
   chargingSessions: ChargingSession[];
+  policyPct: number;
   isGuestVehicle: boolean;
   guestSnapshotCurrent: boolean;
   telemetry?: VehicleStatsCurrent;
 }) {
   const stats = vehicleStats(vehicle.id, trips, chargingSessions);
+  // Energy tile renders kWh permanently, never a dollar amount (design
+  // review Issue 7, 7A) — sourced the same way the vehicle-details ledger's
+  // lifetime tile is (components/owner/ledger-view.ts's lifetimeKwh), so
+  // both "Energy" tiles in the app agree with the never-render-currency rule.
+  const linkedTrips = trips.filter((t) => t.vehicleId === vehicle.id);
+  const kWh = lifetimeKwh(buildLedgerRows(linkedTrips, chargingSessions, vehicle, policyPct));
   return (
     <Link
       href={`/owner/vehicles/${vehicle.id}`}
@@ -101,7 +110,7 @@ function VehicleCard({
           <div className="mt-4 grid grid-cols-4 gap-2">
             <VehicleStatCell label="Trips" value={String(stats.tripCount)} />
             <VehicleStatCell label="Miles" value={formatMiles(stats.milesRented)} />
-            <VehicleStatCell label="Energy" value={formatUsd(stats.energyCostUsd)} />
+            <VehicleStatCell label="Energy" value={formatKwh(kWh)} />
             <VehicleStatCell
               label="Avg return"
               value={stats.avgReturnChargePct === null ? "—" : formatPct(stats.avgReturnChargePct)}
@@ -126,6 +135,7 @@ export default function VehiclesPage() {
   const { trips, chargingSessions, vehicleTelemetry, hydrated: dataHydrated, operationalError } = useOwnerData();
   const { hydrated: setupHydrated, update: updateSetupState } = useOwnerSetupState();
   const ready = vehicleHydrated && dataHydrated;
+  const policyPct = parseReturnPolicyPct(config.rental.returnChargeLevel);
 
   if (!ready) {
     return <StatePanel title="Loading vehicles…" />;
@@ -197,6 +207,7 @@ export default function VehiclesPage() {
               vehicle={vehicle}
               trips={trips}
               chargingSessions={chargingSessions}
+              policyPct={policyPct}
               isGuestVehicle={config.car.sourceVehicleId === vehicle.guestSourceId}
               guestSnapshotCurrent={tenantCarMatchesVehicle(config.car, vehicle)}
               telemetry={vehicleTelemetry[vehicle.id]}

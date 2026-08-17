@@ -7,7 +7,7 @@
  * trips that have actually started.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
@@ -33,6 +33,11 @@ import { BatteryReturnGauge, TripTimeline } from "@/components/owner/charts";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconAlert } from "@/components/icons";
 import { regenerateGuestOnboardingLink } from "@/lib/owner/trip-repository";
+import { vehicleWorkspaceScope } from "@/lib/owner/vehicle-repository";
+import { fetchTripChargeSessions, saveManualChargeCostOverride } from "@/lib/owner/charge-session-repository";
+import { formatSessionKwhLabel } from "@/lib/owner/charge-sessions";
+import { CostOverrideField } from "@/components/owner/cost-override-field";
+import type { DerivedChargeSession } from "@/lib/owner/types";
 import { PageHeader } from "@/components/evhost-ui";
 import { ReminderButton } from "@/components/owner/ReminderButton";
 
@@ -57,7 +62,7 @@ function formatDateRange(startMs: number, endMs: number): string {
 }
 
 export default function TripDetailPage() {
-  const { config } = useTenantConfig();
+  const { config, tenantSlug } = useTenantConfig();
   const params = useParams<{ id: string }>();
   const tripId = params.id;
   const { trips, drivers, vehicles, chargingSessions, hydrated } = useOwnerData();
@@ -66,6 +71,7 @@ export default function TripDetailPage() {
   const [generatingLink, setGeneratingLink] = useState(false);
   const [guestUrl, setGuestUrl] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [derivedSessions, setDerivedSessions] = useState<DerivedChargeSession[]>([]);
 
   const trip = trips.find((t) => t.id === tripId) ?? null;
   const driver = trip ? drivers.find((d) => d.id === trip.driverId) ?? null : null;
@@ -73,6 +79,41 @@ export default function TripDetailPage() {
   const sessions = trip ? sessionsForTrip(chargingSessions, trip.id) : [];
   const energy = useMemo(() => tripEnergy(sessions), [sessions]);
   const miles = trip ? tripMiles(trip) : null;
+  const scope = useMemo(() => vehicleWorkspaceScope(tenantSlug), [tenantSlug]);
+
+  // Cost-provenance detail (Phase 3, TODO 2 choice C, mechanism Issue 9B) —
+  // ChargingSessionList above already renders the real per-session
+  // kWh/cost from `chargingSessions`; this fetches the same trip's sessions
+  // in their full DerivedChargeSession shape (costProvenance intact) so
+  // CostProvenanceTag/CostOverrideField have somewhere to render. A read
+  // failure degrades to an empty list — the plain session list above still
+  // renders regardless.
+  useEffect(() => {
+    if (!trip || !scope) { setDerivedSessions([]); return; }
+    let cancelled = false;
+    fetchTripChargeSessions(scope, trip)
+      .then((result) => { if (!cancelled) setDerivedSessions(result); })
+      .catch(() => { if (!cancelled) setDerivedSessions([]); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed off the
+    // trip's stable identity/window fields, not the trips-array reference
+    // (which is re-created on every operational-snapshot refresh).
+  }, [trip?.id, trip?.vehicleId, trip?.startAt, trip?.endAt, scope]);
+
+  // Persists a manual cost correction (G5 remediation) and reflects it in
+  // local state immediately — the pure applyManualChargeCostOverride inside
+  // CostOverrideField already computed `next`, so no refetch is needed for
+  // the row itself to show the new value/provenance right away.
+  async function saveCostOverride(session: DerivedChargeSession) {
+    if (!scope) throw new Error("This workspace can't save cost corrections right now.");
+    await saveManualChargeCostOverride(scope, {
+      vehicleId: session.vehicleId,
+      tripId: session.tripId,
+      sessionStartedAtMs: session.startedAt,
+      costUsd: session.costUsd ?? 0,
+    });
+    setDerivedSessions((prev) => prev.map((s) => (s.id === session.id ? session : s)));
+  }
   const globalPolicyPct = useMemo(
     () => parseReturnPolicyPct(config.rental.returnChargeLevel),
     [config.rental.returnChargeLevel],
@@ -271,6 +312,29 @@ export default function TripDetailPage() {
         </div>
         <ChargingSessionList sessions={sessions} />
       </div>
+
+      {derivedSessions.length > 0 && (
+        <Card className="p-4">
+          <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">
+            Cost detail
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-muted">
+            Each session shows where its cost came from — a reconciled Tesla invoice, your
+            configured home rate, or a correction you enter yourself.
+          </p>
+          <ul className="mt-3 space-y-3">
+            {derivedSessions.map((session) => (
+              <li key={session.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-white p-3.5">
+                <span className="text-sm text-ink-soft">
+                  {session.kind === "dc_fast" ? "Supercharging" : "Home / AC charging"} · {formatSessionKwhLabel(session)}
+                  {session.gapAffected ? " (gap-affected)" : ""}
+                </span>
+                <CostOverrideField session={session} enteredBy="owner" saveAction={saveCostOverride} />
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {(trip.status === "active" || trip.status === "completed") && (
         <ReturnChecklistCard tripId={trip.id} />

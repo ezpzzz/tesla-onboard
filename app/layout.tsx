@@ -37,7 +37,17 @@ export default function RootLayout({
   return (
     <html lang="en" className={manrope.variable}>
       <body>
-        <Suspense fallback={children}>
+        {/*
+          `useSearchParams()` inside TenantConfigProvider requires a Suspense
+          ancestor. The fallback here must NOT reuse `children` — Suspense
+          renders fallback and the real content as two separate passes during
+          SSR streaming, so `fallback={children}` server-rendered the entire
+          page twice (two <aside> shells, two account menus, duplicate
+          landmarks) and that duplicate DOM survived hydration. A `null`
+          fallback keeps the single required boundary without ever rendering
+          the page content more than once.
+        */}
+        <Suspense fallback={null}>
           <TenantConfigProvider>{children}</TenantConfigProvider>
         </Suspense>
       </body>

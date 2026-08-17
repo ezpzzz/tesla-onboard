@@ -5,11 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import { PageHeader, ReadinessRail, StatePanel, TripRibbon } from "@/components/evhost-ui";
 import { ReminderButton } from "@/components/owner/ReminderButton";
 import { NewGuestOnboarding } from "@/components/owner/NewGuestOnboarding";
+import { AlertsPanel } from "@/components/owner/owner-ui";
 import { Card } from "@/components/ui";
 import { IconAlert, IconCalendar, IconChevronRight, IconKey, IconTrips, IconVehicle } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
-import { handoffSteps, selectAttentionQueue, selectNextHandoff } from "@/lib/owner/handoff";
+import { useOwnerState } from "@/lib/owner/owner-state";
+import { deriveAlerts } from "@/lib/owner/alerts";
+import { handoffSteps, selectNextHandoff } from "@/lib/owner/handoff";
 import { formatTripDuration } from "@/lib/trip-format";
 
 function dateTime(ms: number) {
@@ -21,7 +24,8 @@ function fullDate(ms: number) {
 }
 
 export default function OwnerTodayPage() {
-  const { drivers, trips, vehicles, stats, hydrated, vehicleError, operationalError } = useOwnerData();
+  const { drivers, trips, vehicles, chargingSessions, stats, policyPct, hydrated, vehicleError, operationalError } = useOwnerData();
+  const { state: ownerState, hydrated: ownerStateHydrated } = useOwnerState();
   const [now, setNow] = useState(0);
   useEffect(() => setNow(Date.now()), []);
   const handoff = useMemo(() => now ? selectNextHandoff(trips, drivers, vehicles, now) : null, [trips, drivers, vehicles, now]);
@@ -35,7 +39,20 @@ export default function OwnerTodayPage() {
       return [];
     }).sort((a, b) => a.at - b.at).slice(0, 3);
   }, [trips, drivers, vehicles, now]);
-  const attention = useMemo(() => now ? selectAttentionQueue(drivers, trips, now) : [], [drivers, trips, now]);
+  // Real alert derivation (lib/owner/alerts.ts), wired into the Today
+  // surface (plan Phase 5 "alerts wired to real data" / G12): honest empty
+  // ("Every active guest is on track.") until ownerState has hydrated, then
+  // the same pure deriveAlerts the design specced for the vehicle/trip
+  // pages. `chargeSessions` (Phase 3 derived, kWh-based) isn't exposed by
+  // useOwnerData yet, so the supercharging-unrecovered alert honestly never
+  // fires here rather than guessing — every other alert kind is real.
+  const alerts = useMemo(
+    () =>
+      now && ownerStateHydrated
+        ? deriveAlerts({ drivers, trips, chargingSessions, vehicles, ownerState, policyPct, now })
+        : [],
+    [drivers, trips, chargingSessions, vehicles, ownerState, ownerStateHydrated, policyPct, now],
+  );
   const error = vehicleError ?? operationalError;
 
   return (
@@ -72,15 +89,17 @@ export default function OwnerTodayPage() {
           {boundaries.length ? boundaries.map((item) => <Link key={`${item.trip.id}-${item.kind}`} href={`/owner/trips/${item.trip.id}`} className="group grid min-h-[64px] grid-cols-[72px_1fr_auto] items-center gap-3 border-b border-line text-sm last:border-0 hover:bg-surface/60"><span className="text-muted">{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(item.at))}</span><span className="min-w-0"><span className="block truncate font-semibold">{item.label}</span><span className="block truncate text-xs text-muted">{item.location ?? item.vehicle?.displayName ?? "Trip details"}</span></span><IconChevronRight className="h-4 w-4 text-muted group-hover:translate-x-0.5" /></Link>) : <p className="py-6 text-sm text-muted">No upcoming pickup or return boundaries.</p>}
         </section>
         <section className="rounded-lg border border-line bg-white px-6 py-3" aria-labelledby="attention-title">
-          <h2 id="attention-title" className="flex items-center gap-2 border-b border-line py-3 text-[17px] font-semibold"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-warn/10 text-warn"><IconAlert className="h-4 w-4" /></span>Needs attention · {attention.length}</h2>
-          {attention.length ? attention.map(({ driver, status, trip }) => <div key={driver.id} className="flex min-h-[64px] items-center gap-3 border-b border-line last:border-0"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-xs font-semibold">{driver.name.slice(0, 2).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{driver.name || "Guest"} walkthrough</span><span className="block text-xs text-muted">{status.replaceAll("-", " ")}</span></span><Link href={`/owner/trips/${trip.id}`} className="text-xs font-semibold text-brand">Review</Link></div>) : <p className="py-6 text-sm text-muted">Every active guest is on track.</p>}
+          <h2 id="attention-title" className="flex items-center gap-2 border-b border-line py-3 text-[17px] font-semibold"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-warn/10 text-warn"><IconAlert className="h-4 w-4" /></span>Needs attention · {alerts.length}</h2>
+          <div className="py-3">
+            <AlertsPanel alerts={alerts} />
+          </div>
         </section>
       </div>
 
       <section className="grid grid-cols-3 divide-x divide-line rounded-lg border border-line bg-white py-5 text-center">
         <div><div className="text-2xl font-semibold text-brand">{stats.tripCounts.active + stats.tripCounts.upcoming}</div><div className="mt-1 text-xs text-muted">Trips in motion</div></div>
         <div><div className="text-2xl font-semibold text-good">{drivers.filter((driver) => driver.progress?.isDone).length}</div><div className="mt-1 text-xs text-muted">Guests ready</div></div>
-        <div><div className={attention.length ? "text-2xl font-semibold text-warn" : "text-2xl font-semibold text-ink"}>{attention.length}</div><div className="mt-1 text-xs text-muted">Actions needed</div></div>
+        <div><div className={alerts.length ? "text-2xl font-semibold text-warn" : "text-2xl font-semibold text-ink"}>{alerts.length}</div><div className="mt-1 text-xs text-muted">Actions needed</div></div>
       </section>
 
     </div>
