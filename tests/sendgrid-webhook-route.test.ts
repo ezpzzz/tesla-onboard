@@ -2,10 +2,11 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const serviceRpc = vi.fn();
-const createServiceRoleClient = vi.fn();
+const reconcileSendGridEvent = vi.fn();
+const getEmailCaptureDbPool = vi.fn();
+const FAKE_POOL = { query: vi.fn() };
 
-vi.mock("@/lib/supabase/server", () => ({ createServiceRoleClient }));
+vi.mock("@/lib/email/capture-db", () => ({ reconcileSendGridEvent, getEmailCaptureDbPool }));
 
 const { POST } = await import("@/app/api/internal/sendgrid/events/route");
 
@@ -42,8 +43,8 @@ describe("sendgrid event webhook keyring", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEYS = `1:${current.publicKeyDer},2:${next.publicKeyDer}`;
-    serviceRpc.mockResolvedValue({ data: true, error: null });
-    createServiceRoleClient.mockReturnValue({ rpc: serviceRpc });
+    getEmailCaptureDbPool.mockReturnValue(FAKE_POOL);
+    reconcileSendGridEvent.mockResolvedValue({ data: true, error: null });
   });
 
   afterEach(() => delete process.env.EVHOST_SENDGRID_EVENT_WEBHOOK_PUBLIC_KEYS);
@@ -52,18 +53,25 @@ describe("sendgrid event webhook keyring", () => {
     const response = await POST(eventRequest(sampleEvents, current.privateKey));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ accepted: 1 });
-    expect(serviceRpc).toHaveBeenCalledWith("reconcile_onlyevs_sendgrid_event", expect.objectContaining({ p_signature_key_version: 1 }));
+    expect(reconcileSendGridEvent).toHaveBeenCalledWith(FAKE_POOL, expect.objectContaining({ signatureKeyVersion: 1 }));
   });
 
   it("accepts a signature from the next key during rotation and passes version 2 through", async () => {
     const response = await POST(eventRequest(sampleEvents, next.privateKey));
     expect(response.status).toBe(200);
-    expect(serviceRpc).toHaveBeenCalledWith("reconcile_onlyevs_sendgrid_event", expect.objectContaining({ p_signature_key_version: 2 }));
+    expect(reconcileSendGridEvent).toHaveBeenCalledWith(FAKE_POOL, expect.objectContaining({ signatureKeyVersion: 2 }));
   });
 
   it("rejects a signature from a key not in the keyring", async () => {
     const response = await POST(eventRequest(sampleEvents, unknown.privateKey));
     expect(response.status).toBe(401);
-    expect(serviceRpc).not.toHaveBeenCalled();
+    expect(reconcileSendGridEvent).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when ONLYEVS_EMAIL_CAPTURE_DATABASE_URL is unset (no service-role fallback)", async () => {
+    getEmailCaptureDbPool.mockReturnValue(null);
+    const response = await POST(eventRequest(sampleEvents, current.privateKey));
+    expect(response.status).toBe(400);
+    expect(reconcileSendGridEvent).not.toHaveBeenCalled();
   });
 });

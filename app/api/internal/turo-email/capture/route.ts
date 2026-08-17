@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseCanonicalJson, type CaptureFinalizeManifest, type CaptureInitManifest } from "@evhost/email-ingest-contract";
 import { authenticateEmailCaptureRequest } from "@/lib/email/internal-route";
+import { finalizeEmailCapture, initEmailCapture, type InboundEmailRow, type RpcResult } from "@/lib/email/capture-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,24 +14,24 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await authenticateEmailCaptureRequest(request, phase);
     if (!auth) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-    const parsed = phase === "init"
-      ? parseCanonicalJson<CaptureInitManifest>(auth.body, INIT_KEYS)
-      : parseCanonicalJson<CaptureFinalizeManifest>(auth.body, FINAL_KEYS);
-    const rpc = phase === "init" ? "init_onlyevs_email_capture" : "finalize_onlyevs_email_capture";
-    const args = phase === "init" ? {
-      p_inbound_id: parsed.inboundId, p_alias_revision: (parsed as CaptureInitManifest).acceptedAliasRevision,
-      p_raw_sha256: (parsed as CaptureInitManifest).rawSha256, p_normalized_sha256: (parsed as CaptureInitManifest).normalizedSha256,
-      p_raw_bytes: (parsed as CaptureInitManifest).rawBytes, p_normalized_bytes: (parsed as CaptureInitManifest).normalizedBytes,
-      p_auth_verdict: (parsed as CaptureInitManifest).authVerdict, p_kek_version: parsed.kekVersion,
-    } : {
-      p_inbound_id: parsed.inboundId, p_object_key: (parsed as CaptureFinalizeManifest).objectKey,
-      p_ciphertext_sha256: (parsed as CaptureFinalizeManifest).ciphertextSha256,
-      p_ciphertext_bytes: (parsed as CaptureFinalizeManifest).ciphertextBytes,
-      p_wrapped_dek_sha256: (parsed as CaptureFinalizeManifest).wrappedDekSha256,
-      p_kek_version: parsed.kekVersion, p_delete_after: (parsed as CaptureFinalizeManifest).deleteAfter,
-    };
-    const { data, error } = await auth.service.rpc(rpc, args);
-    if (error) return NextResponse.json({ error: "Capture conflict." }, { status: 409 });
-    return NextResponse.json({ id: data.id, state: data.state }, { headers: { "Cache-Control": "no-store" } });
+    let outcome: RpcResult<InboundEmailRow>;
+    if (phase === "init") {
+      const parsed = parseCanonicalJson<CaptureInitManifest>(auth.body, INIT_KEYS);
+      outcome = await initEmailCapture(auth.db, {
+        inboundId: parsed.inboundId, aliasRevision: parsed.acceptedAliasRevision,
+        rawSha256: parsed.rawSha256, normalizedSha256: parsed.normalizedSha256,
+        rawBytes: parsed.rawBytes, normalizedBytes: parsed.normalizedBytes,
+        authVerdict: parsed.authVerdict, kekVersion: parsed.kekVersion,
+      });
+    } else {
+      const parsed = parseCanonicalJson<CaptureFinalizeManifest>(auth.body, FINAL_KEYS);
+      outcome = await finalizeEmailCapture(auth.db, {
+        inboundId: parsed.inboundId, objectKey: parsed.objectKey,
+        ciphertextSha256: parsed.ciphertextSha256, ciphertextBytes: parsed.ciphertextBytes,
+        wrappedDekSha256: parsed.wrappedDekSha256, kekVersion: parsed.kekVersion, deleteAfter: parsed.deleteAfter,
+      });
+    }
+    if (outcome.error || !outcome.data) return NextResponse.json({ error: "Capture conflict." }, { status: 409 });
+    return NextResponse.json({ id: outcome.data.id, state: outcome.data.state }, { headers: { "Cache-Control": "no-store" } });
   } catch { return NextResponse.json({ error: "Invalid capture manifest." }, { status: 400 }); }
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.2 — 2026-08-16
+
+- Fix the internal Turo email capture routes (`/api/internal/turo-email/{authorize,capture}`) and the SendGrid delivery-event webhook (`/api/internal/sendgrid/events`) 401/400-ing on every request in production: they authenticated via `createServiceRoleClient()`, which requires `SUPABASE_SERVICE_ROLE_KEY` -- correctly absent from the web deployment under the repo's "the web app never uses a service-role key" invariant. They now connect through a dedicated, narrow Postgres role, `onlyevs_email_capture_svc` (new migration `20260816160000_onlyevs_email_capture_role.sql`), granted `EXECUTE` on exactly the five RPCs those routes call and nothing else, over a direct connection (`ONLYEVS_EMAIL_CAPTURE_DATABASE_URL`) through the Supabase pooler -- the same scoped-role shape `onlyevs_worker` already uses. The service-role key remains banned from the web app; `createServiceRoleClient()` is untouched and still used solely by the owner trip-reminder route, which this fix does not change.
+
+### For contributors
+
+- Keep every email-ingestion feature flag default-false; no gate flips as part of this release.
+- New env var: `ONLYEVS_EMAIL_CAPTURE_DATABASE_URL` (see `.env.example`). Provision the `onlyevs_email_capture_svc` LOGIN role out-of-band (this migration creates the NOLOGIN privilege group only, no password) the same way `ONLYEVS_WORKER_DATABASE_URL`'s role is provisioned, and grant it `onlyevs_email_capture_svc` membership.
+- Known separate issue, intentionally not touched here: `app/api/owner/trips/[id]/reminder/route.ts` also calls `createServiceRoleClient()` (for `get_onlyevs_trip_reminder_material`, defined in the unrelated `20260815190000_evhost_guest_portal.sql` migration) and is therefore equally broken in any production environment missing `SUPABASE_SERVICE_ROLE_KEY`. It's a different subsystem (guest-portal trip reminders, gated by `EVHOST_REMINDERS_ENABLED`) from the Turo email pipeline this release fixes, so it ships separately.
+
 ## 0.7.1 — 2026-08-16
 
 - Fix workspace email aliases minted by `createWorkspaceAlias` being RFC 5321-overlong (69-octet local-part: 36-char token + "." + 32-char signature) and therefore undeliverable -- Cloudflare's inbound MX rejected RCPT TO with "500 5.5.2 ... Invalid email user" before the email worker ever ran, so no mintable alias had ever actually delivered mail. The local-part format is shortened to 26-char token + "." + 21-char signature (48 octets total, comfortably under the 64-octet hard limit) while keeping the same HMAC keyring scheme, `token.signature` structure, and >= 96/120-bit entropy floors -- see the sizing comment on `EMAIL_ALIAS_TOKEN_BYTES`/`EMAIL_ALIAS_SIGNATURE_CHARS` in `packages/email-ingest-contract/src/index.ts`.
