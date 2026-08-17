@@ -106,7 +106,7 @@ describe("CRITICAL regression: tripMiles/tripEnergy/vehicleStats with real input
     expect(stats.totalMilesRented).toBe(200);
     expect(stats.avgReturnChargePct).toBe(60);
     expect(stats.tripsBelowPolicy).toBe(1);
-    expect(stats.tripCounts).toEqual({ upcoming: 0, active: 0, completed: 1 });
+    expect(stats.tripCounts).toEqual({ upcoming: 0, active: 0, completed: 1, cancelled: 0 });
   });
 });
 
