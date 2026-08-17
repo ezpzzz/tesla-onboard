@@ -27,6 +27,20 @@
 import { createClient } from "@/lib/supabase/client";
 import type { Driver, Trip } from "@/lib/owner/types";
 
+// Same env-based check used by OwnerTenantProvider.tsx / TenantConfigProvider.tsx
+// / use-owner-data.ts / app/login/page.tsx / app/owner/account/page.tsx. This
+// module's callers gate on `useOwnerTenant().workspace`, but that context
+// always supplies a truthy synthetic demo workspace (see
+// OwnerTenantProvider.tsx's demoWorkspace()) so a workspace-mode caller can
+// render workspace-shaped UI in demo mode -- it is NOT a reliable "Supabase is
+// configured" signal. Guarding here too keeps this module's own promise
+// "Workspace mode only" honest even if a caller's `!workspace` check is ever
+// relied on by mistake, and matches the project rule that demo mode never
+// constructs a Supabase client.
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+);
+
 export interface GuestRosterScope {
   workspaceId: string;
   shopSlug: string;
@@ -66,6 +80,7 @@ export const EMPTY_GUEST_LINKS: WorkspaceGuestLinks = {
  * links resolved yet" state (every trip keeps its own per-trip row), same
  * degrade rule as fetchWorkspaceOperationalSnapshot's bookend join. */
 export async function fetchWorkspaceGuestLinks(scope: GuestRosterScope): Promise<WorkspaceGuestLinks> {
+  if (!SUPABASE_CONFIGURED) return EMPTY_GUEST_LINKS;
   const supabase = createClient();
   const [guestsResult, tripsResult] = await Promise.all([
     supabase.from("onlyevs_guests").select("id,display_name").eq("workspace_id", scope.workspaceId),
@@ -96,6 +111,7 @@ export async function fetchWorkspaceGuestLinks(scope: GuestRosterScope): Promise
  * empty map on any error, so the merge dialog degrades to "0 identity keys"
  * rather than crashing -- never a guessed count. */
 export async function fetchWorkspaceGuestKeyCounts(scope: GuestRosterScope): Promise<Map<string, number>> {
+  if (!SUPABASE_CONFIGURED) return new Map();
   const { data, error } = await createClient().rpc("get_onlyevs_guest_identity_key_counts", {
     p_workspace_id: scope.workspaceId,
   });

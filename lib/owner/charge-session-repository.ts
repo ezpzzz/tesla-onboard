@@ -7,25 +7,41 @@
  * chargingSessions: [] and segmentChargeSessions was only ever invoked
  * inside the worker's evidence-packet composer).
  *
- * Nothing here is precomputed or cached: it fetches raw
- * onlyevs_vehicle_stats_history rows for a bounded window, segments them per
- * vehicle (lib/owner/charge-sessions.ts's segmentChargeSessions, passing
- * each vehicle's own battery capacity so ac_home kWh is estimated honestly
- * or left an explicit unknown), prices ac_home sessions at the owner's
- * configured $/kWh rate when one exists, reconciles any synced Tesla
- * charging-history invoices onto dc_fast sessions by vehicle + time-window
- * overlap, and finally applies any manager-entered manual cost corrections
- * (always last, so manual > invoice > rate).
+ * D2 remediation ("Server-side RPC"): fetchWorkspaceChargeSessions below no
+ * longer selects raw onlyevs_vehicle_stats_history rows and re-segments
+ * them client-side on every poll — that raw-select-then-segment path
+ * shipped every history row for the workspace's whole trip window (bounded
+ * only by the table's 13-month retention) to the browser and re-ran
+ * segmentChargeSessions on every 30s poll. It now calls the hardened
+ * public.get_onlyevs_charge_sessions() RPC (introduced in the same
+ * migration as this table), which performs the identical segmentation
+ * server-side with window functions, internally clamps its window to a
+ * sane horizon, and hard-limits its output regardless of what the caller
+ * passes.
  *
- * This is a DIRECT select of onlyevs_vehicle_stats_history, not the
- * bucketed get_onlyevs_vehicle_stats_history_buckets() RPC that
- * history-repository.ts's chart reads must always use — that rule exists
- * because averaging into <=300 buckets would blur or merge the
- * charging_state transitions this module needs to segment sessions
- * correctly. The workspace's existing manager-select RLS policy on
- * onlyevs_vehicle_stats_history already permits this read directly (no new
- * RPC needed); callers bound the window to keep it a bounded query, never an
- * unbounded fleet-wide history pull.
+ * IMPORTANT — lockstep requirement: that RPC's SQL segmentation and
+ * lib/owner/charge-sessions.ts's segmentChargeSessions() (still used
+ * directly by the worker's evidence-packet composer, untouched by this
+ * remediation) must be kept in lockstep. A change to either
+ * implementation's session-boundary rules (charging-state edges,
+ * CHARGE_SESSION_GAP_MS gapAffected rule, trip attribution, battery-delta
+ * kWh estimate) must be mirrored in the other by hand.
+ *
+ * What stays client-side, unchanged: pricing ac_home sessions at the
+ * owner's configured $/kWh rate, reconciling synced Tesla charging-history
+ * invoices onto dc_fast sessions by vehicle + time-window overlap, and
+ * finally applying any manager-entered manual cost corrections (always
+ * last, so manual > invoice > rate) — exactly the same
+ * reconcileHomeRateCost / reconcileChargingInvoices /
+ * applyManualChargeCostOverrides calls as before, just fed from the RPC's
+ * output instead of a client-side segmentChargeSessions call.
+ *
+ * fetchVehicleStatsHistoryRaw and fetchVehicleBatteryCapacitiesKwh below are
+ * no longer called by fetchWorkspaceChargeSessions (the RPC does its own
+ * server-side battery-capacity join) but are kept as standalone, tested
+ * primitives — history-repository.ts's chart reads still go through the
+ * separate bucketed RPC, never this raw select, per that module's own
+ * header comment.
  */
 
 import { createClient } from "@/lib/supabase/client";
@@ -35,7 +51,6 @@ import {
   applyManualChargeCostOverrides,
   reconcileChargingInvoices,
   reconcileHomeRateCost,
-  segmentChargeSessions,
   type ChargingInvoice,
   type ManualChargeCostOverride,
 } from "./charge-sessions";
@@ -262,13 +277,64 @@ function earliestRelevantSinceMs(trips: Pick<Trip, "startAt">[]): number | null 
   return Math.max(earliestTripStart, Date.now() - HISTORY_RETENTION_MS);
 }
 
+interface ChargeSessionRpcRow {
+  vehicle_id: string;
+  trip_id: string | null;
+  started_at: string;
+  ended_at: string;
+  kwh_added: number | null;
+  gap_affected: boolean;
+  kind: string;
+}
+
+/** Server-side segmented sessions via public.get_onlyevs_charge_sessions
+ * (D2) — see the module doc comment for the lockstep requirement with
+ * lib/owner/charge-sessions.ts's segmentChargeSessions(). Every row is kind
+ * 'ac_home' (the RPC's own pre-reconciliation default); cost fields always
+ * come back null/unset here, exactly like a freshly segmented session
+ * before reconcileHomeRateCost/reconcileChargingInvoices/
+ * applyManualChargeCostOverrides run below. `kwh_added: null` (no battery
+ * capacity on file server-side, or a missing percent reading at a session
+ * edge) maps to the NaN "unknown measurement" sentinel
+ * isChargeSessionKwhUnknown expects — never a fabricated 0. Honest empty
+ * pre-migration, matching every other RPC-backed repository function in
+ * this lane (e.g. history-repository.ts's fetchVehicleStatsHistoryBuckets). */
+async function fetchServerSegmentedChargeSessions(
+  scope: VehicleWorkspaceScope,
+  sinceMs: number,
+  untilMs: number,
+): Promise<DerivedChargeSession[]> {
+  const { data, error } = await createClient().rpc("get_onlyevs_charge_sessions", {
+    p_workspace_id: scope.workspaceId,
+    p_since: new Date(sinceMs).toISOString(),
+    p_until: new Date(untilMs).toISOString(),
+  });
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") return [];
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as ChargeSessionRpcRow[]).map((row) => ({
+    id: `${row.vehicle_id}:${Date.parse(row.started_at)}`,
+    tripId: row.trip_id,
+    vehicleId: row.vehicle_id,
+    kind: row.kind as DerivedChargeSession["kind"],
+    startedAt: Date.parse(row.started_at),
+    endedAt: Date.parse(row.ended_at),
+    kWhAdded: row.kwh_added === null ? NaN : row.kwh_added,
+    gapAffected: row.gap_affected,
+    costUsd: null,
+    costProvenance: null,
+  }));
+}
+
 /**
- * Workspace-wide charge-session derivation, read-time only. Segments each
- * vehicle's own history independently (segmentChargeSessions carries no
- * cross-vehicle state), prices ac_home sessions at the configured rate, and
- * reconciles any synced invoices onto dc_fast sessions. `trips` supplies
- * both the read window (via earliestRelevantSinceMs) and each session's
- * trip-boundary attribution.
+ * Workspace-wide charge-session derivation, read-time only. Segmentation
+ * itself now happens server-side (fetchServerSegmentedChargeSessions, D2);
+ * this function's own job is unchanged: price ac_home sessions at the
+ * configured rate, reconcile any synced invoices onto dc_fast sessions, and
+ * apply manual cost corrections last. `trips` supplies both the read window
+ * (via earliestRelevantSinceMs) and — server-side inside the RPC — each
+ * session's trip-boundary attribution.
  */
 export async function fetchWorkspaceChargeSessions(
   scope: VehicleWorkspaceScope,
@@ -277,33 +343,12 @@ export async function fetchWorkspaceChargeSessions(
   const sinceMs = earliestRelevantSinceMs(trips);
   if (sinceMs === null) return [];
 
-  const [history, ratePerKwh, invoices, batteryCapacities, manualOverrides] = await Promise.all([
-    fetchVehicleStatsHistoryRaw(scope, sinceMs),
+  const [segmented, ratePerKwh, invoices, manualOverrides] = await Promise.all([
+    fetchServerSegmentedChargeSessions(scope, sinceMs, Date.now()),
     fetchHomeChargeRatePerKwh(scope),
     fetchWorkspaceChargingInvoices(scope, sinceMs),
-    fetchVehicleBatteryCapacitiesKwh(scope),
     fetchWorkspaceManualChargeCostOverrides(scope, sinceMs),
   ]);
-
-  const historyByVehicle = new Map<string, VehicleStatsHistoryPoint[]>();
-  for (const point of history) {
-    const list = historyByVehicle.get(point.vehicleId);
-    if (list) list.push(point);
-    else historyByVehicle.set(point.vehicleId, [point]);
-  }
-
-  const segmented: DerivedChargeSession[] = [];
-  for (const [vehicleId, points] of historyByVehicle) {
-    const tripWindows = trips
-      .filter((t) => t.vehicleId === vehicleId)
-      .map((t) => ({ tripId: t.id, startsAtMs: t.startAt, endsAtMs: t.endAt }));
-    segmented.push(...segmentChargeSessions({
-      vehicleId,
-      history: points,
-      tripWindows,
-      batteryCapacityKwh: batteryCapacities.get(vehicleId) ?? null,
-    }));
-  }
 
   const priced = segmented.map((session) => reconcileHomeRateCost({ session, ratePerKwh }));
   const reconciled = reconcileChargingInvoices(priced, invoices).sessions;

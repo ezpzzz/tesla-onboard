@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isDeniedWrite,
   isMissingColumnError,
   parseRateDraft,
   validateRateDraft,
@@ -58,5 +59,20 @@ describe("isMissingColumnError", () => {
     expect(isMissingColumnError({ code: "23505" })).toBe(false);
     expect(isMissingColumnError(null)).toBe(false);
     expect(isMissingColumnError(undefined)).toBe(false);
+  });
+});
+
+describe("isDeniedWrite", () => {
+  it("flags a zero-row update result as denied — RLS silently filtered the write out", () => {
+    expect(isDeniedWrite([])).toBe(true);
+  });
+
+  it("treats a missing/undefined/null rows array the same as zero rows", () => {
+    expect(isDeniedWrite(undefined)).toBe(true);
+    expect(isDeniedWrite(null)).toBe(true);
+  });
+
+  it("does not flag a write that actually updated a row", () => {
+    expect(isDeniedWrite([{ home_charge_rate_usd_per_kwh: 0.14 }])).toBe(false);
   });
 });

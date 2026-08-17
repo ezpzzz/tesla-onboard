@@ -52,16 +52,42 @@ describe("parseTeslaChargingInvoice", () => {
     expect(parseTeslaChargingInvoice("not an object")).toBeNull();
   });
 
-  it("falls back to startedAtMs when no end timestamp is present, and never lets end precede start", () => {
+  it("falls back to startedAtMs when no end timestamp is present at all", () => {
     const noEnd = parseTeslaChargingInvoice({ id: "inv-7", vin: "V1", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: 1, cost: 1 });
     expect(noEnd?.endedAtMs).toBe(noEnd?.startedAtMs);
   });
 
-  it("clamps negative kWh/cost to 0 rather than propagating a negative value", () => {
-    const invoice = parseTeslaChargingInvoice({
-      id: "inv-8", vin: "V1", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: -5, cost: -1,
+  it("drops the row rather than clamping when a negative kWh/cost is reported (a Tesla credit/refund or anomaly is a real value, never a fabricated confident $0)", () => {
+    expect(parseTeslaChargingInvoice({
+      id: "inv-8", vin: "V1", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: -5, cost: 1,
+    })).toBeNull();
+    expect(parseTeslaChargingInvoice({
+      id: "inv-9", vin: "V1", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: 1, cost: -1,
+    })).toBeNull();
+  });
+
+  it("drops the row rather than clamping when a present end timestamp precedes the start (malformed, not zero-duration)", () => {
+    const reversed = parseTeslaChargingInvoice({
+      id: "inv-10",
+      vin: "V1",
+      chargeStartDateTime: "2026-08-15T10:00:00Z",
+      chargeStopDateTime: "2026-08-15T09:00:00Z",
+      energyAdded: 1,
+      cost: 1,
     });
-    expect(invoice).toMatchObject({ kWhAdded: 0, costUsd: 0 });
+    expect(reversed).toBeNull();
+  });
+
+  it("an end timestamp equal to the start is a valid zero-duration session, not dropped", () => {
+    const zeroDuration = parseTeslaChargingInvoice({
+      id: "inv-11",
+      vin: "V1",
+      chargeStartDateTime: "2026-08-15T10:00:00Z",
+      chargeStopDateTime: "2026-08-15T10:00:00Z",
+      energyAdded: 1,
+      cost: 1,
+    });
+    expect(zeroDuration?.endedAtMs).toBe(zeroDuration?.startedAtMs);
   });
 });
 

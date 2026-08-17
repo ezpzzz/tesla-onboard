@@ -23,6 +23,16 @@ import { useOwnerTenant } from "./OwnerTenantProvider";
 import { Button, Segmented } from "../ui";
 import { IconMapPin } from "../icons";
 
+// Same env-based check as OwnerTenantProvider.tsx / TenantConfigProvider.tsx /
+// lib/owner/use-owner-data.ts. `useOwnerTenant().workspace` is truthy even in
+// demo mode (it supplies a synthetic local-demo workspace), so `!workspace`
+// alone never detects demo mode -- it must be combined with this check before
+// constructing a Supabase client. Used by HomeAreaFieldGroup and
+// BatteryCapacityFieldGroup below.
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+);
+
 // Fixed SSR-safe fallback for "current year" — reading Date.now() during
 // render risks server/client clock skew producing a hydration mismatch.
 // The real year is patched in via a mount effect below, after hydration.
@@ -221,6 +231,14 @@ export function buildHomeAreaPatch(draft: HomeAreaDraft): {
   };
 }
 
+/** True when a Supabase update returned no error but touched zero rows —
+ * PostgREST's signature for "RLS silently filtered the update target out."
+ * Shared by HomeAreaFieldGroup and BatteryCapacityFieldGroup's save() below;
+ * both must treat this exactly like a real error, never rendering "Saved". */
+export function isDeniedWrite(updatedRows: unknown[] | null | undefined): boolean {
+  return (updatedRows?.length ?? 0) === 0;
+}
+
 /** Which of the fixed presets (if any) the draft's radius currently matches,
  * for highlighting the right Segmented option; "custom" covers everything
  * else, including blank. */
@@ -299,7 +317,7 @@ function HomeAreaFieldGroup({ vehicleId }: { vehicleId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    if (!workspace) { setLoaded(true); return; }
+    if (!workspace || !SUPABASE_CONFIGURED) { setLoaded(true); return; }
     (async () => {
       const { data } = await createClient()
         .from("onlyevs_vehicles")
@@ -336,18 +354,32 @@ function HomeAreaFieldGroup({ vehicleId }: { vehicleId: string }) {
     if (Object.keys(fieldErrors).length > 0) { setErrors(fieldErrors); return; }
     const patch = buildHomeAreaPatch(draft);
     if (!patch || !workspace) return;
+    if (!SUPABASE_CONFIGURED) {
+      setSaveState("error");
+      setSaveError("The home area couldn't be saved. Try again.");
+      return;
+    }
     setErrors({});
     setSaveState("saving");
     setSaveError(null);
-    const { error } = await createClient()
+    const { data, error } = await createClient()
       .from("onlyevs_vehicles")
       .update(patch)
       .eq("workspace_id", workspace.id)
       .eq("shop_slug", workspace.shopSlug)
-      .eq("id", vehicleId);
+      .eq("id", vehicleId)
+      .select("id");
     if (error) {
       setSaveState("error");
       setSaveError("The home area couldn't be saved. Try again.");
+      return;
+    }
+    if (isDeniedWrite(data)) {
+      // error: null with zero rows means RLS silently filtered the update
+      // target out (stale session, revoked membership, etc.) — never let
+      // that read as "Saved".
+      setSaveState("error");
+      setSaveError("The home area wasn't saved — your session or permissions may have changed. Try again.");
       return;
     }
     setSaveState("saved");
@@ -548,10 +580,11 @@ function BatteryCapacityFieldGroup({ vehicleId }: { vehicleId: string }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    if (!workspace) { setLoaded(true); return; }
+    if (!workspace || !SUPABASE_CONFIGURED) { setLoaded(true); return; }
     (async () => {
       const { data } = await createClient()
         .from("onlyevs_vehicles")
@@ -572,6 +605,7 @@ function BatteryCapacityFieldGroup({ vehicleId }: { vehicleId: string }) {
   function onChange(value: string) {
     setDraft(value);
     setSaveState("idle");
+    setSaveError(null);
     setError(validateBatteryCapacityDraft(value));
   }
 
@@ -579,15 +613,34 @@ function BatteryCapacityFieldGroup({ vehicleId }: { vehicleId: string }) {
     const validationError = validateBatteryCapacityDraft(draft);
     if (validationError) { setError(validationError); return; }
     if (!workspace) return;
+    if (!SUPABASE_CONFIGURED) {
+      setSaveState("error");
+      setSaveError("The battery capacity couldn't be saved. Try again.");
+      return;
+    }
     setError(null);
     setSaveState("saving");
-    const { error: writeError } = await createClient()
+    setSaveError(null);
+    const { data, error: writeError } = await createClient()
       .from("onlyevs_vehicles")
       .update({ battery_capacity_kwh: parseBatteryCapacityDraft(draft) })
       .eq("workspace_id", workspace.id)
       .eq("shop_slug", workspace.shopSlug)
-      .eq("id", vehicleId);
-    if (writeError) { setSaveState("error"); return; }
+      .eq("id", vehicleId)
+      .select("id");
+    if (writeError) {
+      setSaveState("error");
+      setSaveError("The battery capacity couldn't be saved. Try again.");
+      return;
+    }
+    if (isDeniedWrite(data)) {
+      // error: null with zero rows means RLS silently filtered the update
+      // target out (stale session, revoked membership, etc.) — never let
+      // that read as "Saved".
+      setSaveState("error");
+      setSaveError("The battery capacity wasn't saved — your session or permissions may have changed. Try again.");
+      return;
+    }
     setSaveState("saved");
   }
 
@@ -614,7 +667,7 @@ function BatteryCapacityFieldGroup({ vehicleId }: { vehicleId: string }) {
         Used to estimate home-charging energy from battery-percent readings. Leave blank to show
         home sessions&apos; kWh as unknown rather than a guessed figure.
       </p>
-      {saveState === "error" ? <p role="alert" className="text-sm text-danger">The battery capacity couldn&apos;t be saved. Try again.</p> : null}
+      {saveState === "error" ? <p role="alert" className="text-sm text-danger">{saveError ?? "The battery capacity couldn't be saved. Try again."}</p> : null}
       <div className="flex items-center gap-3">
         <Button type="button" variant="secondary" onClick={() => void save()} disabled={!loaded || saveState === "saving"} className="min-h-11">
           {saveState === "saving" ? "Saving…" : "Save battery capacity"}

@@ -16,6 +16,13 @@ vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({ rpc }),
 }));
 
+// SUPABASE_CONFIGURED (lib/owner/guest-linking-client.ts) is a module-scope
+// const evaluated once at import, mirroring the pattern in
+// OwnerTenantProvider.tsx / use-owner-data.ts / cost-rate-setting.tsx -- so
+// these must be stubbed before the dynamic import below, not in beforeEach.
+vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
+vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable-key");
+
 const { mergeGuestsViaRpc } = await import("@/lib/owner/guest-linking-client");
 
 const WORKSPACE = "00000000-0000-4000-8000-000000000001";

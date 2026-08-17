@@ -19,9 +19,12 @@ import {
   CHARGING_SYNC_INTERVAL_MS,
   CHARGING_SYNC_LOOKBACK_MS,
   CHARGING_SYNC_RETRY_MS,
+  haversineMiles,
   HISTORY_RETENTION_MS,
   LOCATION_RETENTION_MS,
+  validCoordinates,
 } from "@/lib/owner/telemetry-policy";
+import { resolveVehiclePolicyPct } from "@/lib/owner/derive";
 import {
   captureBookendField,
   deriveBookendDelta,
@@ -42,8 +45,7 @@ import {
   TeslaTelemetryClient,
   TeslaTelemetryError,
 } from "@/lib/owner/tesla-telemetry-client";
-import { linkTripToGuest, type GuestIdentityCandidateKey, type GuestLinkingStore } from "@/lib/owner/guest-linking";
-import { PgGuestLinkingStore } from "./guest-linking-store";
+import type { GuestIdentityCandidateKey } from "@/lib/owner/guest-linking";
 import { processEmailJobs } from "./email";
 
 const TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
@@ -51,8 +53,18 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const workerId = process.env.ONLYEVS_WORKER_ID?.trim() || `onlyevs-${randomUUID()}`;
 const databaseUrl = process.env.ONLYEVS_WORKER_DATABASE_URL?.trim();
 if (!databaseUrl) throw new Error("ONLYEVS_WORKER_DATABASE_URL is required.");
-const pool = new Pool({ connectionString: databaseUrl, max: 4, statement_timeout: 15_000, application_name: workerId });
-const guestLinkingStore = new PgGuestLinkingStore(pool);
+// idleTimeoutMillis is explicit (not left at pg's own default) so intent is
+// legible here: this is a long-running worker whose runOnce() claim loop
+// polls every 15s (see main() below), so idle pool clients are kept around a
+// bit longer than that cadence to avoid needless reconnect churn between
+// passes, while still recycling long-idle connections eventually.
+const pool = new Pool({
+  connectionString: databaseUrl,
+  max: 4,
+  idleTimeoutMillis: 30_000,
+  statement_timeout: 15_000,
+  application_name: workerId,
+});
 const keyring = credentialKeyringFromEnv();
 const tripBindingSecret = process.env.ONLYEVS_TRIP_BINDING_HMAC_SECRET?.trim() ?? "";
 if (tripBindingSecret.length < 32) throw new Error("ONLYEVS_TRIP_BINDING_HMAC_SECRET is required.");
@@ -313,10 +325,22 @@ async function acquireIntegrationLock(client: PoolClient, integrationId: string)
 }
 
 async function releaseIntegrationLock(client: PoolClient, integrationId: string): Promise<void> {
-  await client.query(
-    "select pg_advisory_unlock(hashtextextended($1, 0))",
-    [integrationId],
-  );
+  try {
+    await client.query(
+      "select pg_advisory_unlock(hashtextextended($1, 0))",
+      [integrationId],
+    );
+  } catch (error) {
+    // A failed unlock (e.g. the connection just dropped) must never throw
+    // out of a finally block, but silently swallowing it hides a lock that
+    // may now be stuck held past this claim -- log which worker and which
+    // integration's lock so it's findable, then move on.
+    console.warn(
+      `releaseIntegrationLock: failed to release lock (worker=${workerId} integration=${integrationId}): ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 async function grantContext(client: PoolClient, id: string): Promise<GrantContext | null> {
@@ -469,6 +493,16 @@ interface BookendSweepCandidateRow {
  * ends_at + grace has elapsed) -- isEndBookendStillTracking is still
  * consulted per row for defense-in-depth and to keep one shared, tested
  * decision function as the single source of truth.
+ *
+ * Start candidates are additionally bounded to trips starting within the
+ * next hour and capped to a batch of 200, ordered by starts_at, so this
+ * never becomes an unbounded fleet-wide scan as trip volume grows -- a trip
+ * further out than that simply becomes a candidate on a later sweep once
+ * its starts_at approaches; isBookendWindowDue still gates the actual write
+ * either way, so this bound only trims how much gets fetched per pass, not
+ * which trips are ever eligible. End candidates fetch by
+ * `t.ends_at <= now()` already, which is naturally self-bounding the same
+ * way.
  */
 export async function sweepTripBookends(pool: Pool): Promise<void> {
   const client = await pool.connect();
@@ -479,10 +513,13 @@ export async function sweepTripBookends(pool: Pool): Promise<void> {
       select t.id, t.workspace_id, t.vehicle_id, t.starts_at, t.ends_at, t.status
       from public.onlyevs_trips t
       where t.status in ('confirmed', 'armed', 'active')
+        and t.starts_at <= now() + interval '1 hour'
         and not exists (
           select 1 from private.onlyevs_trip_bookends b
           where b.trip_id = t.id and b.edge = 'start'
         )
+      order by t.starts_at
+      limit 200
     `);
     for (const row of startCandidates.rows) {
       const startsAtMs = row.starts_at.getTime();
@@ -536,6 +573,33 @@ interface GuestLinkCandidateRow {
  * an existing/new guest via an equal `email_hash`/`tesla_subject_hmac`
  * key, never a fuzzy match.
  *
+ * D1 remediation ("Full atomic RPC"): this now calls the migration's
+ * private.link_onlyevs_trip_to_guest() RPC directly, one statement per
+ * candidate trip, instead of running lib/owner/guest-linking.ts's
+ * linkTripToGuest() against a live Pg-backed GuestLinkingStore as three
+ * separate statements (find, then create-if-absent, then attach). That
+ * non-atomic sequence let two concurrent sweep passes racing on the same
+ * not-yet-seen identity key each create a *different* guest, with the
+ * loser's key insert silently no-oped by the identity-keys table's ON
+ * CONFLICT DO NOTHING -- see the migration's "Phase 7 remediation (D1)"
+ * comment for the full failure mode and the transaction-scoped advisory
+ * lock that closes it. lib/owner/guest-linking.ts's
+ * linkTripToGuest()/mergeGuests()/GuestLinkingStore are unchanged and still
+ * exactly what they were: the pure, unit-tested orchestrator for paths that
+ * don't race a not-yet-seen key (mergeGuests' repoint sequence, the
+ * one-time migration backfill, backfillGuestLinksByEmailHash) -- this sweep
+ * is simply no longer one of its callers, and today nothing else in
+ * production calls linkTripToGuest()/mergeGuests() either: the live guest
+ * merge path (app/owner/drivers/[id]/page.tsx) goes through
+ * mergeGuestsViaRpc() (lib/owner/guest-linking-client.ts) straight to a
+ * Supabase RPC, never through this JS orchestrator. The Pg-backed
+ * GuestLinkingStore implementation this file used to export
+ * (PgGuestLinkingStore, services/onlyevs-worker/guest-linking-store.ts) had
+ * zero production constructors as a result and was deleted as dead code
+ * (adversarial-review sweep); a future re-split/merge-support worker
+ * tooling lane that needs one against this same Pool should write a fresh
+ * one rather than assume this file still has it.
+ *
  * Candidates are trips with `guest_id is null` joined to their guest
  * binding -- the identical shape the migration's one-time backfill `do $$`
  * block used, except this runs continuously so every trip created *after*
@@ -544,7 +608,7 @@ interface GuestLinkCandidateRow {
  * this pass and picked up automatically on a later sweep once binding
  * completes -- never a fabricated link from an empty key.
  */
-export async function sweepGuestLinking(pool: Pool, store: GuestLinkingStore): Promise<void> {
+export async function sweepGuestLinking(pool: Pool): Promise<void> {
   const candidates = await pool.query<GuestLinkCandidateRow>(`
     select t.id as trip_id, t.workspace_id, t.guest_name,
       b.verified_email_hash, b.tesla_subject_hmac
@@ -558,12 +622,10 @@ export async function sweepGuestLinking(pool: Pool, store: GuestLinkingStore): P
     if (row.verified_email_hash) candidateKeys.push({ keyType: "email_hash", keyValue: row.verified_email_hash });
     if (row.tesla_subject_hmac) candidateKeys.push({ keyType: "tesla_subject_hmac", keyValue: row.tesla_subject_hmac });
     if (candidateKeys.length === 0) continue;
-    await linkTripToGuest(store, {
-      workspaceId: row.workspace_id,
-      tripId: row.trip_id,
-      candidateKeys,
-      fallbackDisplayName: row.guest_name,
-    });
+    await pool.query(
+      `select private.link_onlyevs_trip_to_guest($1, $2, $3, $4::jsonb, $5)`,
+      [workerId, row.workspace_id, row.trip_id, JSON.stringify(candidateKeys), row.guest_name],
+    );
   }
 }
 
@@ -581,9 +643,42 @@ interface TripEvidenceBookendRow {
  * exactly at the moment a trip transitions to 'completed' (see runOnce()),
  * from data already durable in this workspace: the trip window and both
  * bookends (this lane, complete) plus the miles/battery delta
- * (deriveBookendDelta, this lane). Deliberately contains no coordinates --
- * the packet is safe to render anywhere owner-side without touching the
- * sealed location table.
+ * (deriveBookendDelta, this lane).
+ *
+ * Delta-vs-policy framing (T9 payload-gap closure):
+ * - milesAllowance is always null today -- no mileage-allowance data source
+ *   exists anywhere in this codebase yet (verified across trips, vehicles,
+ *   and tenant config; mirrors components/owner/telemetry-view.ts's
+ *   activeTripPace note). Never guessed; the field exists so a future
+ *   source needs no shape change here.
+ * - batteryPolicyPct resolves through resolveVehiclePolicyPct
+ *   (lib/owner/derive.ts) -- the single source of truth for policy-
+ *   percentage resolution per CLAUDE.md -- using only the vehicle's own
+ *   return_charge_level_pct override. The worker's scoped DB role has no
+ *   readable access to workspace_branding (the tenant-config table the
+ *   app's parseReturnPolicyPct(config.rental.returnChargeLevel) reads), so
+ *   the global fallback is passed as null: a vehicle with no override
+ *   honestly renders null rather than guessing the tenant's real default.
+ * - outOfAreaOccurrences is the count of this trip's location observations
+ *   that fall outside the vehicle's optional home area (haversineMiles vs.
+ *   home_area_radius_mi, same comparison app/api/owner/vehicles/[id]/
+ *   location's route uses) -- null unless a home area is configured AND at
+ *   least one location observation exists for this trip, per the plan.
+ *   private.onlyevs_vehicle_location_points rows are already trip-scoped at
+ *   ingest time (ingestTelemetry above resolves the one authorized trip
+ *   before writing), so this reads by trip_id directly, no time-window math
+ *   needed. Ciphertext is decrypted with the same keyring/AAD the worker
+ *   used to encrypt it -- server-side, worker-only, never exposed -- and
+ *   only the resulting COUNT is written to the payload; a point that fails
+ *   to decrypt (e.g. a rotated-out key_version) is skipped from the count
+ *   rather than aborting the whole packet, since the count is already a
+ *   sampled signal (LOCATION_INTERVAL_SECONDS/LOCATION_MINIMUM_DELTA_METERS
+ *   -- not a continuous track) and one unreadable sample does not make an
+ *   aggregate dishonest. This is NOT gated by
+ *   ONLYEVS_LOCATION_EVIDENCE_WORKSPACES: that allowlist gates user-visible
+ *   *coordinate* viewing (Phase 4's route); this composer never emits a
+ *   coordinate, only a count, which is exactly the safety bar the plan sets
+ *   for this packet ("deliberately safe to render anywhere owner-side").
  *
  * Charging-session segmentation (lib/owner/charge-sessions.ts) is owned by
  * the parallel data-layer lane (T10) and is a stub that throws until that
@@ -634,10 +729,11 @@ export async function composeTripEvidencePacket(
     workspace_id: string;
     vehicle_id: string;
     guest_name: string;
+    shop_slug: string;
     starts_at: Date;
     ends_at: Date;
   }>(`
-    select id, workspace_id, vehicle_id, guest_name, starts_at, ends_at
+    select id, workspace_id, vehicle_id, guest_name, shop_slug, starts_at, ends_at
     from public.onlyevs_trips
     where workspace_id = $1 and id = $2
   `, [trip.workspaceId, trip.id]);
@@ -658,6 +754,64 @@ export async function composeTripEvidencePacket(
     startBatteryPct: numberOrNull(start?.battery_pct ?? null),
     endBatteryPct: numberOrNull(end?.battery_pct ?? null),
   });
+
+  // No mileage-allowance data source exists anywhere in this codebase yet
+  // (see doc comment above) -- always null, never guessed.
+  const milesAllowance: number | null = null;
+
+  const vehicleResult = await client.query<{
+    return_charge_level_pct: number | string | null;
+    home_area_center_lat: number | string | null;
+    home_area_center_lng: number | string | null;
+    home_area_radius_mi: number | string | null;
+  }>(`
+    select return_charge_level_pct, home_area_center_lat, home_area_center_lng, home_area_radius_mi
+    from public.onlyevs_vehicles
+    where workspace_id = $1 and id = $2
+  `, [t.workspace_id, t.vehicle_id]);
+  const vehicleRow = vehicleResult.rows[0] ?? null;
+  const batteryPolicyPct = resolveVehiclePolicyPct(
+    { returnChargeLevelPct: numberOrNull(vehicleRow?.return_charge_level_pct ?? null) },
+    null,
+  );
+
+  const homeAreaCenterLat = numberOrNull(vehicleRow?.home_area_center_lat ?? null);
+  const homeAreaCenterLng = numberOrNull(vehicleRow?.home_area_center_lng ?? null);
+  const homeAreaRadiusMi = numberOrNull(vehicleRow?.home_area_radius_mi ?? null);
+  let outOfAreaOccurrences: number | null = null;
+  if (homeAreaCenterLat !== null && homeAreaCenterLng !== null && homeAreaRadiusMi !== null) {
+    const locationResult = await client.query<{ coordinates_ciphertext: string }>(`
+      select coordinates_ciphertext
+      from private.onlyevs_vehicle_location_points
+      where workspace_id = $1 and trip_id = $2
+    `, [t.workspace_id, t.id]);
+    if (locationResult.rows.length > 0) {
+      let count = 0;
+      for (const point of locationResult.rows) {
+        try {
+          const plaintext = decryptCredential(point.coordinates_ciphertext, keyring, {
+            workspaceId: t.workspace_id,
+            shopSlug: t.shop_slug,
+            provider: "tesla",
+            field: "location",
+          });
+          const parsed = JSON.parse(plaintext) as { latitude?: unknown; longitude?: unknown };
+          const latitude = Number(parsed.latitude);
+          const longitude = Number(parsed.longitude);
+          if (!validCoordinates(latitude, longitude)) continue;
+          if (haversineMiles(latitude, longitude, homeAreaCenterLat, homeAreaCenterLng) > homeAreaRadiusMi) {
+            count += 1;
+          }
+        } catch {
+          // A point that fails to decrypt/parse (e.g. a rotated-out key
+          // version) is skipped from the count, not counted either way --
+          // see the doc comment above on why this doesn't make the
+          // aggregate dishonest.
+        }
+      }
+      outOfAreaOccurrences = count;
+    }
+  }
 
   let chargingSessionsDerived = false;
   let chargingSessions: unknown[] = [];
@@ -704,15 +858,19 @@ export async function composeTripEvidencePacket(
 
   const payload = {
     tripId: t.id,
+    vehicleId: t.vehicle_id,
     guestName: t.guest_name,
     startsAt: t.starts_at.toISOString(),
     endsAt: t.ends_at.toISOString(),
     bookends: { start: bookendPayload(start), end: bookendPayload(end) },
     milesDriven: delta.milesDriven,
+    milesAllowance,
     batteryDeltaPct: delta.batteryDeltaPct,
+    batteryPolicyPct,
     odometerRegression: delta.odometerRegression,
     chargingSessionsDerived,
     chargingSessions,
+    outOfAreaOccurrences,
   };
 
   const versionResult = await client.query<{ next_version: string }>(`
@@ -1025,7 +1183,7 @@ async function processGrant(grant: GrantRow) {
     }).catch(() => undefined);
   } finally {
     if (lockedIntegrationId) {
-      await releaseIntegrationLock(client, lockedIntegrationId).catch(() => undefined);
+      await releaseIntegrationLock(client, lockedIntegrationId);
     }
     client.release();
   }
@@ -1163,7 +1321,7 @@ async function processTelemetry(row: TelemetryRow) {
     ]).catch(() => undefined);
   } finally {
     if (lockedIntegrationId) {
-      await releaseIntegrationLock(client, lockedIntegrationId).catch(() => undefined);
+      await releaseIntegrationLock(client, lockedIntegrationId);
     }
     client.release();
   }
@@ -1208,7 +1366,11 @@ async function chargingSyncContext(client: PoolClient, integrationId: string): P
  * actually have a charging-history record for) never aborts the rest of
  * the integration's vehicles; only a 401/403 (token no longer valid for
  * this scope) is treated as terminal for the whole sync attempt, matching
- * processTelemetry's reauth handling. Takes `pool` as a parameter (unlike
+ * processTelemetry's reauth handling. Each vehicle's request is VIN-scoped
+ * by URL, but a present-and-mismatched invoice.vin is also dropped and
+ * counted rather than trusted on request-URL scoping alone (see the VIN
+ * check inside the loop below) -- a dropped-count > 0 logs a single
+ * console.warn per sync attempt. Takes `pool` as a parameter (unlike
  * processGrant/processTelemetry/processCalendar, which close over the
  * module-scope pool) so it can be contract-tested with a fake pool, the
  * same convention sweepTripBookends/ingestTelemetry already use.
@@ -1242,6 +1404,7 @@ export async function syncChargingInvoices(pool: Pool, row: ChargingSyncRow) {
     `, [context.workspace_id, context.shop_slug]);
 
     const sinceMs = Date.now() - CHARGING_SYNC_LOOKBACK_MS;
+    let vinMismatchCount = 0;
     for (const vehicle of vehicles.rows) {
       const url = new URL("api/1/dx/charging/history", `${context.region_base_url.replace(/\/$/, "")}/`);
       url.searchParams.set("vin", vehicle.vin);
@@ -1259,12 +1422,31 @@ export async function syncChargingInvoices(pool: Pool, row: ChargingSyncRow) {
           throw error;
         }
         // Non-fatal per vehicle (e.g. no charging-history record for this
-        // car): skip it this cycle, keep syncing the rest.
+        // car): skip it this cycle, keep syncing the rest -- but a
+        // systematic 429/5xx for one vehicle must still be visible, not a
+        // silent `continue`, so it's logged (vehicle id + status only, never
+        // the token or the query-string-bearing URL).
+        console.warn(
+          `syncChargingInvoices: charging-history fetch failed for vehicle ${vehicle.id} (integration ${row.id}, status ${response.status})`,
+        );
         continue;
       }
       const body = await response.json().catch(() => null);
       const invoices = parseTeslaChargingHistory(body);
       for (const invoice of invoices) {
+        // Requested per-VIN (url.searchParams.set("vin", vehicle.vin)
+        // above), but charging/history is "the least-documented surface in
+        // the design" (tesla-charging-client.ts's header comment) --
+        // defend against it ever returning a row for a different vehicle
+        // rather than trusting request-URL scoping alone. A present-but-
+        // mismatched VIN is dropped and counted; an absent/null VIN
+        // (structurally unreachable today -- parseTeslaChargingInvoice
+        // already requires one -- but defended here in case that parser
+        // ever loosens) keeps today's request-scoped attribution.
+        if (invoice.vin && invoice.vin !== vehicle.vin) {
+          vinMismatchCount += 1;
+          continue;
+        }
         await client.query(`
           insert into public.onlyevs_charging_invoices
             (workspace_id, vehicle_id, provider_invoice_id, started_at, ended_at, kwh_added, cost_usd, synced_at)
@@ -1277,6 +1459,11 @@ export async function syncChargingInvoices(pool: Pool, row: ChargingSyncRow) {
           new Date(invoice.startedAtMs), new Date(invoice.endedAtMs), invoice.kWhAdded, invoice.costUsd,
         ]);
       }
+    }
+    if (vinMismatchCount > 0) {
+      console.warn(
+        `syncChargingInvoices: dropped ${vinMismatchCount} charging invoice(s) with a VIN that did not match the requested vehicle (integration ${row.id})`,
+      );
     }
 
     await client.query(`update public.onlyevs_integrations
@@ -1299,7 +1486,7 @@ export async function syncChargingInvoices(pool: Pool, row: ChargingSyncRow) {
     ]).catch(() => undefined);
   } finally {
     if (lockedIntegrationId) {
-      await releaseIntegrationLock(client, lockedIntegrationId).catch(() => undefined);
+      await releaseIntegrationLock(client, lockedIntegrationId);
     }
     client.release();
   }
@@ -1398,7 +1585,7 @@ async function processCalendar(row: CalendarRow) {
       error instanceof Error ? error.message.slice(0, 160) : "calendar_sync_failed",
     ]).catch(() => undefined);
   } finally {
-    if (locked) await releaseIntegrationLock(client, row.id).catch(() => undefined);
+    if (locked) await releaseIntegrationLock(client, row.id);
     client.release();
   }
 }
@@ -1514,6 +1701,16 @@ export async function ingestTelemetry(pool: Pool, update: TelemetryUpdate, sourc
     }
 
     if (!update.location) return;
+    // Consent invariant: this write-path attribution must be at least as
+    // strict as locationNeeded() above, which is what decides whether
+    // vehicle_location was ever requested from Tesla for this vehicle in the
+    // first place. telemetry-config reconciliation (processTelemetry) can
+    // take up to 5 minutes to notice a grant was just revoked/expired/failed
+    // and turn location back off at the source -- during that window a
+    // straggling location event must still never be attributed to (and
+    // written against) an already-revoked/expired/terminal grant, so the
+    // grant-status filter is duplicated here exactly as locationNeeded()
+    // applies it, not left to the issue_at/revoke_at window alone.
     const tripResult = await client.query<{ trip_id: string; shop_slug: string }>(`
       select t.id as trip_id, t.shop_slug
       from public.onlyevs_trips t
@@ -1521,6 +1718,7 @@ export async function ingestTelemetry(pool: Pool, update: TelemetryUpdate, sourc
       join private.onlyevs_guest_bindings b on b.workspace_id = t.workspace_id and b.trip_id = t.id
       where t.workspace_id = $1 and t.vehicle_id = $2
         and $3::timestamptz between g.issue_at and g.revoke_at
+        and g.status not in ('revoked', 'expired', 'failed_terminal')
         and t.status not in ('cancelled', 'conflict')
         and b.consented_at is not null and b.onboarding_completed_at is not null
       order by t.starts_at
@@ -1595,11 +1793,33 @@ async function startTelemetryConsumer(): Promise<Consumer | null> {
       // without terminating telemetry consumption for every workspace.
       return;
     }
-    if (topic === vehicleTopic) {
-      const update = parseTelemetryPayload(body);
-      if (update) await ingestTelemetry(pool, update, `${topic}:${partition}:${message.offset}`);
-    } else {
-      await ingestConnectivity(body);
+    try {
+      if (topic === vehicleTopic) {
+        const update = parseTelemetryPayload(body);
+        if (update) await ingestTelemetry(pool, update, `${topic}:${partition}:${message.offset}`);
+      } else {
+        await ingestConnectivity(body);
+      }
+    } catch (error) {
+      // One poison-pill message (valid JSON, constraint-violating types) or
+      // a transient DB blip must never throw uncaught out of eachMessage --
+      // kafkajs eventually stalls the whole consumer on an unhandled
+      // rejection here. Isolate it the same way every other per-item loop in
+      // this file isolates one bad item (e.g. the location-decrypt loop in
+      // composeTripEvidencePacket above): log enough to find the offset
+      // again -- topic/partition/offset and the vehicle when the payload got
+      // far enough to have one, never the raw coordinate/location payload --
+      // and move on. A connection-level failure (thrown by the consumer
+      // itself, outside this handler) is deliberately left to crash the
+      // process.
+      const vin = topic === vehicleTopic
+        ? parseTelemetryPayload(body)?.vin ?? null
+        : parseConnectivityPayload(body)?.vin ?? null;
+      console.error(
+        `onlyevs-telemetry-consumer: message processing failed (topic=${topic} partition=${partition} offset=${message.offset}${vin ? ` vehicle=${vin}` : ""}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }});
   return consumer;
@@ -1675,7 +1895,7 @@ async function runOnce() {
   // (late-return rule, 6B).
   await sweepTripBookends(pool);
   await advanceTripStatusesAndComposePackets(pool);
-  await sweepGuestLinking(pool, guestLinkingStore);
+  await sweepGuestLinking(pool);
 
   await pool.query(`
     insert into public.onlyevs_telemetry_enrollments (workspace_id, vehicle_id, integration_id)

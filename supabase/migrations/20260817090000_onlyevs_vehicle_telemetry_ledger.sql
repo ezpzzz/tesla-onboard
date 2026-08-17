@@ -273,7 +273,10 @@ alter table public.onlyevs_manual_charge_cost_entries enable row level security;
 create policy onlyevs_manual_charge_cost_managers_all on public.onlyevs_manual_charge_cost_entries
   for all to authenticated
   using ((select public.has_minimum_role(workspace_id, (select auth.uid()), 'manager')))
-  with check ((select public.has_minimum_role(workspace_id, (select auth.uid()), 'manager')));
+  with check (
+    (select public.has_minimum_role(workspace_id, (select auth.uid()), 'manager'))
+    and created_by = (select auth.uid())
+  );
 
 comment on table public.onlyevs_manual_charge_cost_entries is
   'Manager-entered charge-session cost overrides (costProvenance: manual). Owner-authored directly, unlike the worker-composed packets/invoices tables.';
@@ -480,6 +483,7 @@ begin
       on b.workspace_id = t.workspace_id and b.trip_id = t.id
     where t.guest_id is null
       and b.verified_email_hash is not null
+      and length(btrim(t.guest_name)) > 0
     order by t.workspace_id, t.created_at
   loop
     select k.guest_id into v_guest_id
@@ -490,7 +494,7 @@ begin
 
     if v_guest_id is null then
       insert into public.onlyevs_guests (workspace_id, display_name)
-      values (r.workspace_id, r.guest_name)
+      values (r.workspace_id, btrim(r.guest_name))
       returning id into v_guest_id;
 
       insert into private.onlyevs_guest_identity_keys (workspace_id, guest_id, key_type, key_value)
@@ -503,6 +507,136 @@ begin
     where workspace_id = r.workspace_id and id = r.trip_id;
   end loop;
 end $$;
+
+-- =====================================================================
+-- Phase 7 remediation (D1) — atomic guest linking, worker-only.
+--
+-- lib/owner/guest-linking.ts's linkTripToGuest() previously composed
+-- findGuestIdByKey -> createGuest -> attachKey as three separate
+-- non-transactional statements (services/onlyevs-worker/guest-linking-
+-- store.ts's PgGuestLinkingStore, one query per method). Two concurrent
+-- callers racing on the same not-yet-seen identity key could both miss on
+-- findGuestIdByKey, both createGuest a *different* guest row, and then the
+-- loser's attachKey silently no-ops on the (workspace_id, key_type,
+-- key_value) unique constraint (ON CONFLICT DO NOTHING) -- leaving a
+-- duplicate, keyless guest record and the loser's trip linked to it instead
+-- of the real guest the winner created.
+--
+-- This function makes the whole find-or-create-and-link sequence one
+-- atomic statement, worker-only (never authenticated/anon -- identity keys
+-- are worker-only material, same rule as every private.onlyevs_guest_*
+-- table's grants below). It takes a transaction-scoped advisory lock on
+-- every usable candidate key, in a stable (sorted) order, *before* doing
+-- the find-or-create -- two calls that share a candidate key serialize;
+-- calls that share no key never contend (there is no logical race between
+-- them). Matches the private.claim_onlyevs_due_email /
+-- private.claim_onlyevs_due_charging_sync convention: plpgsql, SECURITY
+-- DEFINER, locked search_path, worker-only grant, no membership check (the
+-- worker role is not an authenticated browser session -- there is no
+-- auth.uid() to check).
+--
+-- p_candidate_keys is a jsonb array of {"keyType": ..., "keyValue": ...}
+-- objects, same shape as lib/owner/guest-linking.ts's
+-- GuestIdentityCandidateKey -- mirrors that module's usableKeys() filter
+-- (empty keyValue is dropped) and first-match-wins precedence (the first
+-- candidate key, in the caller-supplied order, whose lookup finds an
+-- existing guest wins; ties are impossible since a key can only ever point
+-- at one guest by the table's own unique constraint).
+create or replace function private.link_onlyevs_trip_to_guest(
+  p_worker_id text,
+  p_workspace_id uuid,
+  p_trip_id uuid,
+  p_candidate_keys jsonb,
+  p_fallback_display_name text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_keys jsonb;
+  v_key jsonb;
+  v_guest_id uuid;
+  v_found uuid;
+begin
+  if char_length(coalesce(p_worker_id, '')) < 3 then
+    raise exception 'invalid_guest_link_worker' using errcode = '22023';
+  end if;
+  if p_workspace_id is null or p_trip_id is null then
+    raise exception 'invalid_guest_link_args' using errcode = '22023';
+  end if;
+
+  -- Usable keys only (non-empty keyValue), deterministically sorted so two
+  -- concurrent calls over the same key set always request their advisory
+  -- locks in the same order -- never a lock-order deadlock between them.
+  select coalesce(jsonb_agg(k order by (k ->> 'keyType'), (k ->> 'keyValue')), '[]'::jsonb)
+    into v_keys
+  from jsonb_array_elements(coalesce(p_candidate_keys, '[]'::jsonb)) as k
+  where coalesce(k ->> 'keyValue', '') <> '';
+
+  for v_key in select value from jsonb_array_elements(v_keys)
+  loop
+    if (v_key ->> 'keyType') not in ('email_hash', 'tesla_subject_hmac')
+      or (v_key ->> 'keyValue') !~ '^[0-9a-f]{64}$' then
+      raise exception 'invalid_guest_link_key' using errcode = '22023';
+    end if;
+  end loop;
+
+  -- Lock every candidate key before reading or writing anything -- a
+  -- concurrent call sharing any one of these keys blocks here until this
+  -- transaction commits or rolls back, so the find-or-create below never
+  -- races. Transaction-scoped: released automatically, no explicit unlock.
+  for v_key in select value from jsonb_array_elements(v_keys)
+  loop
+    perform pg_advisory_xact_lock(
+      hashtextextended(p_workspace_id::text || ':' || (v_key ->> 'keyType') || ':' || (v_key ->> 'keyValue'), 0)
+    );
+  end loop;
+
+  -- Re-check now that every candidate key's lock is held -- first matching
+  -- key (in the sorted, locked order) wins, same precedence as
+  -- lib/owner/guest-linking.ts's linkTripToGuest().
+  for v_key in select value from jsonb_array_elements(v_keys)
+  loop
+    select k.guest_id into v_found
+    from private.onlyevs_guest_identity_keys k
+    where k.workspace_id = p_workspace_id
+      and k.key_type = (v_key ->> 'keyType')
+      and k.key_value = (v_key ->> 'keyValue');
+    if v_found is not null then
+      v_guest_id := v_found;
+      exit;
+    end if;
+  end loop;
+
+  if v_guest_id is null then
+    insert into public.onlyevs_guests (workspace_id, display_name)
+    values (p_workspace_id, btrim(p_fallback_display_name))
+    returning id into v_guest_id;
+  end if;
+
+  for v_key in select value from jsonb_array_elements(v_keys)
+  loop
+    -- Idempotent, same as PgGuestLinkingStore.attachKey: a key already
+    -- attached to this exact guest no-ops; a key somehow already attached
+    -- to a different guest (impossible under the lock held above, kept as
+    -- defense in depth) is left alone rather than reassigned.
+    insert into private.onlyevs_guest_identity_keys (workspace_id, guest_id, key_type, key_value)
+    values (p_workspace_id, v_guest_id, (v_key ->> 'keyType'), (v_key ->> 'keyValue'))
+    on conflict (workspace_id, key_type, key_value) do nothing;
+  end loop;
+
+  update public.onlyevs_trips
+  set guest_id = v_guest_id
+  where workspace_id = p_workspace_id and id = p_trip_id;
+
+  return v_guest_id;
+end;
+$$;
+
+revoke all on function private.link_onlyevs_trip_to_guest(text, uuid, uuid, jsonb, text) from public, anon, authenticated;
+grant execute on function private.link_onlyevs_trip_to_guest(text, uuid, uuid, jsonb, text) to onlyevs_worker;
 
 -- =====================================================================
 -- Bucketed history aggregation (reader; SECURITY INVOKER — relies on the
@@ -883,6 +1017,201 @@ $$;
 
 revoke all on function public.merge_onlyevs_guests(uuid, uuid, uuid) from public, anon;
 grant execute on function public.merge_onlyevs_guests(uuid, uuid, uuid) to authenticated;
+
+-- =====================================================================
+-- Server-side charge-session segmentation (remediation D2, decided:
+-- "Server-side RPC"). lib/owner/charge-session-repository.ts's
+-- fetchWorkspaceChargeSessions previously raw-selected every
+-- onlyevs_vehicle_stats_history row for the workspace's whole read window
+-- (pinned to the earliest linked trip, capped only by the table's own
+-- 13-month retention) and re-segmented client-side on every 30s poll --
+-- unbounded both in rows shipped to the browser and in client CPU. This RPC
+-- performs the same segmentation server-side with window functions and
+-- returns only the derived sessions -- never raw history rows, and never
+-- location/coordinate data (onlyevs_vehicle_stats_history carries none, by
+-- design -- see the Phase 1 header comment). Hardened the same way as the
+-- other manager-facing readers above: SECURITY DEFINER, locked search_path,
+-- membership check as the function's first statement, revoked from public/
+-- anon, granted to authenticated only. Internally bounded independent of
+-- caller input: the requested window is clamped server-side to the table's
+-- own 13-month retention horizon, and the output is hard-limited
+-- regardless (mirrors get_onlyevs_vehicle_stats_history_buckets' own
+-- always-bounded-output discipline above, applied here to sessions instead
+-- of chart buckets).
+--
+-- IMPORTANT -- lockstep requirement: this SQL segmentation and
+-- lib/owner/charge-sessions.ts's segmentChargeSessions() must be kept in
+-- lockstep. Same charging-state edges (isChargingState: 'Starting' /
+-- 'Charging'), same CHARGE_SESSION_GAP_MS gapAffected rule (a gap mid-
+-- session only flags the session, it never splits or merges it), same
+-- start-then-end trip-boundary attribution, same battery-delta kWh
+-- estimate (kWhFromBatteryDelta). A change to either implementation's
+-- session-boundary rules must be mirrored in the other by hand -- there is
+-- no shared source of truth between SQL and TypeScript here. The worker's
+-- own TS segmentation used by composeTripEvidencePacket is untouched by
+-- this RPC and stays on segmentChargeSessions directly.
+--
+-- Every returned session is kind 'ac_home' -- the same safe pre-
+-- reconciliation default segmentChargeSessions itself returns (Phase 3's
+-- module doc comment: the baseline telemetry stream has no charge-power or
+-- site-type signal to classify DC-fast vs. AC/home). Invoice reconciliation
+-- (dc_fast promotion, costProvenance: 'invoice') and manual cost overrides
+-- (costProvenance: 'manual') stay client-side in
+-- lib/owner/charge-session-repository.ts's fetchWorkspaceChargeSessions,
+-- exactly as before -- this RPC only replaces the raw-fetch-then-
+-- segmentChargeSessions half of that function.
+create or replace function public.get_onlyevs_charge_sessions(
+  p_workspace_id uuid,
+  p_since timestamptz,
+  p_until timestamptz default now()
+)
+returns table (
+  vehicle_id uuid,
+  trip_id uuid,
+  started_at timestamptz,
+  ended_at timestamptz,
+  kwh_added numeric,
+  gap_affected boolean,
+  kind text
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_since timestamptz;
+  v_until timestamptz;
+  v_horizon constant interval := interval '13 months';
+  v_gap constant interval := interval '30 minutes';
+begin
+  if (select auth.uid()) is null
+    or not public.has_minimum_role(p_workspace_id, (select auth.uid()), 'manager') then
+    raise exception 'workspace_manager_required' using errcode = '42501';
+  end if;
+
+  -- Clamp regardless of what the caller passes: never later than now(),
+  -- never further back than the table's own retention horizon, never an
+  -- inverted/empty window.
+  v_until := least(coalesce(p_until, now()), now());
+  v_since := greatest(coalesce(p_since, v_until - v_horizon), v_until - v_horizon);
+  if v_since >= v_until then
+    return;
+  end if;
+
+  return query
+  with history as (
+    select
+      h.vehicle_id,
+      h.observed_at,
+      h.battery_pct,
+      coalesce(h.charging_state in ('Starting', 'Charging'), false) as is_charging
+    from public.onlyevs_vehicle_stats_history h
+    where h.workspace_id = p_workspace_id
+      and h.observed_at >= v_since
+      and h.observed_at <= v_until
+  ),
+  flagged as (
+    select
+      hh.vehicle_id,
+      hh.observed_at,
+      hh.battery_pct,
+      hh.is_charging,
+      lag(hh.is_charging) over w as prev_is_charging,
+      lag(hh.observed_at) over w as prev_observed_at
+    from history hh
+    window w as (partition by hh.vehicle_id order by hh.observed_at)
+  ),
+  islands as (
+    select
+      f.*,
+      sum(case when f.is_charging and not coalesce(f.prev_is_charging, false) then 1 else 0 end)
+        over (partition by f.vehicle_id order by f.observed_at
+              rows between unbounded preceding and current row) as island_id
+    from flagged f
+  ),
+  charging_rows as (
+    select * from islands where is_charging
+  ),
+  session_bounds as (
+    select
+      c.vehicle_id,
+      c.island_id,
+      min(c.observed_at) as started_at,
+      max(c.observed_at) as last_charging_at,
+      (array_agg(c.battery_pct order by c.observed_at asc))[1] as start_battery_pct,
+      (array_agg(c.battery_pct order by c.observed_at desc) filter (where c.battery_pct is not null))[1]
+        as last_charging_battery_pct,
+      bool_or(c.prev_is_charging is true and c.observed_at - c.prev_observed_at >= v_gap) as internal_gap
+    from charging_rows c
+    group by c.vehicle_id, c.island_id
+  ),
+  closers as (
+    -- The first non-charging row immediately after each charging island --
+    -- its own reading is the session's true end, exactly like
+    -- segmentChargeSessions' close(point.observedAt, point.batteryPct ??
+    -- open.lastBatteryPct).
+    select distinct on (i.vehicle_id, i.island_id)
+      i.vehicle_id, i.island_id, i.observed_at as closed_at, i.battery_pct as closed_battery_pct
+    from islands i
+    where not i.is_charging and i.island_id > 0
+    order by i.vehicle_id, i.island_id, i.observed_at asc
+  ),
+  sessions as (
+    select
+      b.vehicle_id,
+      b.started_at,
+      coalesce(cl.closed_at, b.last_charging_at) as ended_at,
+      coalesce(cl.closed_battery_pct, b.last_charging_battery_pct) as end_battery_pct,
+      b.start_battery_pct,
+      -- No closer found (stream/window ended mid-charge): the session's
+      -- true end is unconfirmed, forced gapAffected -- matches
+      -- segmentChargeSessions' end-of-stream handling.
+      (b.internal_gap or cl.closed_at is null) as gap_affected
+    from session_bounds b
+    left join closers cl
+      on cl.vehicle_id = b.vehicle_id and cl.island_id = b.island_id
+    where b.island_id > 0
+  ),
+  trip_windows as (
+    select t.id as trip_id, t.vehicle_id, t.starts_at, t.ends_at
+    from public.onlyevs_trips t
+    where t.workspace_id = p_workspace_id
+  )
+  select
+    s.vehicle_id,
+    coalesce(
+      (select tw.trip_id from trip_windows tw
+       where tw.vehicle_id = s.vehicle_id
+         and s.started_at >= tw.starts_at and s.started_at <= tw.ends_at
+       order by tw.starts_at limit 1),
+      (select tw.trip_id from trip_windows tw
+       where tw.vehicle_id = s.vehicle_id
+         and s.ended_at >= tw.starts_at and s.ended_at <= tw.ends_at
+       order by tw.starts_at limit 1)
+    ) as trip_id,
+    s.started_at,
+    s.ended_at,
+    case
+      when v.battery_capacity_kwh is null or v.battery_capacity_kwh <= 0
+        or s.start_battery_pct is null or s.end_battery_pct is null
+        then null
+      when s.end_battery_pct > s.start_battery_pct
+        then ((s.end_battery_pct - s.start_battery_pct) / 100.0) * v.battery_capacity_kwh
+      else 0
+    end as kwh_added,
+    s.gap_affected,
+    'ac_home'::text as kind
+  from sessions s
+  join public.onlyevs_vehicles v
+    on v.workspace_id = p_workspace_id and v.id = s.vehicle_id
+  order by s.vehicle_id, s.started_at
+  limit 2000;
+end;
+$$;
+
+revoke all on function public.get_onlyevs_charge_sessions(uuid, timestamptz, timestamptz) from public, anon;
+grant execute on function public.get_onlyevs_charge_sessions(uuid, timestamptz, timestamptz) to authenticated;
 
 -- =====================================================================
 -- Grants + RLS

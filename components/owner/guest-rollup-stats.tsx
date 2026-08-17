@@ -15,6 +15,7 @@
  * "hidden" means absent, not a disabled/greyed section.
  */
 
+import { tripWindowRollup } from "@/lib/owner/derive";
 import type { Trip } from "@/lib/owner/types";
 
 /** Flip only after the Phase 3 / P4 key-stability validation query has been
@@ -32,15 +33,23 @@ function sum(values: number[]): number {
 
 /** Pure rollup computation over a guest's own completed trips — miles driven
  * and trip count only (no fabricated averages when there is nothing to
- * average). Exported for testing independent of the flag/rendering. */
+ * average). Mirrors lib/owner/derive.ts's `tripWindowRollup` (also used by
+ * ledger-view.ts) for the odometer math so an odometer regression
+ * (odometerEndMi < odometerStartMi, e.g. a bad manual entry) renders as its
+ * `data-error` state and contributes zero miles to the total rather than a
+ * negative figure — never a second, drifted copy of that rule. Exported for
+ * testing independent of the flag/rendering. */
 export function computeGuestRollup(trips: Trip[]): { tripCount: number; totalMiles: number } {
-  const completed = trips.filter(
-    (trip) => trip.odometerStartMi !== null && trip.odometerEndMi !== null,
-  );
-  const totalMiles = sum(
-    completed.map((trip) => (trip.odometerEndMi as number) - (trip.odometerStartMi as number)),
-  );
-  return { tripCount: trips.length, totalMiles };
+  const milesPerTrip = trips.map((trip) => {
+    const rollup = tripWindowRollup({
+      odometerStartMi: trip.odometerStartMi,
+      odometerEndMi: trip.odometerEndMi,
+      batteryStartPct: null,
+      batteryEndPct: null,
+    });
+    return rollup.odometer.kind === "complete" ? rollup.odometer.milesDriven : 0;
+  });
+  return { tripCount: trips.length, totalMiles: sum(milesPerTrip) };
 }
 
 /** Renders nothing when the validation gate is closed — never a disabled or

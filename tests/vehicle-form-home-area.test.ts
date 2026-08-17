@@ -3,6 +3,7 @@ import {
   EMPTY_HOME_AREA_DRAFT,
   buildHomeAreaPatch,
   interpretLocateSetupResponse,
+  isDeniedWrite,
   matchedRadiusPreset,
   parseBatteryCapacityDraft,
   validateBatteryCapacityDraft,
@@ -153,5 +154,20 @@ describe("parseBatteryCapacityDraft", () => {
   it("returns null (never a guessed value) for an invalid draft", () => {
     expect(parseBatteryCapacityDraft("abc")).toBeNull();
     expect(parseBatteryCapacityDraft("-5")).toBeNull();
+  });
+});
+
+describe("isDeniedWrite", () => {
+  it("flags a zero-row update result as denied — RLS silently filtered the write out", () => {
+    expect(isDeniedWrite([])).toBe(true);
+  });
+
+  it("treats a missing/undefined/null rows array the same as zero rows", () => {
+    expect(isDeniedWrite(undefined)).toBe(true);
+    expect(isDeniedWrite(null)).toBe(true);
+  });
+
+  it("does not flag a write that actually updated a row", () => {
+    expect(isDeniedWrite([{ id: "veh-1" }])).toBe(false);
   });
 });

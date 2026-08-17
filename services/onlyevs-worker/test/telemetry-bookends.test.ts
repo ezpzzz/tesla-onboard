@@ -32,6 +32,7 @@ const {
   sweepTripBookends,
 } = await import("@/services/onlyevs-worker/index");
 const { segmentChargeSessions } = await import("@/lib/owner/charge-sessions");
+const { credentialKeyringFromEnv, encryptCredential } = await import("@/lib/owner/credential-envelope");
 
 interface QueryLogEntry {
   sql: string;
@@ -178,6 +179,38 @@ describe("ingestTelemetry -- history append + split late-event policy (T2/T3)", 
     await ingestTelemetry(pool, baseUpdate({ observedAt: NOW - 60_000 }), "onlyevs_V:0:4");
 
     expect(findQuery(queries, "insert into public.onlyevs_vehicle_stats_current")).toBeDefined();
+  });
+
+  describe("location write-path trip attribution: consent invariant mirrors locationNeeded()", () => {
+    it("the trip-attribution query filters out revoked/expired/failed_terminal grants, exactly like locationNeeded()", async () => {
+      const { pool, queries } = makeFakePool((sql) => {
+        if (sql.includes("from public.onlyevs_vehicles where vin")) return { rows: [{ id: "veh-1", workspace_id: "ws-1" }] };
+        if (sql.includes("from public.onlyevs_trips t") && sql.includes("onlyevs_access_grants")) return { rows: [] };
+        return undefined;
+      });
+
+      await ingestTelemetry(pool, baseUpdate({ location: { latitude: 37.7, longitude: -122.4 } }), "onlyevs_V:0:5");
+
+      const tripQuery = findQuery(queries, /from public\.onlyevs_trips t[\s\S]*onlyevs_access_grants/)!;
+      expect(tripQuery.sql).toContain("g.status not in ('revoked', 'expired', 'failed_terminal')");
+      // No candidate row (the fake grant-status filter above returned none) --
+      // the location insert must never fire without an attributed trip.
+      expect(findQuery(queries, "insert into private.onlyevs_vehicle_location_points")).toBeUndefined();
+    });
+
+    it("still writes the location point when exactly one non-revoked, consented trip attributes it", async () => {
+      const { pool, queries } = makeFakePool((sql) => {
+        if (sql.includes("from public.onlyevs_vehicles where vin")) return { rows: [{ id: "veh-1", workspace_id: "ws-1" }] };
+        if (sql.includes("from public.onlyevs_trips t") && sql.includes("onlyevs_access_grants")) {
+          return { rows: [{ trip_id: "trip-1", shop_slug: "shop-1" }] };
+        }
+        return undefined;
+      });
+
+      await ingestTelemetry(pool, baseUpdate({ location: { latitude: 37.7, longitude: -122.4 } }), "onlyevs_V:0:6");
+
+      expect(findQuery(queries, "insert into private.onlyevs_vehicle_location_points")).toBeDefined();
+    });
   });
 });
 
@@ -353,6 +386,21 @@ describe("sweepTripBookends -- trip-window sweep trigger (eng-review Issue 1A) +
     await sweepTripBookends(pool);
     expect(queries.some((q) => q.sql.includes("insert into private.onlyevs_trip_bookends"))).toBe(false);
   });
+
+  it("bounds the start-candidate query to trips starting soon and caps the batch (never an unbounded fleet-wide scan)", async () => {
+    const { pool, queries } = makeFakePool((sql) => {
+      if (sql.includes("not exists") && sql.includes("edge = 'start'")) {
+        expect(sql).toContain("t.starts_at <= now() + interval '1 hour'");
+        expect(sql).toMatch(/limit \d+/);
+        return { rows: [] };
+      }
+      if (sql.includes("t.ends_at <= now()")) return { rows: [] };
+      return undefined;
+    });
+
+    await sweepTripBookends(pool);
+    expect(queries.some((q) => q.sql.includes("insert into private.onlyevs_trip_bookends"))).toBe(false);
+  });
 });
 
 describe("sweepHistoryRetention -- 13-month retention sweep", () => {
@@ -403,6 +451,7 @@ describe("composeTripEvidencePacket -- Phase 6 immutable evidence packet (T9 wor
     workspace_id: "ws-1",
     vehicle_id: "veh-1",
     guest_name: "Riley T.",
+    shop_slug: "shop-1",
     starts_at: new Date("2026-08-15T10:00:00Z"),
     ends_at: new Date("2026-08-16T10:00:00Z"),
   };
@@ -420,12 +469,17 @@ describe("composeTripEvidencePacket -- Phase 6 immutable evidence packet (T9 wor
   // exercised without a real database -- state lives in a closure array
   // that the fake insert handler appends to, mirroring how the real
   // `unique(trip_id, version)` constraint would accumulate rows.
+  // Default: no vehicle row at all -- no return-charge override, no home
+  // area configured. Individual tests override this via a custom handler
+  // to exercise the battery-policy / out-of-area paths.
   function makeComposeHandler(existingVersions: number[] = []) {
     const versions = [...existingVersions];
     return (sql: string, params: unknown[]) => {
       if (sql.includes("select id, workspace_id, vehicle_id, guest_name")) return { rows: [tripRow] };
       if (sql.includes("from private.onlyevs_trip_bookends")) return { rows: [startBookend, endBookend] };
       if (sql.includes("from public.onlyevs_vehicle_stats_history")) return { rows: [] };
+      if (sql.includes("from public.onlyevs_vehicles")) return { rows: [] };
+      if (sql.includes("from private.onlyevs_vehicle_location_points")) return { rows: [] };
       if (sql.includes("coalesce(max(version), 0) + 1")) {
         const nextVersion = versions.length ? Math.max(...versions) + 1 : 1;
         return { rows: [{ next_version: String(nextVersion) }] };
@@ -557,5 +611,157 @@ describe("composeTripEvidencePacket -- Phase 6 immutable evidence packet (T9 wor
     await composeTripEvidencePacket(client, { id: "trip-missing", workspaceId: "ws-1" });
     expect(queries.some((q) => q.sql.includes("insert into public.onlyevs_trip_evidence_packets"))).toBe(false);
     expect(queries.some((q) => q.sql.includes("insert into public.onlyevs_integration_audit_events"))).toBe(false);
+  });
+
+  it("includes vehicleId in the payload (t.vehicle_id, already fetched with the trip)", async () => {
+    const { client, queries } = makeFakePool(makeComposeHandler());
+    await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
+    const payload = JSON.parse(findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!.params[3] as string);
+    expect(payload.vehicleId).toBe("veh-1");
+  });
+
+  it("miles-vs-allowance: always null -- no mileage-allowance data source exists anywhere in this codebase yet", async () => {
+    const { client, queries } = makeFakePool(makeComposeHandler());
+    await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
+    const payload = JSON.parse(findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!.params[3] as string);
+    expect(payload.milesAllowance).toBeNull();
+  });
+
+  it("battery-vs-policy: resolves through the vehicle's own return-charge override, via resolveVehiclePolicyPct", async () => {
+    const { client, queries } = makeFakePool((sql) => {
+      if (sql.includes("select id, workspace_id, vehicle_id, guest_name")) return { rows: [tripRow] };
+      if (sql.includes("from private.onlyevs_trip_bookends")) return { rows: [startBookend, endBookend] };
+      if (sql.includes("from public.onlyevs_vehicle_stats_history")) return { rows: [] };
+      if (sql.includes("from public.onlyevs_vehicles")) return { rows: [{ return_charge_level_pct: "70.00" }] };
+      if (sql.includes("from private.onlyevs_vehicle_location_points")) return { rows: [] };
+      if (sql.includes("coalesce(max(version), 0) + 1")) return { rows: [{ next_version: "1" }] };
+      if (sql.includes("insert into public.onlyevs_trip_evidence_packets")) return { rows: [{ id: "packet-1" }] };
+      if (sql.includes("insert into public.onlyevs_integration_audit_events")) return { rows: [] };
+      return undefined;
+    });
+    await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
+    const payload = JSON.parse(findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!.params[3] as string);
+    expect(payload.batteryPolicyPct).toBe(70);
+  });
+
+  it("battery-vs-policy: null when the vehicle carries no override -- the worker has no reachable fleet-wide fallback", async () => {
+    const { client, queries } = makeFakePool((sql) => {
+      if (sql.includes("select id, workspace_id, vehicle_id, guest_name")) return { rows: [tripRow] };
+      if (sql.includes("from private.onlyevs_trip_bookends")) return { rows: [startBookend, endBookend] };
+      if (sql.includes("from public.onlyevs_vehicle_stats_history")) return { rows: [] };
+      if (sql.includes("from public.onlyevs_vehicles")) return { rows: [{ return_charge_level_pct: null }] };
+      if (sql.includes("from private.onlyevs_vehicle_location_points")) return { rows: [] };
+      if (sql.includes("coalesce(max(version), 0) + 1")) return { rows: [{ next_version: "1" }] };
+      if (sql.includes("insert into public.onlyevs_trip_evidence_packets")) return { rows: [{ id: "packet-1" }] };
+      if (sql.includes("insert into public.onlyevs_integration_audit_events")) return { rows: [] };
+      return undefined;
+    });
+    await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
+    const payload = JSON.parse(findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!.params[3] as string);
+    expect(payload.batteryPolicyPct).toBeNull();
+  });
+
+  it("out-of-area: null when the vehicle has no home area configured, and never queries the sealed location table", async () => {
+    const { client, queries } = makeFakePool(makeComposeHandler());
+    await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
+    const payload = JSON.parse(findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!.params[3] as string);
+    expect(payload.outOfAreaOccurrences).toBeNull();
+    expect(queries.some((q) => q.sql.includes("onlyevs_vehicle_location_points"))).toBe(false);
+  });
+
+  it("out-of-area: null when a home area is configured but no location observations exist for this trip", async () => {
+    const { client, queries } = makeFakePool((sql) => {
+      if (sql.includes("select id, workspace_id, vehicle_id, guest_name")) return { rows: [tripRow] };
+      if (sql.includes("from private.onlyevs_trip_bookends")) return { rows: [startBookend, endBookend] };
+      if (sql.includes("from public.onlyevs_vehicle_stats_history")) return { rows: [] };
+      if (sql.includes("from public.onlyevs_vehicles")) {
+        return { rows: [{ return_charge_level_pct: null, home_area_center_lat: "33.45", home_area_center_lng: "-111.94", home_area_radius_mi: "25" }] };
+      }
+      if (sql.includes("from private.onlyevs_vehicle_location_points")) return { rows: [] };
+      if (sql.includes("coalesce(max(version), 0) + 1")) return { rows: [{ next_version: "1" }] };
+      if (sql.includes("insert into public.onlyevs_trip_evidence_packets")) return { rows: [{ id: "packet-1" }] };
+      if (sql.includes("insert into public.onlyevs_integration_audit_events")) return { rows: [] };
+      return undefined;
+    });
+    await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
+    const payload = JSON.parse(findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!.params[3] as string);
+    expect(payload.outOfAreaOccurrences).toBeNull();
+    expect(queries.some((q) => q.sql.includes("onlyevs_vehicle_location_points"))).toBe(true);
+  });
+
+  describe("out-of-area occurrence count: real decryption against a configured home area", () => {
+    const HOME_LAT = 33.45;
+    const HOME_LNG = -111.94;
+    const HOME_RADIUS_MI = 25;
+    const INSIDE_POINT = { latitude: 33.46, longitude: -111.95 }; // ~0.8mi from home
+    const OUTSIDE_POINT = { latitude: 34.2, longitude: -112.6 }; // ~60mi+ from home
+
+    function encryptPoint(point: { latitude: number; longitude: number }): string {
+      return encryptCredential(JSON.stringify(point), credentialKeyringFromEnv(), {
+        workspaceId: "ws-1",
+        shopSlug: "shop-1",
+        provider: "tesla",
+        field: "location",
+      }).ciphertext;
+    }
+
+    function makeHomeAreaHandler(locationRows: { coordinates_ciphertext: string }[]) {
+      return (sql: string) => {
+        if (sql.includes("select id, workspace_id, vehicle_id, guest_name")) return { rows: [tripRow] };
+        if (sql.includes("from private.onlyevs_trip_bookends")) return { rows: [startBookend, endBookend] };
+        if (sql.includes("from public.onlyevs_vehicle_stats_history")) return { rows: [] };
+        if (sql.includes("from public.onlyevs_vehicles")) {
+          return { rows: [{ return_charge_level_pct: null, home_area_center_lat: String(HOME_LAT), home_area_center_lng: String(HOME_LNG), home_area_radius_mi: String(HOME_RADIUS_MI) }] };
+        }
+        if (sql.includes("from private.onlyevs_vehicle_location_points")) return { rows: locationRows };
+        if (sql.includes("coalesce(max(version), 0) + 1")) return { rows: [{ next_version: "1" }] };
+        if (sql.includes("insert into public.onlyevs_trip_evidence_packets")) return { rows: [{ id: "packet-1" }] };
+        if (sql.includes("insert into public.onlyevs_integration_audit_events")) return { rows: [] };
+        return undefined;
+      };
+    }
+
+    it("counts observations outside the home area, decrypting server-side, without ever leaking coordinates into the payload", async () => {
+      const rows = [
+        { coordinates_ciphertext: encryptPoint(INSIDE_POINT) },
+        { coordinates_ciphertext: encryptPoint(INSIDE_POINT) },
+        { coordinates_ciphertext: encryptPoint(OUTSIDE_POINT) },
+      ];
+      const { client, queries } = makeFakePool(makeHomeAreaHandler(rows));
+      await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
+      const insert = findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!;
+      const payload = JSON.parse(insert.params[3] as string);
+      expect(payload.outOfAreaOccurrences).toBe(1);
+
+      // No-coordinates invariant (T9 gap closure): even though real
+      // decryption happened above, the serialized payload never carries a
+      // latitude/longitude -- only the derived count.
+      const serialized = JSON.stringify(payload).toLowerCase();
+      expect(serialized).not.toContain("latitude");
+      expect(serialized).not.toContain("longitude");
+      expect(serialized).not.toContain(String(INSIDE_POINT.latitude));
+      expect(serialized).not.toContain(String(OUTSIDE_POINT.latitude));
+    });
+
+    it("all observations inside the home area: a real, checked zero -- not null", async () => {
+      const rows = [{ coordinates_ciphertext: encryptPoint(INSIDE_POINT) }, { coordinates_ciphertext: encryptPoint(INSIDE_POINT) }];
+      const { client, queries } = makeFakePool(makeHomeAreaHandler(rows));
+      await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
+      const payload = JSON.parse(findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!.params[3] as string);
+      expect(payload.outOfAreaOccurrences).toBe(0);
+    });
+
+    it("a point that fails to decrypt (e.g. a rotated-out key version) is skipped from the count, not counted either way", async () => {
+      const rows = [
+        { coordinates_ciphertext: "oev1.99.bad.bad.bad" }, // unknown key version -> decrypt failure
+        { coordinates_ciphertext: encryptPoint(OUTSIDE_POINT) },
+      ];
+      const { client, queries } = makeFakePool(makeHomeAreaHandler(rows));
+      await composeTripEvidencePacket(client, { id: "trip-1", workspaceId: "ws-1" });
+      const insert = findQuery(queries, "insert into public.onlyevs_trip_evidence_packets")!;
+      expect(insert).toBeDefined(); // packet composition still completes
+      const payload = JSON.parse(insert.params[3] as string);
+      expect(payload.outOfAreaOccurrences).toBe(1); // only the decryptable outside point counts
+    });
   });
 });

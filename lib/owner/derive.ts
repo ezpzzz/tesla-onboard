@@ -70,10 +70,32 @@ export function isTripCancellable(status: TripStatus): boolean {
   return status === "upcoming" || status === "active";
 }
 
+/**
+ * Overloaded so every existing (browser) call site — which always passes a
+ * real `globalPolicyPct` number, since parseReturnPolicyPct always returns
+ * one — keeps getting a non-null `number` back, unchanged. The
+ * `number | null` overload exists only for callers that genuinely cannot
+ * resolve a fleet-wide fallback: services/onlyevs-worker/index.ts's
+ * composeTripEvidencePacket calls this with `null` because the worker's
+ * scoped DB role has no readable access to workspace_branding (the
+ * tenant-config table the app's own
+ * parseReturnPolicyPct(config.rental.returnChargeLevel) reads) — only the
+ * vehicle's own return_charge_level_pct override. A vehicle with no
+ * override and no reachable global fallback resolves to null there rather
+ * than guessing a default percentage.
+ */
 export function resolveVehiclePolicyPct(
-  vehicle: Vehicle | null | undefined,
+  vehicle: Pick<Vehicle, "returnChargeLevelPct"> | null | undefined,
   globalPolicyPct: number
-): number {
+): number;
+export function resolveVehiclePolicyPct(
+  vehicle: Pick<Vehicle, "returnChargeLevelPct"> | null | undefined,
+  globalPolicyPct: number | null
+): number | null;
+export function resolveVehiclePolicyPct(
+  vehicle: Pick<Vehicle, "returnChargeLevelPct"> | null | undefined,
+  globalPolicyPct: number | null
+): number | null {
   return vehicle?.returnChargeLevelPct ?? globalPolicyPct;
 }
 

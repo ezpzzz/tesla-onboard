@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   TURO_INVOICE_WINDOW_MS,
+  derivePacketPolicyRollup,
   derivePacketStatus,
   derivePacketTitle,
+  formatBatteryDeltaFact,
   formatInvoiceWindowCountdown,
+  formatMilesDrivenFact,
+  formatOutOfAreaFact,
   isSupersedingPacket,
   parseEvidencePacketPayload,
   selectLatestPacketPerTrip,
@@ -64,6 +68,39 @@ describe("parseEvidencePacketPayload", () => {
   });
 });
 
+// T9 gap closure: composeTripEvidencePacket now populates vehicleId,
+// milesAllowance, batteryPolicyPct, and outOfAreaOccurrences (previously
+// always absent). rawPayload() intentionally omits these by default so
+// every pre-existing test above keeps parsing them as null/undefined,
+// unchanged.
+describe("parseEvidencePacketPayload — vehicleId/milesAllowance/batteryPolicyPct/outOfAreaOccurrences (T9 gap closure)", () => {
+  it("parses all four fields when the worker populated them", () => {
+    const parsed = parseEvidencePacketPayload(rawPayload({
+      vehicleId: "veh-1",
+      milesAllowance: 600,
+      batteryPolicyPct: 80,
+      outOfAreaOccurrences: 2,
+    }));
+    expect(parsed.vehicleId).toBe("veh-1");
+    expect(parsed.milesAllowance).toBe(600);
+    expect(parsed.batteryPolicyPct).toBe(80);
+    expect(parsed.outOfAreaOccurrences).toBe(2);
+  });
+
+  it("degrades all four fields to null when absent, never guessing", () => {
+    const parsed = parseEvidencePacketPayload(rawPayload());
+    expect(parsed.vehicleId).toBeNull();
+    expect(parsed.milesAllowance).toBeNull();
+    expect(parsed.batteryPolicyPct).toBeNull();
+    expect(parsed.outOfAreaOccurrences).toBeNull();
+  });
+
+  it("parses outOfAreaOccurrences of 0 as a real, checked zero — distinct from null (unknown)", () => {
+    const parsed = parseEvidencePacketPayload(rawPayload({ outOfAreaOccurrences: 0 }));
+    expect(parsed.outOfAreaOccurrences).toBe(0);
+  });
+});
+
 describe("derivePacketStatus", () => {
   const clean = parseEvidencePacketPayload(rawPayload());
 
@@ -92,6 +129,90 @@ describe("derivePacketStatus", () => {
       chargingSessions: [{ id: "s1", tripId: "trip-1", vehicleId: "v1", kind: "ac_home", startedAt: 0, endedAt: 0, kWhAdded: 5, gapAffected: true, costUsd: null, costProvenance: null }],
     }));
     expect(derivePacketStatus(packet).label).toBe("Needs attention");
+  });
+});
+
+describe("derivePacketStatus — delta-vs-policy verdicts (T9 gap closure)", () => {
+  // rawPayload()'s bookends: start odometer 1000/battery 90, end odometer
+  // 1421/battery 74 — 421 mi driven, -16% battery delta.
+  it("flags a battery return below the resolved policy as Needs attention", () => {
+    const packet = parseEvidencePacketPayload(rawPayload({ batteryPolicyPct: 80 })); // 74 < 80
+    expect(derivePacketStatus(packet).label).toBe("Needs attention");
+  });
+
+  it("stays Clean return when the battery return meets or exceeds the resolved policy", () => {
+    const packet = parseEvidencePacketPayload(rawPayload({ batteryPolicyPct: 70 })); // 74 >= 70
+    expect(derivePacketStatus(packet).label).toBe("Clean return");
+  });
+
+  it("never claims a policy verdict when batteryPolicyPct is null (the worker couldn't resolve one)", () => {
+    const packet = parseEvidencePacketPayload(rawPayload()); // no override, no reachable fallback
+    expect(derivePacketStatus(packet).label).toBe("Clean return");
+  });
+
+  it("flags miles driven beyond the allowance as Needs attention, once an allowance exists", () => {
+    const packet = parseEvidencePacketPayload(rawPayload({ milesAllowance: 300 })); // 421 > 300
+    expect(derivePacketStatus(packet).label).toBe("Needs attention");
+  });
+
+  it("stays Clean return when miles driven are within the allowance", () => {
+    const packet = parseEvidencePacketPayload(rawPayload({ milesAllowance: 500 })); // 421 <= 500
+    expect(derivePacketStatus(packet).label).toBe("Clean return");
+  });
+});
+
+describe("formatMilesDrivenFact / formatBatteryDeltaFact / formatOutOfAreaFact — card rendering of the new facts (T9 gap closure)", () => {
+  it("renders miles driven plainly when no allowance context exists", () => {
+    const packet = parseEvidencePacketPayload(rawPayload());
+    expect(formatMilesDrivenFact(packet, derivePacketPolicyRollup(packet))).toBe("421 mi driven");
+  });
+
+  it("renders miles vs. allowance with the over-allowance amount when driven exceeds it", () => {
+    const packet = parseEvidencePacketPayload(rawPayload({ milesAllowance: 300 }));
+    expect(formatMilesDrivenFact(packet, derivePacketPolicyRollup(packet))).toBe("421 mi of 300 mi allowed — 121 mi over");
+  });
+
+  it("renders miles vs. allowance with no over-allowance note when within it", () => {
+    const packet = parseEvidencePacketPayload(rawPayload({ milesAllowance: 500 }));
+    expect(formatMilesDrivenFact(packet, derivePacketPolicyRollup(packet))).toBe("421 mi of 500 mi allowed");
+  });
+
+  it("renders 'Not captured' for miles when the packet has no milesDriven", () => {
+    const packet: ParsedEvidencePacket = { ...parseEvidencePacketPayload(rawPayload()), milesDriven: null };
+    expect(formatMilesDrivenFact(packet, derivePacketPolicyRollup(packet))).toBe("Not captured");
+  });
+
+  it("renders battery delta plainly when no policy context exists", () => {
+    const packet = parseEvidencePacketPayload(rawPayload());
+    expect(formatBatteryDeltaFact(packet, derivePacketPolicyRollup(packet))).toBe("-16%");
+  });
+
+  it("renders battery delta with a below-policy note", () => {
+    const packet = parseEvidencePacketPayload(rawPayload({ batteryPolicyPct: 80 }));
+    expect(formatBatteryDeltaFact(packet, derivePacketPolicyRollup(packet))).toBe("-16% — below the 80% return policy");
+  });
+
+  it("renders battery delta with a plain policy annotation when at/above policy", () => {
+    const packet = parseEvidencePacketPayload(rawPayload({ batteryPolicyPct: 70 }));
+    expect(formatBatteryDeltaFact(packet, derivePacketPolicyRollup(packet))).toBe("-16% (policy: 70%)");
+  });
+
+  it("renders 'Not captured' for battery when the packet has no batteryDeltaPct", () => {
+    const packet: ParsedEvidencePacket = { ...parseEvidencePacketPayload(rawPayload()), batteryDeltaPct: null };
+    expect(formatBatteryDeltaFact(packet, derivePacketPolicyRollup(packet))).toBe("Not captured");
+  });
+
+  it("out-of-area: null collapses to one honest 'no data' sentence, never leaking which precondition failed", () => {
+    expect(formatOutOfAreaFact(null)).toBe("No out-of-area tracking data for this trip");
+  });
+
+  it("out-of-area: a real, checked zero renders a clean confirmation, not the null copy", () => {
+    expect(formatOutOfAreaFact(0)).toBe("In area for every recorded observation");
+  });
+
+  it("out-of-area: singular/plural occurrence counts", () => {
+    expect(formatOutOfAreaFact(1)).toBe("1 observation outside the home area");
+    expect(formatOutOfAreaFact(3)).toBe("3 observations outside the home area");
   });
 });
 

@@ -42,6 +42,7 @@ export const config = {
     "/api/owner/google/:path*",
     "/api/owner/trips/:path*",
     "/api/owner/branding/:path*",
+    "/api/owner/vehicles/:path*",
     "/auth/owner/:path*",
     "/trip/:path*",
   ],
@@ -109,6 +110,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/api/owner/google") ||
     pathname.startsWith("/api/owner/trips") ||
     pathname.startsWith("/api/owner/branding") ||
+    pathname.startsWith("/api/owner/vehicles") ||
     pathname.startsWith("/auth/owner");
 
   if (isOwnerGated) {

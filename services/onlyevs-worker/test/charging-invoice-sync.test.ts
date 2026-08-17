@@ -118,10 +118,11 @@ describe("syncChargingInvoices -- charging-invoice sync job (T10)", () => {
     expect(reschedule.sql).toContain("last_error_code = null");
   });
 
-  it("skips a vehicle whose charging-history call 404s/500s without aborting the rest of the sync", async () => {
+  it("skips a vehicle whose charging-history call 404s/500s without aborting the rest of the sync, and logs the failed vehicle/status", async () => {
     const { pool, queries } = makeFakePool(baseHandler({
       vehicles: () => ({ rows: [{ id: "veh-1", vin: "VIN1" }, { id: "veh-2", vin: "VIN2" }] }),
     }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     fetchMock
       .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "rt", expires_in: 3600 }))
       .mockResolvedValueOnce(jsonResponse(500, {}))
@@ -134,6 +135,13 @@ describe("syncChargingInvoices -- charging-invoice sync job (T10)", () => {
     const inserts = queries.filter((q) => q.sql.includes("insert into public.onlyevs_charging_invoices"));
     expect(inserts).toHaveLength(1);
     expect(inserts[0].params[1]).toBe("veh-2");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("veh-1"),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("500"),
+    );
+    warnSpy.mockRestore();
   });
 
   it("a 401 from the charging-history endpoint marks the integration reauth_required and stops the sync", async () => {
@@ -182,5 +190,26 @@ describe("syncChargingInvoices -- charging-invoice sync job (T10)", () => {
     await syncChargingInvoices(pool, { id: "int-1" });
 
     expect(queries.some((q) => q.sql.includes("insert into public.onlyevs_charging_invoices"))).toBe(false);
+  });
+
+  it("drops a present-but-mismatched invoice.vin instead of trusting request-URL scoping alone, and logs the drop count", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "rt", expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        response: [
+          { id: "inv-1", vin: "5YJ3E1EA7KF000001", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: 22.5, totalDue: 8.1 },
+          { id: "inv-2", vin: "SOMEOTHERVEHICLEVIN", chargeStartDateTime: "2026-08-15T11:00:00Z", energyAdded: 5, totalDue: 2 },
+        ],
+      }));
+
+    await syncChargingInvoices(pool, { id: "int-1" });
+
+    const inserts = queries.filter((q) => q.sql.includes("insert into public.onlyevs_charging_invoices"));
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].params[2]).toBe("inv-1");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("dropped 1 charging invoice"));
+    warnSpy.mockRestore();
   });
 });

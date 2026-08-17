@@ -79,11 +79,20 @@ function firstMs(row: Record<string, unknown>, keys: string[]): number | null {
   return null;
 }
 
+/** Despite the name, this no longer clamps a negative reading to 0: a
+ * negative cost/kWh is a real value (a Tesla credit/refund, or an anomaly),
+ * not an absent field, and this module's whole design promise is "never
+ * fabricate a value from a partial row" -- a confident $0 fabricated from a
+ * negative reading is exactly that. So a negative-but-finite value returns
+ * null here, same as an unparseable one, which sends the caller down the
+ * existing null-field rejection path and drops the whole row rather than
+ * recording a fabricated non-negative number. */
 function firstNonNegativeNumber(row: Record<string, unknown>, keys: string[]): number | null {
   for (const key of keys) {
     const value = row[key];
     const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-    if (Number.isFinite(n)) return Math.max(0, n);
+    if (!Number.isFinite(n)) continue;
+    return n >= 0 ? n : null;
   }
   return null;
 }
@@ -103,12 +112,20 @@ export function parseTeslaChargingInvoice(raw: unknown): TeslaChargingHistoryInv
   ) {
     return null;
   }
+  // An absent end timestamp legitimately falls back to a zero-duration
+  // session at startedAtMs -- there's no data, so there's nothing to be
+  // dishonest about. A *present* end timestamp that parses to before the
+  // start, though, is not "no data": it's a malformed/inconsistent row, and
+  // clamping it to zero-duration would silently fabricate a session length
+  // that was never actually reported. Drop the row instead, same as any
+  // other unrecoverable field.
+  if (endedAtMsRaw !== null && endedAtMsRaw < startedAtMs) return null;
   const endedAtMs = endedAtMsRaw ?? startedAtMs;
   return {
     providerInvoiceId,
     vin,
     startedAtMs,
-    endedAtMs: Math.max(endedAtMs, startedAtMs),
+    endedAtMs,
     kWhAdded,
     costUsd,
   };

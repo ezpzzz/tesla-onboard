@@ -173,6 +173,12 @@ export type LocationRowView =
  * "not available" copy (design review + P1: never leak which precondition
  * failed to a viewer who isn't debugging the allowlist). `null` means the
  * caller is still loading — render a skeleton, not a state.
+ *
+ * The `default` arm below is belt-and-suspenders: `parseLocationEvidenceApiState`
+ * already guarantees `api.state` is one of the known discriminants before
+ * this ever runs, but this function must never return `undefined` even if
+ * that guarantee is ever violated — an undefined view crashes LocationRow
+ * (components/owner/telemetry-active-trip-card.tsx) outright.
  */
 export function deriveLocationRowView(
   api: LocationEvidenceApiState | null,
@@ -191,6 +197,53 @@ export function deriveLocationRowView(
       if (api.outOfArea === null) return { kind: "no-home-area", ageLabel };
       return api.outOfArea ? { kind: "out-of-area", ageLabel } : { kind: "in-area", ageLabel };
     }
+    default:
+      return { kind: "error" };
+  }
+}
+
+/**
+ * Validates a GET /api/owner/vehicles/[id]/location response before it is
+ * ever trusted as a `LocationEvidenceApiState` (mirrors
+ * `interpretLocateSetupResponse` in components/owner/vehicle-form.tsx). The
+ * route replies with `{ error: string }` and no `state` field on a 401
+ * session-expiry — a shape that doesn't match this union at all — and any
+ * other non-OK status or malformed/unrecognized `state` value must collapse
+ * to the same honest `decrypt_error` ("couldn't be read right now") rather
+ * than being stored as-is and handed to `deriveLocationRowView`.
+ */
+export function parseLocationEvidenceApiState(ok: boolean, body: unknown): LocationEvidenceApiState {
+  if (!ok) return { state: "decrypt_error" };
+  const row = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  switch (row.state) {
+    case "not_allowlisted":
+      return { state: "not_allowlisted" };
+    case "denied":
+      return { state: "denied" };
+    case "absent":
+      return { state: "absent" };
+    case "decrypt_error":
+      return { state: "decrypt_error" };
+    case "evidence":
+      if (
+        typeof row.tripId === "string" &&
+        typeof row.observedAtMs === "number" &&
+        typeof row.latitude === "number" &&
+        typeof row.longitude === "number" &&
+        (row.outOfArea === null || typeof row.outOfArea === "boolean")
+      ) {
+        return {
+          state: "evidence",
+          tripId: row.tripId,
+          observedAtMs: row.observedAtMs,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          outOfArea: row.outOfArea as boolean | null,
+        };
+      }
+      return { state: "decrypt_error" };
+    default:
+      return { state: "decrypt_error" };
   }
 }
 

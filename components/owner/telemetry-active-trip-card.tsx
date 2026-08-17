@@ -21,6 +21,7 @@ import {
   activeTripPace,
   deriveLocationRowView,
   freshnessAgeLabel,
+  parseLocationEvidenceApiState,
   type LocationEvidenceApiState,
   type StartBookendPace,
 } from "./telemetry-view";
@@ -61,9 +62,14 @@ function useLocationEvidence(
       `/api/owner/vehicles/${encodeURIComponent(vehicleId)}/location?workspaceId=${encodeURIComponent(scope.workspaceId)}`,
       { cache: "no-store" },
     )
-      .then((res) => res.json())
-      .then((body) => {
-        if (!cancelled) setState(body as LocationEvidenceApiState);
+      .then(async (res) => {
+        const body = await res.json().catch(() => null);
+        // Never trust the body's shape directly — a 401 session-expiry
+        // reply is `{ error: string }` with no `state` field at all, which
+        // doesn't match LocationEvidenceApiState. Validate first so an
+        // unrecognized shape collapses to the union's existing error state
+        // instead of reaching deriveLocationRowView as something undefined.
+        if (!cancelled) setState(parseLocationEvidenceApiState(res.ok, body));
       })
       .catch(() => {
         if (!cancelled) setState({ state: "absent" });

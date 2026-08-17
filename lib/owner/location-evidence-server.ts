@@ -2,7 +2,15 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { credentialKeyringFromEnv, decryptCredential } from "./credential-envelope";
-import { validCoordinates } from "./telemetry-policy";
+import { haversineMiles, validCoordinates } from "./telemetry-policy";
+
+// Re-exported so existing imports of `haversineMiles` from this module
+// (e.g. tests/owner-location-evidence.test.ts) keep working now that the
+// formula itself lives in telemetry-policy.ts -- the worker's evidence-
+// packet out-of-area count (services/onlyevs-worker/index.ts) needs the
+// same framework-agnostic function and cannot import this "server-only"
+// module (it pulls in next/headers via @/lib/supabase/server).
+export { haversineMiles };
 
 /**
  * Server-only location evidence read path (Phase 4).
@@ -68,26 +76,6 @@ interface VehicleHomeAreaRow {
   home_area_center_lat: number | null;
   home_area_center_lng: number | null;
   home_area_radius_mi: number | null;
-}
-
-/** Great-circle distance in miles. Local to this module — the only caller
- * needing an in/out-of-area comparison against a small radius, so it is not
- * worth a shared geo module for the routes lane's scope. */
-export function haversineMiles(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-): number {
-  const EARTH_RADIUS_MI = 3958.8;
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  const c = 2 * Math.asin(Math.min(1, Math.sqrt(a)));
-  return EARTH_RADIUS_MI * c;
 }
 
 /** Evidence states only — current position during an active consented trip,

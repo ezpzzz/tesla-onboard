@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -25,6 +26,12 @@ import {
   LAST_TENANT_KEY,
 } from "@/lib/tenant-storage";
 
+// React warns if useLayoutEffect runs during SSR ("does nothing on the
+// server"); it's a no-op there anyway, so fall back to useEffect
+// server-side and only get the synchronous-before-paint behavior on the
+// client, where it actually matters (see the resolution effect below).
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 export interface TenantConfigContextValue {
   config: TenantConfig;
   tenantSlug: string | null;
@@ -42,6 +49,31 @@ const DEFAULT_CONTEXT: TenantConfigContextValue = {
 };
 
 const TenantConfigContext = createContext<TenantConfigContextValue>(DEFAULT_CONTEXT);
+
+// Module scope (not React state) on purpose: resolving the tenant is at
+// least one microtask away from first paint even in the common case (it
+// still reads localStorage inside an effect, and may hit
+// /api/tenant/resolve-domain), and React can legitimately re-mount this
+// provider for reasons that have nothing to do with tenant data (dev-only
+// Suspense/Strict Mode remounts, etc.). Without this cache, every such
+// remount would start over at `loading: true` and every consumer downstream
+// (e.g. the owner dashboard's OwnerDataProvider, gated on
+// useTenantConfig().loading) would drop back into its own loading state even
+// though this exact route already resolved a value moments earlier in this
+// browser tab. Keyed by the same (pathname, search) the resolution effect
+// itself keys on, so a real route/query change still resolves fresh.
+let lastResolvedKey: string | null = null;
+let lastResolvedValue: TenantConfigContextValue | null = null;
+
+function resolvedFor(pathname: string, search: string): TenantConfigContextValue | null {
+  const key = `${pathname}?${search}`;
+  return lastResolvedKey === key ? lastResolvedValue : null;
+}
+
+function rememberResolved(pathname: string, search: string, next: TenantConfigContextValue) {
+  lastResolvedKey = `${pathname}?${search}`;
+  lastResolvedValue = next;
+}
 
 function darkenHex(value: string): string {
   const channels = [1, 3, 5].map((offset) =>
@@ -81,19 +113,41 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
   const search = searchParams.toString();
-  const [value, setValue] = useState<TenantConfigContextValue>({
-    ...DEFAULT_CONTEXT,
-    loading: true,
-    readiness: "loading",
-  });
+  const [value, setValue] = useState<TenantConfigContextValue>(
+    () =>
+      resolvedFor(pathname, search) ?? {
+        ...DEFAULT_CONTEXT,
+        loading: true,
+        readiness: "loading",
+      },
+  );
 
-  useEffect(() => {
+  // A layout effect (not a passive one) so the synchronous fast path below
+  // — no Supabase, no network call, just localStorage — resolves and commits
+  // BEFORE the browser paints, instead of after. useOwnerDataValue (and
+  // everything else reading useTenantConfig()) is then never given a chance
+  // to render a "still loading" frame for that path in the first place: its
+  // own effect, gated on `tenantLoading`, sees the resolved value on its very
+  // first pass rather than waiting on a whole extra render+commit cycle. The
+  // real Supabase path still resolves asynchronously after its network call,
+  // same as before — this only removes the artificial wait for cases that
+  // never actually needed one.
+  useIsomorphicLayoutEffect(() => {
+    // Already resolved this exact route in this tab (see the module cache
+    // above) — adopt it immediately instead of re-announcing `loading: true`
+    // to every consumer while the effect below re-resolves in the
+    // background.
+    const cached = resolvedFor(pathname, search);
+    if (cached) setValue((current) => (current === cached ? current : cached));
+
     // Private trip routes carry an already-validated, guest-safe tenant
     // snapshot in their nested boundary. Resolving the serving hostname here
     // would be redundant and can create a blocked background request under
     // the portal's intentionally strict no-referrer policy.
     if (pathname.startsWith("/trip/")) {
-      setValue({ ...DEFAULT_CONTEXT, tenantSlug: null, loading: false, readiness: "missing-tenant" });
+      const next = { ...DEFAULT_CONTEXT, tenantSlug: null, loading: false, readiness: "missing-tenant" } as const;
+      setValue(next);
+      rememberResolved(pathname, search, next);
       return;
     }
     let cancelled = false;
@@ -133,7 +187,11 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
         : querySlug ?? storedSlug;
 
       if (!slug) {
-        if (!cancelled) setValue({ ...DEFAULT_CONTEXT, tenantSlug: null, loading: false, readiness: "missing-tenant" });
+        if (!cancelled) {
+          const next = { ...DEFAULT_CONTEXT, tenantSlug: null, loading: false, readiness: "missing-tenant" } as const;
+          setValue(next);
+          rememberResolved(pathname, search, next);
+        }
         return;
       }
       if (querySlug || customDomainSlug) {
@@ -154,13 +212,17 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
             // A malformed preview value remains unavailable.
           }
         }
-        if (!cancelled) setValue({
-          config: config ?? DEFAULT_TENANT_CONFIG,
-          tenantSlug: slug,
-          loading: false,
-          source: config ? "workspace" : "default",
-          readiness: config ? "ready" : "setup-required",
-        });
+        if (!cancelled) {
+          const next = {
+            config: config ?? DEFAULT_TENANT_CONFIG,
+            tenantSlug: slug,
+            loading: false,
+            source: config ? "workspace" : "default",
+            readiness: config ? "ready" : "setup-required",
+          } as const;
+          setValue(next);
+          rememberResolved(pathname, search, next);
+        }
         return;
       }
 
@@ -177,7 +239,7 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
           workspaceId: data?.workspace_id,
           shopSlug: data?.shop_slug,
         }) : null;
-        setValue({
+        const next = {
           config: config ?? DEFAULT_TENANT_CONFIG,
           tenantSlug: slug,
           loading: false,
@@ -187,7 +249,9 @@ export function TenantConfigProvider({ children }: { children: ReactNode }) {
             : config
               ? "ready"
               : "setup-required",
-        });
+        } as const;
+        setValue(next);
+        rememberResolved(pathname, search, next);
       }
     })();
 

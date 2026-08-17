@@ -10,16 +10,21 @@
  *
  * Payload shape note: this parses the *actual* runtime shape
  * `composeTripEvidencePacket` (services/onlyevs-worker/index.ts, worker
- * lane) writes — tripId/guestName/startsAt/endsAt/bookends.{start,end}/
- * milesDriven/batteryDeltaPct/odometerRegression/chargingSessionsDerived/
- * chargingSessions — which differs in shape from the aspirational
- * `EvidencePacketPayload` interface in lib/owner/types.ts (that type adds
- * milesAllowance/batteryPolicyPct/outOfAreaOccurrences fields the worker
- * doesn't populate yet, and an array-of-bookends shape rather than
- * start/end keys). Parsing here is defensive field-by-field (mirroring
+ * lane) writes — tripId/vehicleId/guestName/startsAt/endsAt/
+ * bookends.{start,end}/milesDriven/milesAllowance/batteryDeltaPct/
+ * batteryPolicyPct/odometerRegression/chargingSessionsDerived/
+ * chargingSessions/outOfAreaOccurrences. There is deliberately no static
+ * type in lib/owner/types.ts mirroring this shape — see that file's Phase 6
+ * section comment for why: the payload is a worker-composed, versioned
+ * jsonb blob whose shape can differ across a trip's own packet versions (a
+ * correction is a new row, never a mutation) and across packets composed
+ * before/after a field like the ones this module now reads was added.
+ * Parsing here is defensive field-by-field (mirroring
  * `parseEmailCandidateFacts`'s `firstString` approach) precisely so an
- * absent/renamed field degrades to "not shown" rather than a crash, and so
- * this card doesn't need to block on that type being reconciled.
+ * absent/renamed field on an older packet version degrades to "not shown"
+ * rather than a crash — this module IS the single source of truth for what
+ * a packet looks like once read, by design, not a consumer of a second
+ * static type that could drift from it.
  *
  * Collapsed order (design review Issue 1, 1A — inherits InboxCandidateCard's
  * convention): status badge -> consequence-led title -> deltas-vs-policy
@@ -40,10 +45,19 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useOwnerTenant } from "./OwnerTenantProvider";
-import { formatMiles, formatPct } from "@/lib/owner/derive";
+import { formatMiles, formatPct, tripWindowRollup, type TripWindowRollup } from "@/lib/owner/derive";
 import { Badge, Card } from "@/components/ui";
 import { IconBattery } from "@/components/icons";
 import { TURO_INVOICE_WINDOW_MS } from "@/lib/owner/telemetry-policy";
+
+// Same env-based check as OwnerTenantProvider.tsx / TenantConfigProvider.tsx /
+// lib/owner/use-owner-data.ts. `useOwnerTenant().workspace` is truthy even in
+// demo mode (it supplies a synthetic local-demo workspace), so `!workspace`
+// alone never detects demo mode -- it must be combined with this check before
+// constructing a Supabase client.
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+);
 
 /**
  * Turo's invoice-eligibility window closes 72h after trip end. Centralized
@@ -69,16 +83,30 @@ export interface ParsedPacketChargeSession {
 
 export interface ParsedEvidencePacket {
   tripId: string;
+  vehicleId: string | null;
   guestName: string | null;
   startsAt: number | null;
   endsAt: number | null;
   bookendStart: ParsedPacketBookend | null;
   bookendEnd: ParsedPacketBookend | null;
   milesDriven: number | null;
+  /** null unless a mileage-allowance data source exists for this trip — no
+   * such source exists anywhere in this codebase yet (see
+   * composeTripEvidencePacket's doc comment), so this is currently always
+   * null. Never a guessed number. */
+  milesAllowance: number | null;
   batteryDeltaPct: number | null;
+  /** null unless the worker could resolve a return-charge policy percentage
+   * for this vehicle (its own override; the worker has no reachable
+   * fleet-wide fallback — see composeTripEvidencePacket's doc comment). */
+  batteryPolicyPct: number | null;
   odometerRegression: boolean;
   chargingSessionsDerived: boolean;
   chargingSessions: ParsedPacketChargeSession[];
+  /** Count of this trip's location observations that fell outside the
+   * vehicle's home area — never coordinates. Null unless a home area is
+   * configured AND at least one location observation exists for this trip. */
+  outOfAreaOccurrences: number | null;
 }
 
 function toMs(value: unknown): number | null {
@@ -104,22 +132,25 @@ function parseBookend(raw: unknown): ParsedPacketBookend | null {
 }
 
 /** Defensive field-by-field parse of the packet payload jsonb — see the
- * module doc comment for why this doesn't trust lib/owner/types.ts's
- * EvidencePacketPayload shape verbatim. Never throws on an unexpected or
- * partial payload; every field independently degrades to null/false. */
+ * module doc comment for why this never trusts a static type for the raw
+ * shape. Never throws on an unexpected or partial payload; every field
+ * independently degrades to null/false. */
 export function parseEvidencePacketPayload(raw: unknown): ParsedEvidencePacket {
   const row = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const bookends = row.bookends && typeof row.bookends === "object" ? (row.bookends as Record<string, unknown>) : {};
   const sessions = Array.isArray(row.chargingSessions) ? row.chargingSessions : [];
   return {
     tripId: typeof row.tripId === "string" ? row.tripId : "",
+    vehicleId: typeof row.vehicleId === "string" && row.vehicleId ? row.vehicleId : null,
     guestName: typeof row.guestName === "string" && row.guestName.trim() ? row.guestName : null,
     startsAt: toMs(row.startsAt),
     endsAt: toMs(row.endsAt),
     bookendStart: parseBookend(bookends.start),
     bookendEnd: parseBookend(bookends.end),
     milesDriven: toNumberOrNull(row.milesDriven),
+    milesAllowance: toNumberOrNull(row.milesAllowance),
     batteryDeltaPct: toNumberOrNull(row.batteryDeltaPct),
+    batteryPolicyPct: toNumberOrNull(row.batteryPolicyPct),
     odometerRegression: row.odometerRegression === true,
     chargingSessionsDerived: row.chargingSessionsDerived === true,
     chargingSessions: sessions.map((session) => {
@@ -130,6 +161,7 @@ export function parseEvidencePacketPayload(raw: unknown): ParsedEvidencePacket {
         gapAffected: s.gapAffected === true,
       };
     }),
+    outOfAreaOccurrences: toNumberOrNull(row.outOfAreaOccurrences),
   };
 }
 
@@ -138,21 +170,44 @@ export interface PacketStatus {
   tone: "good" | "warn";
 }
 
+/** Reuses tripWindowRollup (lib/owner/derive.ts) — the same windowed-delta
+ * computation the ledger and active-trip card use — over the packet's own
+ * captured bookend odometer/battery values plus its allowance/policy
+ * context, so "miles over allowance" / "battery below policy" mean exactly
+ * the same thing here as everywhere else in the app. milesOverAllowance
+ * stays null in practice today since milesAllowance is always null (no data
+ * source exists yet); this activates automatically once one does. */
+export function derivePacketPolicyRollup(packet: ParsedEvidencePacket): TripWindowRollup {
+  return tripWindowRollup({
+    odometerStartMi: packet.bookendStart?.odometerMi ?? null,
+    odometerEndMi: packet.bookendEnd?.odometerMi ?? null,
+    batteryStartPct: packet.bookendStart?.batteryPct ?? null,
+    batteryEndPct: packet.bookendEnd?.batteryPct ?? null,
+    milesAllowance: packet.milesAllowance,
+    policyPct: packet.batteryPolicyPct,
+  });
+}
+
 /**
  * Honest, evidence-only status: "Needs attention" whenever the record
  * itself says so — a missing bookend, an odometer regression (data error),
- * or a charging session whose kWh crossed a stream gap. Never claims a
- * miles-/battery-vs-policy verdict the payload doesn't carry (see the
- * module doc comment on the milesAllowance/batteryPolicyPct gap).
+ * a charging session whose kWh crossed a stream gap, a battery return below
+ * the resolved return-charge policy, or miles driven beyond the resolved
+ * allowance. Each of the last two only fires when the packet actually
+ * carries that context (both null unless the worker could resolve them) —
+ * never claims a verdict the payload doesn't carry.
  */
 export function derivePacketStatus(packet: ParsedEvidencePacket): PacketStatus {
+  const rollup = derivePacketPolicyRollup(packet);
   const needsAttention =
     packet.odometerRegression ||
     !packet.bookendStart ||
     !packet.bookendEnd ||
     packet.bookendStart.stale ||
     packet.bookendEnd.stale ||
-    packet.chargingSessions.some((session) => session.gapAffected);
+    packet.chargingSessions.some((session) => session.gapAffected) ||
+    rollup.batteryBelowPolicy === true ||
+    (rollup.milesOverAllowance !== null && rollup.milesOverAllowance > 0);
   return needsAttention ? { label: "Needs attention", tone: "warn" } : { label: "Clean return", tone: "good" };
 }
 
@@ -244,7 +299,7 @@ export function PacketEvidenceQueue() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!workspace) { setLoaded(true); return; }
+    if (!workspace || !SUPABASE_CONFIGURED) { setLoaded(true); return; }
     (async () => {
       const { data } = await createClient()
         .from("onlyevs_trip_evidence_packets")
@@ -353,13 +408,56 @@ function bookendLine(label: string, bookend: ParsedPacketBookend | null): string
   return `${label}: ${parts.join(", ")}${bookend.stale ? " (stale)" : ""}`;
 }
 
+/** "421 mi driven" / "421 of 600 mi allowed — 21 mi over" / "Not captured".
+ * Folds the allowance-vs-policy framing into the existing miles-driven fact
+ * rather than a parallel always-empty row: milesAllowance is currently
+ * always null (see the ParsedEvidencePacket doc comment), so a standalone
+ * "Mileage allowance" row would just be permanent clutter across every
+ * packet ever rendered. This activates automatically once a real source
+ * populates milesAllowance on a packet. */
+export function formatMilesDrivenFact(payload: ParsedEvidencePacket, rollup: TripWindowRollup): string {
+  if (payload.milesDriven === null) return "Not captured";
+  if (payload.milesAllowance === null) return `${formatMiles(payload.milesDriven)} driven`;
+  const base = `${formatMiles(payload.milesDriven)} of ${formatMiles(payload.milesAllowance)} allowed`;
+  return rollup.milesOverAllowance !== null && rollup.milesOverAllowance > 0
+    ? `${base} — ${formatMiles(rollup.milesOverAllowance)} over`
+    : base;
+}
+
+/** "+12%" / "-16% — below the 80% return policy" / "-16% (policy: 80%)" /
+ * "Not captured" — same fold-in-place approach as formatMilesDrivenFact
+ * above, for the same reason (batteryPolicyPct is null whenever the vehicle
+ * carries no return-charge override, which is common). */
+export function formatBatteryDeltaFact(payload: ParsedEvidencePacket, rollup: TripWindowRollup): string {
+  if (payload.batteryDeltaPct === null) return "Not captured";
+  const base = `${payload.batteryDeltaPct > 0 ? "+" : ""}${payload.batteryDeltaPct}%`;
+  if (payload.batteryPolicyPct === null) return base;
+  return rollup.batteryBelowPolicy
+    ? `${base} — below the ${formatPct(payload.batteryPolicyPct)} return policy`
+    : `${base} (policy: ${formatPct(payload.batteryPolicyPct)})`;
+}
+
+/** Never renders coordinates — an occurrence count only, per the
+ * outOfAreaOccurrences doc comment. The null case collapses "no home area
+ * configured" and "home area configured but no location observations" into
+ * one honest sentence, matching how components/owner/telemetry-view.ts's
+ * LocationEvidenceApiState states already avoid leaking which precondition
+ * failed. */
+export function formatOutOfAreaFact(occurrences: number | null): string {
+  if (occurrences === null) return "No out-of-area tracking data for this trip";
+  if (occurrences === 0) return "In area for every recorded observation";
+  return `${occurrences} observation${occurrences === 1 ? "" : "s"} outside the home area`;
+}
+
 function PacketEvidenceDetail({ payload }: { payload: ParsedEvidencePacket }) {
+  const rollup = derivePacketPolicyRollup(payload);
   return (
     <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
       <div><dt className="text-xs text-muted">Pickup</dt><dd className="mt-1 font-medium text-ink">{bookendLine("Pickup", payload.bookendStart)}</dd></div>
       <div><dt className="text-xs text-muted">Return</dt><dd className="mt-1 font-medium text-ink">{bookendLine("Return", payload.bookendEnd)}</dd></div>
-      <div><dt className="text-xs text-muted">Miles driven</dt><dd className="mt-1 font-medium text-ink">{payload.milesDriven === null ? "Not captured" : formatMiles(payload.milesDriven)}</dd></div>
-      <div><dt className="text-xs text-muted">Battery delta</dt><dd className="mt-1 font-medium text-ink">{payload.batteryDeltaPct === null ? "Not captured" : `${payload.batteryDeltaPct > 0 ? "+" : ""}${payload.batteryDeltaPct}%`}</dd></div>
+      <div><dt className="text-xs text-muted">Miles driven</dt><dd className="mt-1 font-medium text-ink">{formatMilesDrivenFact(payload, rollup)}</dd></div>
+      <div><dt className="text-xs text-muted">Battery delta</dt><dd className="mt-1 font-medium text-ink">{formatBatteryDeltaFact(payload, rollup)}</dd></div>
+      <div><dt className="text-xs text-muted">Out of area</dt><dd className="mt-1 font-medium text-ink">{formatOutOfAreaFact(payload.outOfAreaOccurrences)}</dd></div>
       {payload.odometerRegression ? (
         <div className="sm:col-span-2">
           <dt className="sr-only">Data error</dt>

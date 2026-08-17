@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isOwnerAuthConfigured } from "@/lib/owner-auth";
 import type { TeslaProfile } from "@/lib/tesla";
 import {
   fetchVehicleLocationReading,
@@ -65,6 +66,11 @@ export async function GET(
 ) {
   const { id } = await context.params;
   if (!UUID_PATTERN.test(id)) return reply({ state: "vehicle_not_found" }, 404);
+  // Demo mode (Supabase unconfigured) has no owner session at all -- same
+  // honest "not connected" state as an expired/absent Tesla session, never a
+  // raw Supabase-client-construction error. Matches the isOwnerAuthConfigured()
+  // guard other owner API routes use (e.g. app/api/owner/magic-link/route.ts).
+  if (!isOwnerAuthConfigured()) return reply({ state: "reconnect_required" });
 
   const supabase = await createClient();
   const { data: authData } = await supabase.auth.getUser();

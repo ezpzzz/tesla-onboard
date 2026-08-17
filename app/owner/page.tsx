@@ -14,6 +14,7 @@ import { useOwnerState } from "@/lib/owner/owner-state";
 import { deriveAlerts } from "@/lib/owner/alerts";
 import { handoffSteps, selectNextHandoff } from "@/lib/owner/handoff";
 import { formatTripDuration } from "@/lib/trip-format";
+import type { ChargingSession, DerivedChargeSession, Trip } from "@/lib/owner/types";
 
 function dateTime(ms: number) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(ms));
@@ -21,6 +22,37 @@ function dateTime(ms: number) {
 
 function fullDate(ms: number) {
   return new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date(ms));
+}
+
+/**
+ * useOwnerData() only returns the legacy-shaped `chargingSessions`
+ * (real Phase 3 sessions already reduced through `toLegacyChargingSessions`
+ * in lib/owner/use-owner-data.ts — that file is owned by another lane right
+ * now, so this reconstructs deriveAlerts's `DerivedChargeSession[]` input
+ * client-side from the same real data rather than editing it). The
+ * reconstruction is lossless for exactly the fields the
+ * supercharging-unrecovered alert reads: `isSupercharger` <->
+ * `kind === "dc_fast"` is the same equivalence
+ * `toLegacyChargingSessions` used going the other way, and `tripId`/
+ * `kWhAdded` pass straight through. `vehicleId` (dropped by the legacy
+ * shape) is recovered from the owning trip when there is one; sessions with
+ * no trip (`tripId === ""`) never match a trip-scoped alert anyway.
+ * `costProvenance`/`gapAffected` aren't read by this alert, so they're left
+ * as honest unknowns rather than guessed.
+ */
+function chargeSessionsFromLegacy(sessions: ChargingSession[], trips: Trip[]): DerivedChargeSession[] {
+  return sessions.map((session) => ({
+    id: session.id,
+    tripId: session.tripId || null,
+    vehicleId: trips.find((trip) => trip.id === session.tripId)?.vehicleId ?? "",
+    kind: session.isSupercharger ? "dc_fast" : "ac_home",
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    kWhAdded: session.kWhAdded,
+    gapAffected: false,
+    costUsd: session.costUsd,
+    costProvenance: null,
+  }));
 }
 
 export default function OwnerTodayPage() {
@@ -43,15 +75,19 @@ export default function OwnerTodayPage() {
   // surface (plan Phase 5 "alerts wired to real data" / G12): honest empty
   // ("Every active guest is on track.") until ownerState has hydrated, then
   // the same pure deriveAlerts the design specced for the vehicle/trip
-  // pages. `chargeSessions` (Phase 3 derived, kWh-based) isn't exposed by
-  // useOwnerData yet, so the supercharging-unrecovered alert honestly never
-  // fires here rather than guessing — every other alert kind is real.
+  // pages. `chargeSessions` feeds the supercharging-unrecovered alert —
+  // reconstructed from useOwnerData()'s legacy-shaped `chargingSessions`
+  // (see chargeSessionsFromLegacy above) so the alert can actually fire.
+  const chargeSessions = useMemo(
+    () => chargeSessionsFromLegacy(chargingSessions, trips),
+    [chargingSessions, trips],
+  );
   const alerts = useMemo(
     () =>
       now && ownerStateHydrated
-        ? deriveAlerts({ drivers, trips, chargingSessions, vehicles, ownerState, policyPct, now })
+        ? deriveAlerts({ drivers, trips, chargingSessions, chargeSessions, vehicles, ownerState, policyPct, now })
         : [],
-    [drivers, trips, chargingSessions, vehicles, ownerState, ownerStateHydrated, policyPct, now],
+    [drivers, trips, chargingSessions, chargeSessions, vehicles, ownerState, ownerStateHydrated, policyPct, now],
   );
   const error = vehicleError ?? operationalError;
 

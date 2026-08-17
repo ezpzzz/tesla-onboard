@@ -10,7 +10,6 @@
 
 import type { ExperienceLevel } from "@/lib/tesla";
 import type { ProgressSummary } from "@/lib/flow";
-import type { BookendEdge } from "./access-types";
 
 export type TripStatus = "upcoming" | "active" | "completed" | "cancelled";
 
@@ -213,57 +212,25 @@ export interface DerivedChargeSession {
 }
 
 // --- Phase 6: immutable trip evidence packet ------------------------------
-
-export interface EvidencePacketBookend {
-  edge: BookendEdge;
-  odometerMi: number | null;
-  odometerObservedAt: number | null;
-  batteryPct: number | null;
-  batteryObservedAt: number | null;
-  stale: boolean;
-}
-
-export interface EvidencePacketChargeSessionSummary {
-  kind: ChargeSessionKind;
-  kWhAdded: number;
-  gapAffected: boolean;
-}
-
-/**
- * NEVER add a coordinate/lat-lng field to this type. The packet is
- * deliberately safe to render anywhere owner-side (Inbox card, reminder
- * email) without touching the sealed location table — out-of-area is an
- * occurrence count only, by design (Phase 6).
- */
-export interface EvidencePacketPayload {
-  tripId: string;
-  vehicleId: string;
-  guestName: string;
-  startsAt: number;
-  endsAt: number;
-  /** Whichever of start/end were captured; absent edge means "not captured
-   * at pickup/return", never a fabricated or carried-forward value. */
-  bookends: EvidencePacketBookend[];
-  milesDriven: number | null;
-  milesAllowance: number | null;
-  batteryDeltaPct: number | null;
-  batteryPolicyPct: number | null;
-  chargeSessions: EvidencePacketChargeSessionSummary[];
-  outOfAreaOccurrences: number;
-}
-
-/** Mirrors a row from public.onlyevs_trip_evidence_packets. Insert-only and
- * versioned: a correction is a new row with `version` = previous max + 1 for
- * the same `tripId` (unique(trip_id, version)), never a mutation of this
- * one. The current packet for a trip is always the row with the highest
- * `version`. */
-export interface EvidencePacket {
-  id: string;
-  tripId: string;
-  version: number;
-  composedAt: number;
-  payload: EvidencePacketPayload;
-}
+//
+// No static payload type lives here. `onlyevs_trip_evidence_packets.payload`
+// is a worker-composed, versioned jsonb blob (services/onlyevs-worker/
+// index.ts's composeTripEvidencePacket) whose shape can legitimately differ
+// across a trip's own packet versions — a correction is a new row, never a
+// mutation of an earlier one (see that function's doc comment) — and across
+// packets composed before/after a payload field was added. An interface
+// here claiming to "mirror the row" would silently drift from what the
+// worker actually writes (it already had, twice, before this comment was
+// written) with nothing to catch it.
+//
+// components/owner/packet-evidence-card.tsx's ParsedEvidencePacket +
+// parseEvidencePacketPayload is the single source of truth for what a
+// packet looks like once read: every field is parsed defensively from
+// `unknown` and degrades independently to null/false rather than trusting a
+// static shape a jsonb column can drift from underneath it. NEVER add a
+// coordinate/lat-lng field anywhere in that parsing path — the packet is
+// deliberately safe to render anywhere owner-side (Inbox card, reminder
+// email); out-of-area is an occurrence count only, by design (Phase 6).
 
 // Re-exported so consumers of lib/owner/* don't need a second import from
 // lib/tesla just for the experience-level union used on Driver progress.

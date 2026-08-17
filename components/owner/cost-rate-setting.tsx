@@ -38,6 +38,16 @@ import { createClient } from "@/lib/supabase/client";
 import { Button, Card } from "@/components/ui";
 import { IconBolt } from "@/components/icons";
 
+// Same env-based check as OwnerTenantProvider.tsx / TenantConfigProvider.tsx /
+// lib/owner/use-owner-data.ts / app/login/page.tsx / app/owner/account/page.tsx.
+// `useOwnerTenant().workspace` is truthy even in demo mode (it supplies a
+// synthetic local-demo workspace so workspace-shaped UI still renders), so
+// `!workspace` alone never detects demo mode -- it must be combined with this
+// check before constructing a Supabase client.
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+);
+
 const RATE_COLUMN = "home_charge_rate_usd_per_kwh";
 const MAX_REASONABLE_RATE_USD_PER_KWH = 5;
 
@@ -71,6 +81,13 @@ export function isMissingColumnError(error: { code?: string } | null | undefined
   return error?.code === "42703" || error?.code === "PGRST204";
 }
 
+/** True when a Supabase update returned no error but touched zero rows —
+ * PostgREST's signature for "RLS silently filtered the update target out."
+ * Must be treated exactly like a real error, never rendered as "Saved". */
+export function isDeniedWrite(updatedRows: unknown[] | null | undefined): boolean {
+  return (updatedRows?.length ?? 0) === 0;
+}
+
 type LoadState = "loading" | "loaded" | "unavailable";
 type SaveState = "idle" | "saving" | "saved" | "error" | "unavailable";
 
@@ -80,10 +97,11 @@ export function CostRateSetting() {
   const [draft, setDraft] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    if (!workspace) { setLoadState("loaded"); return; }
+    if (!workspace || !SUPABASE_CONFIGURED) { setLoadState("loaded"); return; }
     (async () => {
       const { data, error } = await createClient()
         .from("workspace_branding")
@@ -106,27 +124,40 @@ export function CostRateSetting() {
   function onChange(value: string) {
     setDraft(value);
     setSaveState("idle");
+    setSaveError(null);
     setFieldError(validateRateDraft(value));
   }
 
   async function save() {
     const error = validateRateDraft(draft);
     if (error) { setFieldError(error); return; }
-    if (!workspace) return;
+    if (!workspace || !SUPABASE_CONFIGURED) return;
     setSaveState("saving");
-    const { error: writeError } = await createClient()
+    setSaveError(null);
+    const { data, error: writeError } = await createClient()
       .from("workspace_branding")
       .update({ [RATE_COLUMN]: parseRateDraft(draft) })
       .eq("workspace_id", workspace.id)
-      .eq("shop_slug", workspace.shopSlug);
+      .eq("shop_slug", workspace.shopSlug)
+      .select(RATE_COLUMN);
     if (writeError) {
-      setSaveState(isMissingColumnError(writeError) ? "unavailable" : "error");
+      const missingColumn = isMissingColumnError(writeError);
+      setSaveState(missingColumn ? "unavailable" : "error");
+      if (!missingColumn) setSaveError("The rate couldn't be saved. Try again.");
+      return;
+    }
+    if (isDeniedWrite(data)) {
+      // error: null with zero rows means RLS silently filtered the update
+      // target out (stale session, revoked membership, etc.) — never let
+      // that read as "Saved".
+      setSaveState("error");
+      setSaveError("The rate wasn't saved — your session or permissions may have changed. Try again.");
       return;
     }
     setSaveState("saved");
   }
 
-  if (!workspace) return null;
+  if (!workspace || !SUPABASE_CONFIGURED) return null;
 
   return (
     <section>
@@ -167,7 +198,7 @@ export function CostRateSetting() {
               <p id="cost-rate-per-kwh-error" className="text-xs text-danger">{fieldError}</p>
             ) : null}
             {saveState === "error" ? (
-              <p role="alert" className="text-sm text-danger">The rate couldn&apos;t be saved. Try again.</p>
+              <p role="alert" className="text-sm text-danger">{saveError ?? "The rate couldn't be saved. Try again."}</p>
             ) : null}
             <div className="flex items-center gap-3">
               <Button

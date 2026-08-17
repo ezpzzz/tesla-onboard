@@ -6,6 +6,7 @@ interface FakeResult {
 }
 
 const routeHandlers = new Map<string, () => FakeResult>();
+const rpcHandlers = new Map<string, (params: Record<string, unknown>) => FakeResult>();
 
 function makeQueryBuilder(result: FakeResult) {
   const builder = {
@@ -25,14 +26,26 @@ function route(table: string, handler: () => FakeResult) {
   routeHandlers.set(table, handler);
 }
 
+/** Registers a fake handler for a `.rpc(fnName, params)` call — used by the
+ * fetchWorkspaceChargeSessions tests below to stand in for
+ * public.get_onlyevs_charge_sessions without a live database. */
+function routeRpc(fnName: string, handler: (params: Record<string, unknown>) => FakeResult) {
+  rpcHandlers.set(fnName, handler);
+}
+
 function resetRoutes() {
   routeHandlers.clear();
+  rpcHandlers.clear();
 }
 
 const createClient = vi.fn(() => ({
   from: (table: string) => {
     const handler = routeHandlers.get(table);
     return makeQueryBuilder(handler ? handler() : { data: [], error: null });
+  },
+  rpc: (fnName: string, params: Record<string, unknown>) => {
+    const handler = rpcHandlers.get(fnName);
+    return Promise.resolve(handler ? handler(params) : { data: [], error: null });
   },
 }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => createClient() }));
@@ -191,38 +204,46 @@ describe("saveManualChargeCostOverride", () => {
 });
 
 describe("fetchWorkspaceChargeSessions", () => {
+  // D2 remediation: segmentation happens server-side via the
+  // get_onlyevs_charge_sessions RPC now, so these tests stand in a
+  // pre-segmented RPC row directly (routeRpc) instead of raw
+  // onlyevs_vehicle_stats_history rows + a client-side segmentChargeSessions
+  // call. What's still exercised here, unchanged: pricing at the configured
+  // rate, invoice reconciliation, and manual-override precedence.
   it("returns an empty array with no trips (nothing to derive against, no query issued)", async () => {
     resetRoutes();
     expect(await fetchWorkspaceChargeSessions(SCOPE, [])).toEqual([]);
   });
 
-  it("segments a session and leaves it kWh-only unpriced when no capacity or rate is on file (honest absence, not a guess)", async () => {
+  it("leaves an RPC-segmented session kWh-only unpriced when the RPC reports no capacity/rate on file (honest absence, not a guess)", async () => {
     resetRoutes();
     const tripStart = Date.parse("2026-08-15T10:00:00Z");
     const tripEnd = Date.parse("2026-08-15T12:00:00Z");
-    route("onlyevs_vehicle_stats_history", () => ({
-      data: [
-        { vehicle_id: "veh-1", observed_at: "2026-08-15T10:10:00Z", battery_pct: 50, estimated_range_mi: null, odometer_mi: null, charging_state: "Charging", locked: null },
-        { vehicle_id: "veh-1", observed_at: "2026-08-15T10:40:00Z", battery_pct: 80, estimated_range_mi: null, odometer_mi: null, charging_state: "Complete", locked: null },
-      ],
+    routeRpc("get_onlyevs_charge_sessions", () => ({
+      data: [{
+        vehicle_id: "veh-1", trip_id: "trip-1",
+        started_at: "2026-08-15T10:10:00Z", ended_at: "2026-08-15T10:40:00Z",
+        kwh_added: null, gap_affected: false, kind: "ac_home",
+      }],
       error: null,
     }));
     route("workspace_branding", () => ({ data: { home_charge_rate_usd_per_kwh: 0.20 }, error: null }));
     route("onlyevs_charging_invoices", () => ({ data: [], error: null }));
-    // No route registered for onlyevs_vehicles/onlyevs_manual_charge_cost_
-    // entries -> the shared default { data: [], error: null } applies, i.e.
-    // no capacity on file for this vehicle and no manual corrections.
+    // No route registered for onlyevs_manual_charge_cost_entries -> the
+    // shared default { data: [], error: null } applies, i.e. no manual
+    // corrections.
 
     const sessions = await fetchWorkspaceChargeSessions(SCOPE, [
       { id: "trip-1", vehicleId: "veh-1", startAt: tripStart, endAt: tripEnd },
     ]);
 
     expect(sessions).toHaveLength(1);
-    // No battery capacity is on file for this vehicle, so kWhAdded is an
-    // honest unknown (NaN sentinel) rather than a fabricated 0 -- and with
-    // an unknown kWh, reconcileHomeRateCost correctly leaves the session
-    // entirely unpriced (never 0 x rate = 0, which would look like a real
-    // "no cost" measurement instead of "nothing to price").
+    // The RPC reported kwh_added: null (no battery capacity on file server-
+    // side), so kWhAdded is an honest unknown (NaN sentinel) rather than a
+    // fabricated 0 -- and with an unknown kWh, reconcileHomeRateCost
+    // correctly leaves the session entirely unpriced (never 0 x rate = 0,
+    // which would look like a real "no cost" measurement instead of
+    // "nothing to price").
     expect(sessions[0].tripId).toBe("trip-1");
     expect(sessions[0].vehicleId).toBe("veh-1");
     expect(sessions[0].kind).toBe("ac_home");
@@ -231,27 +252,31 @@ describe("fetchWorkspaceChargeSessions", () => {
     expect(sessions[0].costProvenance).toBeNull();
   });
 
-  it("estimates kWhAdded from the battery delta, and prices it, when the vehicle has a battery capacity on file", async () => {
+  it("prices an RPC-segmented session's kWh at the configured rate when the RPC reports a battery-delta estimate", async () => {
     resetRoutes();
     const tripStart = Date.parse("2026-08-15T10:00:00Z");
     const tripEnd = Date.parse("2026-08-15T12:00:00Z");
-    route("onlyevs_vehicle_stats_history", () => ({
-      data: [
-        { vehicle_id: "veh-1", observed_at: "2026-08-15T10:10:00Z", battery_pct: 50, estimated_range_mi: null, odometer_mi: null, charging_state: "Charging", locked: null },
-        { vehicle_id: "veh-1", observed_at: "2026-08-15T10:40:00Z", battery_pct: 80, estimated_range_mi: null, odometer_mi: null, charging_state: "Complete", locked: null },
-      ],
+    routeRpc("get_onlyevs_charge_sessions", () => ({
+      data: [{
+        vehicle_id: "veh-1", trip_id: "trip-1",
+        started_at: "2026-08-15T10:10:00Z", ended_at: "2026-08-15T10:40:00Z",
+        // The RPC already computed this server-side from the vehicle's own
+        // battery_capacity_kwh -- this repository trusts it, it doesn't
+        // re-derive it (that math is covered by the migration's own SQL
+        // validation, not re-tested here).
+        kwh_added: 24, gap_affected: false, kind: "ac_home",
+      }],
       error: null,
     }));
     route("workspace_branding", () => ({ data: { home_charge_rate_usd_per_kwh: 0.20 }, error: null }));
     route("onlyevs_charging_invoices", () => ({ data: [], error: null }));
-    route("onlyevs_vehicles", () => ({ data: [{ id: "veh-1", battery_capacity_kwh: 80 }], error: null }));
 
     const sessions = await fetchWorkspaceChargeSessions(SCOPE, [
       { id: "trip-1", vehicleId: "veh-1", startAt: tripStart, endAt: tripEnd },
     ]);
 
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].kWhAdded).toBeCloseTo(24, 5); // 30% of an 80kWh pack
+    expect(sessions[0].kWhAdded).toBeCloseTo(24, 5);
     expect(sessions[0].costProvenance).toBe("rate");
     expect(sessions[0].costUsd).toBeCloseTo(4.8, 5);
   });
@@ -260,11 +285,12 @@ describe("fetchWorkspaceChargeSessions", () => {
     resetRoutes();
     const tripStart = Date.parse("2026-08-15T10:00:00Z");
     const tripEnd = Date.parse("2026-08-15T12:00:00Z");
-    route("onlyevs_vehicle_stats_history", () => ({
-      data: [
-        { vehicle_id: "veh-1", observed_at: "2026-08-15T10:10:00Z", battery_pct: 50, estimated_range_mi: null, odometer_mi: null, charging_state: "Charging", locked: null },
-        { vehicle_id: "veh-1", observed_at: "2026-08-15T10:40:00Z", battery_pct: 80, estimated_range_mi: null, odometer_mi: null, charging_state: "Complete", locked: null },
-      ],
+    routeRpc("get_onlyevs_charge_sessions", () => ({
+      data: [{
+        vehicle_id: "veh-1", trip_id: "trip-1",
+        started_at: "2026-08-15T10:10:00Z", ended_at: "2026-08-15T10:40:00Z",
+        kwh_added: null, gap_affected: false, kind: "ac_home",
+      }],
       error: null,
     }));
     route("workspace_branding", () => ({ data: { home_charge_rate_usd_per_kwh: null }, error: null }));
@@ -300,11 +326,12 @@ describe("fetchWorkspaceChargeSessions", () => {
     resetRoutes();
     const tripStart = Date.parse("2026-08-15T10:00:00Z");
     const tripEnd = Date.parse("2026-08-15T12:00:00Z");
-    route("onlyevs_vehicle_stats_history", () => ({
-      data: [
-        { vehicle_id: "veh-1", observed_at: "2026-08-15T10:10:00Z", battery_pct: 50, estimated_range_mi: null, odometer_mi: null, charging_state: "Charging", locked: null },
-        { vehicle_id: "veh-1", observed_at: "2026-08-15T10:40:00Z", battery_pct: 80, estimated_range_mi: null, odometer_mi: null, charging_state: "Complete", locked: null },
-      ],
+    routeRpc("get_onlyevs_charge_sessions", () => ({
+      data: [{
+        vehicle_id: "veh-1", trip_id: "trip-1",
+        started_at: "2026-08-15T10:10:00Z", ended_at: "2026-08-15T10:40:00Z",
+        kwh_added: null, gap_affected: false, kind: "ac_home",
+      }],
       error: null,
     }));
     route("workspace_branding", () => ({ data: { home_charge_rate_usd_per_kwh: null }, error: null }));
@@ -325,14 +352,49 @@ describe("fetchWorkspaceChargeSessions", () => {
     expect(sessions[0]).toMatchObject({ kind: "dc_fast", costProvenance: "invoice", costUsd: 12, kWhAdded: 30 });
   });
 
-  it("a history read failure never throws (falls back to empty for that call, no crash)", async () => {
+  it("a gap_affected session from the RPC round-trips that flag unchanged", async () => {
     resetRoutes();
-    route("onlyevs_vehicle_stats_history", () => ({ data: null, error: { message: "permission denied", code: "42501" } }));
+    const tripStart = Date.parse("2026-08-15T10:00:00Z");
+    const tripEnd = Date.parse("2026-08-15T12:00:00Z");
+    routeRpc("get_onlyevs_charge_sessions", () => ({
+      data: [{
+        vehicle_id: "veh-1", trip_id: null,
+        started_at: "2026-08-15T10:10:00Z", ended_at: "2026-08-15T10:40:00Z",
+        kwh_added: null, gap_affected: true, kind: "ac_home",
+      }],
+      error: null,
+    }));
+    route("workspace_branding", () => ({ data: { home_charge_rate_usd_per_kwh: null }, error: null }));
+    route("onlyevs_charging_invoices", () => ({ data: [], error: null }));
+
+    const sessions = await fetchWorkspaceChargeSessions(SCOPE, [
+      { id: "trip-1", vehicleId: "veh-1", startAt: tripStart, endAt: tripEnd },
+    ]);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].gapAffected).toBe(true);
+    expect(sessions[0].tripId).toBeNull();
+  });
+
+  it("a segmentation RPC failure never throws (falls back to empty for that call, no crash)", async () => {
+    resetRoutes();
+    routeRpc("get_onlyevs_charge_sessions", () => ({ data: null, error: { message: "permission denied", code: "42501" } }));
     await expect(fetchWorkspaceChargeSessions(SCOPE, [
       { id: "trip-1", vehicleId: "veh-1", startAt: Date.now() - 1000, endAt: Date.now() },
     ])).rejects.toThrow();
     // Callers (use-owner-data.ts) are the layer responsible for catching
     // this and falling back to []; this repository function itself is
     // honest about a real read failure rather than silently hiding it.
+  });
+
+  it("returns an honest empty array when the RPC isn't applied yet (pre-migration schema)", async () => {
+    resetRoutes();
+    routeRpc("get_onlyevs_charge_sessions", () => ({ data: null, error: { message: "missing", code: "PGRST205" } }));
+    route("workspace_branding", () => ({ data: { home_charge_rate_usd_per_kwh: null }, error: null }));
+    route("onlyevs_charging_invoices", () => ({ data: [], error: null }));
+    const sessions = await fetchWorkspaceChargeSessions(SCOPE, [
+      { id: "trip-1", vehicleId: "veh-1", startAt: Date.now() - 1000, endAt: Date.now() },
+    ]);
+    expect(sessions).toEqual([]);
   });
 });

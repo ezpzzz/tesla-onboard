@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyGuestLinks, type WorkspaceGuestLinks } from "@/app/owner/drivers/guest-roster";
+import {
+  applyGuestLinks,
+  EMPTY_GUEST_LINKS,
+  fetchWorkspaceGuestKeyCounts,
+  fetchWorkspaceGuestLinks,
+  type WorkspaceGuestLinks,
+} from "@/app/owner/drivers/guest-roster";
 import type { Driver, Trip } from "@/lib/owner/types";
 
 function trip(id: string, overrides: Partial<Trip> = {}): Trip {
@@ -98,5 +104,25 @@ describe("applyGuestLinks -- Phase 7 drivers-page durable-guest regrouping (T11 
     };
     const result = applyGuestLinks(drivers, trips, links);
     expect(result.drivers.some((d) => d.id === "guest-local")).toBe(true);
+  });
+});
+
+describe("fetchWorkspaceGuestLinks / fetchWorkspaceGuestKeyCounts -- demo mode (Supabase unconfigured)", () => {
+  // This test file deliberately never mocks @/lib/supabase/client. In this
+  // Vitest process NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  // are unset (demo mode), so if either function below ever regressed to
+  // calling createClient() unguarded, the real createBrowserClient("", "")
+  // would throw synchronously (verified: "@supabase/ssr: Your project's URL
+  // and API key are required to create a Supabase client!") and this test
+  // would fail loudly instead of silently passing.
+  const scope = { workspaceId: "00000000-0000-4000-8000-000000000001", shopSlug: "desert-ev" };
+
+  it("fetchWorkspaceGuestLinks returns EMPTY_GUEST_LINKS without constructing a Supabase client", async () => {
+    await expect(fetchWorkspaceGuestLinks(scope)).resolves.toEqual(EMPTY_GUEST_LINKS);
+  });
+
+  it("fetchWorkspaceGuestKeyCounts returns an empty map without constructing a Supabase client", async () => {
+    const counts = await fetchWorkspaceGuestKeyCounts(scope);
+    expect(counts.size).toBe(0);
   });
 });

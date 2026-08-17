@@ -2,6 +2,15 @@ import { createClient } from "@/lib/supabase/client";
 import type { Guest } from "./types";
 import type { MergeGuestsResult } from "./guest-linking";
 
+// Same env-based check as OwnerTenantProvider.tsx / TenantConfigProvider.tsx /
+// lib/owner/use-owner-data.ts. Guest merge is only ever offered once both
+// sides of the pair resolve as durable guests via guest-roster.ts, which
+// already short-circuits in demo mode -- this guard is defense-in-depth so a
+// caller can never reach a raw Supabase-client-construction error here.
+const SUPABASE_CONFIGURED = Boolean(
+  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+);
+
 /**
  * Browser-side counterpart to lib/owner/guest-linking.ts's mergeGuests()
  * (Phase 7 merge tool's apply half, T11).
@@ -59,6 +68,7 @@ export async function mergeGuestsViaRpc(
   sourceGuestId: string,
   targetGuestId: string,
 ): Promise<MergeGuestsResult> {
+  if (!SUPABASE_CONFIGURED) throw new Error("Guest merge isn't available in this workspace.");
   const { data, error } = await createClient().rpc("merge_onlyevs_guests", {
     p_workspace_id: scope.workspaceId,
     p_source_guest_id: sourceGuestId,

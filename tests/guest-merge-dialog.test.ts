@@ -142,4 +142,14 @@ describe("guest rollup stats gate", () => {
   it("computeGuestRollup on no trips returns zero, not NaN", () => {
     expect(computeGuestRollup([])).toEqual({ tripCount: 0, totalMiles: 0 });
   });
+
+  it("computeGuestRollup excludes an odometer-regression trip's miles rather than going negative", () => {
+    const trips = [
+      trip("t1", "d1", 100, 250), // 150 mi, counts
+      trip("t2", "d1", 500, 400), // end < start (bad manual entry) — data-error, excluded
+    ];
+    const rollup = computeGuestRollup(trips);
+    expect(rollup.tripCount).toBe(2);
+    expect(rollup.totalMiles).toBe(150);
+  });
 });

@@ -6,9 +6,11 @@ const fetchVehicleLocationReading = vi.fn();
 const getConfig = vi.fn();
 const resolveRegionBase = vi.fn();
 const unseal = vi.fn();
+const isOwnerAuthConfigured = vi.fn(() => true);
 
 vi.mock("@/lib/supabase/server", () => ({ createClient }));
 vi.mock("@/lib/tesla-server", () => ({ fetchVehicleLocationReading, getConfig, resolveRegionBase, unseal }));
+vi.mock("@/lib/owner-auth", () => ({ isOwnerAuthConfigured }));
 
 const { GET } = await import("@/app/api/owner/vehicles/[id]/locate-setup/route");
 
@@ -47,6 +49,7 @@ describe("GET /api/owner/vehicles/[id]/locate-setup", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    isOwnerAuthConfigured.mockReturnValue(true);
     writes = [];
     getConfig.mockReturnValue({
       sessionSecret: "a-session-secret-that-is-at-least-32-bytes-long",
@@ -55,6 +58,15 @@ describe("GET /api/owner/vehicles/[id]/locate-setup", () => {
     createClient.mockResolvedValue(
       makeSupabase({ id: vehicleId, vin: "5YJ3E1EA0PF000001" }, writes),
     );
+  });
+
+  it("rejects unauthenticated requests", async () => {
+    createClient.mockResolvedValue({
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) },
+    });
+    const response = await GET(request(), context);
+    expect(response.status).toBe(401);
+    expect(fetchVehicleLocationReading).not.toHaveBeenCalled();
   });
 
   it("returns vehicle_not_found for an unknown vehicle without reading Tesla", async () => {
@@ -151,5 +163,14 @@ describe("GET /api/owner/vehicles/[id]/locate-setup", () => {
     expect(response.status).not.toBe(500);
     await expect(response.json()).resolves.toEqual({ state: "read_failed" });
     expect(writes).toEqual([]);
+  });
+
+  it("reports reconnect_required and never constructs a Supabase client when owner auth is unconfigured (demo mode)", async () => {
+    isOwnerAuthConfigured.mockReturnValue(false);
+    const response = await GET(request("sealed-session"), context);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ state: "reconnect_required" });
+    expect(createClient).not.toHaveBeenCalled();
+    expect(fetchVehicleLocationReading).not.toHaveBeenCalled();
   });
 });
