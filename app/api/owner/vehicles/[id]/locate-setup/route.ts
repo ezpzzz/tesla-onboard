@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isOwnerAuthConfigured } from "@/lib/owner-auth";
 import type { TeslaProfile } from "@/lib/tesla";
+import { LOCATE_SETUP_COOLDOWN_MS } from "@/lib/owner/telemetry-policy";
 import {
   fetchVehicleLocationReading,
   getConfig,
@@ -13,6 +14,21 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Per-vehicle cooldown for the live, billable, potentially vehicle-waking
+ * Tesla `vehicle_data` read below, gated only by owner auth. Module-scope
+ * in-memory Map is fine for a single Next server instance; a multi-instance
+ * deployment would need a shared store (e.g. Redis) to enforce this
+ * cross-instance -- acceptable at current scale (single deployment).
+ * Exported for tests to reset between cases.
+ */
+export const lastLocateSetupAttemptAt = new Map<string, number>();
+
+function isRateLimited(vehicleId: string, now: number): boolean {
+  const last = lastLocateSetupAttemptAt.get(vehicleId);
+  return last !== undefined && now - last < LOCATE_SETUP_COOLDOWN_MS;
+}
 
 function reply(body: unknown, status = 200) {
   const response = NextResponse.json(body, {
@@ -101,6 +117,12 @@ export async function GET(
   if (!isTransientFleetSession(session) || session.expiresAt <= Date.now()) {
     return response({ state: "reconnect_required" });
   }
+
+  const now = Date.now();
+  if (isRateLimited(vehicle.id, now)) {
+    return response({ state: "rate_limited" }, 429);
+  }
+  lastLocateSetupAttemptAt.set(vehicle.id, now);
 
   try {
     const base = await resolveRegionBase(config.audience, session.accessToken);

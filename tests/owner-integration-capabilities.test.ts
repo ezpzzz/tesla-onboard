@@ -115,6 +115,23 @@ describe("owner integration capabilities", () => {
     });
   });
 
+  it("defaults to mock Tesla import in dev when NEXT_PUBLIC_TESLA_AUTH_MODE is unset, matching lib/tesla.ts's AUTH_MODE default", () => {
+    // Regression for the owner-route-matrix e2e artifact: an external dev
+    // server that never sets NEXT_PUBLIC_TESLA_AUTH_MODE still runs the
+    // guest flow against mock Tesla per lib/tesla.ts's AUTH_MODE (mock
+    // unless explicitly "live" or NODE_ENV === "production"), so the owner
+    // dashboard's "Import Tesla fleet" link must stay available too.
+    const capabilities = deriveOwnerIntegrationCapabilities({
+      NODE_ENV: "development",
+      NEXT_PUBLIC_ONLYEVS_OPERATIONS_ENABLED: "false",
+    });
+
+    expect(capabilities.tesla).toEqual({
+      configured: true,
+      connectionMode: "fleet_import",
+    });
+  });
+
   it("requires an explicit 32-byte OAuth state secret when no Tesla session secret exists", () => {
     const googleEnv = {
       NEXT_PUBLIC_ONLYEVS_OPERATIONS_ENABLED: "false",

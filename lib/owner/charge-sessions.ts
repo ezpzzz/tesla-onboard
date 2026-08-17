@@ -20,6 +20,15 @@ import { CHARGE_SESSION_GAP_MS } from "./telemetry-policy";
  * read time — applyManualChargeCostOverrides is applied last, after invoice
  * reconciliation, so the effective precedence is manual > invoice > rate.
  *
+ * A gap-affected ac_home session (its kWh estimate spans a >=30-min
+ * telemetry gap, so it may silently be two real sessions with driving
+ * between them — see segmentChargeSessions) never gets an automatic
+ * rate-derived cost: reconcileHomeRateCost refuses to price it, leaving
+ * costUsd/costProvenance null (the existing kWh-only render state). Invoice
+ * reconciliation and manual overrides are unaffected by gapAffected and
+ * still apply on top with the usual manual > invoice > rate precedence —
+ * only the rate step itself declines to guess at a gap-spanning estimate.
+ *
  * DC-fast vs AC classification: Phase 1's ingested history schema carries
  * only battery_pct / estimated_range_mi / odometer_mi / charging_state /
  * locked (baseline fields — no charge-power or site-type signal), so there
@@ -186,12 +195,17 @@ export interface HomeRateCostInput {
 /** Prices a home/AC session at kWh x the configured rate (costProvenance:
  * 'rate'). Returns the session unchanged (cost fields left null) when no
  * rate is configured, when the session isn't ac_home (DC-fast pricing only
- * ever comes from a reconciled invoice, never a guessed rate), or when the
- * session's kWh itself is unknown (isChargeSessionKwhUnknown — no battery
- * capacity on file, so there is nothing real to multiply by the rate). */
+ * ever comes from a reconciled invoice, never a guessed rate), when the
+ * session is gapAffected (its kWh estimate spans a >=30-min telemetry gap
+ * and may be two real sessions merged with driving between — pricing that
+ * as one clean session would be a guess dressed up as a real number), or
+ * when the session's kWh itself is unknown (isChargeSessionKwhUnknown — no
+ * battery capacity on file, so there is nothing real to multiply by the
+ * rate). */
 export function reconcileHomeRateCost(input: HomeRateCostInput): DerivedChargeSession {
   const { session, ratePerKwh } = input;
   if (session.kind !== "ac_home" || ratePerKwh === null || ratePerKwh <= 0) return session;
+  if (session.gapAffected) return session;
   if (isChargeSessionKwhUnknown(session)) return session;
   return { ...session, costUsd: session.kWhAdded * ratePerKwh, costProvenance: "rate" };
 }
@@ -217,12 +231,52 @@ function windowsOverlap(aStart: number, aEnd: number, bStart: number, bEnd: numb
   return aStart <= bEnd && bStart <= aEnd;
 }
 
+/** Overlap duration (ms) between an invoice window and a session window, or
+ * -1 when they don't overlap at all (distinct from a real 0ms boundary-touch
+ * overlap, which windowsOverlap counts as overlapping). Used only to rank
+ * candidate sessions by match quality — never as a cost/kWh value. */
+function overlapDurationMs(session: DerivedChargeSession, invoice: ChargingInvoice): number {
+  if (session.vehicleId !== invoice.vehicleId) return -1;
+  if (!windowsOverlap(session.startedAt, session.endedAt, invoice.startedAtMs, invoice.endedAtMs)) return -1;
+  return Math.min(session.endedAt, invoice.endedAtMs) - Math.max(session.startedAt, invoice.startedAtMs);
+}
+
+/** Index of the session (same vehicle) with the greatest window overlap
+ * against this invoice, or -1 when no session overlaps it at all. Ties break
+ * toward the earlier session index, so matching stays deterministic
+ * regardless of invoice processing order. */
+function bestOverlappingSessionIndex(
+  sessions: DerivedChargeSession[],
+  invoice: ChargingInvoice,
+): number {
+  let bestIndex = -1;
+  let bestOverlapMs = -1;
+  sessions.forEach((session, index) => {
+    const overlapMs = overlapDurationMs(session, invoice);
+    if (overlapMs > bestOverlapMs) {
+      bestOverlapMs = overlapMs;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
 /** Reconciles synced Tesla charging-history invoices to derived sessions by
- * vehicle + time-window overlap (costProvenance: 'invoice'); a match also
- * promotes the session's kind to 'dc_fast' — see the module doc comment for
- * why the invoice, not the telemetry stream, is the DC/AC classifier.
+ * best window-overlap quality, not first-match (costProvenance: 'invoice');
+ * a match also promotes the session's kind to 'dc_fast' — see the module doc
+ * comment for why the invoice, not the telemetry stream, is the DC/AC
+ * classifier. Each invoice is independently assigned to whichever session it
+ * overlaps most (bestOverlappingSessionIndex) — when two invoices land on
+ * the same session (the real case: two Supercharger stops that the
+ * telemetry stream segmented into one session, e.g. across a brief
+ * charging-state gap) their kWh/cost are SUMMED onto it rather than the
+ * second invoice being dropped or displacing the first. An invoice that
+ * overlaps no session at all lands in unmatchedInvoices, attached to the
+ * vehicle only, never fabricated onto a session.
  * Test matrix per the plan: matched, unmatched-invoice, partial-overlap,
- * duplicate-invoice idempotency (by providerInvoiceId), invoice-outside-trip. */
+ * duplicate-invoice idempotency (by providerInvoiceId), invoice-outside-trip,
+ * two invoices merged onto one session (summed), best-overlap beats
+ * first-in-list, non-overlapping invoice stays unmatched. */
 export function reconcileChargingInvoices(
   sessions: DerivedChargeSession[],
   invoices: ChargingInvoice[],
@@ -234,30 +288,31 @@ export function reconcileChargingInvoices(
     return true;
   });
 
-  const nextSessions = [...sessions];
-  const matchedSessionIndexes = new Set<number>();
   const unmatchedInvoices: ChargingInvoice[] = [];
+  const invoicesBySessionIndex = new Map<number, ChargingInvoice[]>();
 
   for (const invoice of dedupedInvoices) {
-    const matchIndex = nextSessions.findIndex((session, index) => (
-      !matchedSessionIndexes.has(index) &&
-      session.vehicleId === invoice.vehicleId &&
-      windowsOverlap(session.startedAt, session.endedAt, invoice.startedAtMs, invoice.endedAtMs)
-    ));
-    if (matchIndex === -1) {
+    const bestIndex = bestOverlappingSessionIndex(sessions, invoice);
+    if (bestIndex === -1) {
       unmatchedInvoices.push(invoice);
       continue;
     }
-    matchedSessionIndexes.add(matchIndex);
-    const session = nextSessions[matchIndex];
-    nextSessions[matchIndex] = {
-      ...session,
-      kind: "dc_fast",
-      kWhAdded: invoice.kWhAdded,
-      costUsd: invoice.costUsd,
-      costProvenance: "invoice",
-    };
+    const bucket = invoicesBySessionIndex.get(bestIndex);
+    if (bucket) bucket.push(invoice);
+    else invoicesBySessionIndex.set(bestIndex, [invoice]);
   }
+
+  const nextSessions = sessions.map((session, index) => {
+    const matched = invoicesBySessionIndex.get(index);
+    if (!matched) return session;
+    return {
+      ...session,
+      kind: "dc_fast" as const,
+      kWhAdded: matched.reduce((sum, inv) => sum + inv.kWhAdded, 0),
+      costUsd: matched.reduce((sum, inv) => sum + inv.costUsd, 0),
+      costProvenance: "invoice" as const,
+    };
+  });
 
   return { sessions: nextSessions, unmatchedInvoices };
 }

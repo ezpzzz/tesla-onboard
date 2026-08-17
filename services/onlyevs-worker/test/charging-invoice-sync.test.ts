@@ -212,4 +212,89 @@ describe("syncChargingInvoices -- charging-invoice sync job (T10)", () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("dropped 1 charging invoice"));
     warnSpy.mockRestore();
   });
+
+  it("follows an explicit totalResults continuation signal across pages, upserting every distinct invoice", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "rt", expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        response: { totalResults: 3, data: [{ id: "p1-a", vin: "5YJ3E1EA7KF000001", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: 1, cost: 1 }] },
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        response: { totalResults: 3, data: [{ id: "p2-a", vin: "5YJ3E1EA7KF000001", chargeStartDateTime: "2026-08-15T11:00:00Z", energyAdded: 1, cost: 1 }] },
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        response: { totalResults: 3, data: [{ id: "p3-a", vin: "5YJ3E1EA7KF000001", chargeStartDateTime: "2026-08-15T12:00:00Z", energyAdded: 1, cost: 1 }] },
+      }));
+
+    await syncChargingInvoices(pool, { id: "int-1" });
+
+    const inserts = queries.filter((q) => q.sql.includes("insert into public.onlyevs_charging_invoices"));
+    expect(inserts.map((q) => q.params[2])).toEqual(["p1-a", "p2-a", "p3-a"]);
+    // Fetch count: 1 token refresh + 3 charging-history pages, and no more
+    // (totalResults caught up to rows seen after page 3, so the loop stops
+    // on its own rather than running out the hard cap).
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("enforces the hard per-vehicle page cap even if the continuation signal keeps claiming there's more", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "rt", expires_in: 3600 }));
+    // Every page returns a distinct new invoice id AND an inflated
+    // totalResults, so neither the dedup guard nor the totalResults signal
+    // ever naturally stops the loop -- only the hard cap should.
+    for (let i = 0; i < 20; i++) {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, {
+        response: { totalResults: 999, data: [{ id: `page-${i}`, vin: "5YJ3E1EA7KF000001", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: 1, cost: 1 }] },
+      }));
+    }
+
+    await syncChargingInvoices(pool, { id: "int-1" });
+
+    const inserts = queries.filter((q) => q.sql.includes("insert into public.onlyevs_charging_invoices"));
+    // 1 token refresh + exactly 10 charging-history pages (the hard cap),
+    // never the full 20 the mocked responses would otherwise allow.
+    expect(fetchMock).toHaveBeenCalledTimes(11);
+    expect(inserts).toHaveLength(10);
+  });
+
+  it("stops pagination as soon as a page contributes zero NEW invoice ids (per-page dedup guard), even under the hard cap", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "rt", expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        response: { totalResults: 999, data: [{ id: "echo-a", vin: "5YJ3E1EA7KF000001", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: 1, cost: 1 }] },
+      }))
+      // Echo-style page 2: same totalResults signal claiming more, but the
+      // same invoice id already seen on page 1 -- zero NEW ids this page.
+      .mockResolvedValueOnce(jsonResponse(200, {
+        response: { totalResults: 999, data: [{ id: "echo-a", vin: "5YJ3E1EA7KF000001", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: 1, cost: 1 }] },
+      }));
+
+    await syncChargingInvoices(pool, { id: "int-1" });
+
+    // 1 token refresh + exactly 2 charging-history pages -- the dedup guard
+    // stops it well short of the 10-page hard cap.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const inserts = queries.filter((q) => q.sql.includes("insert into public.onlyevs_charging_invoices"));
+    expect(inserts).toHaveLength(2); // both upserts fire (idempotent on provider_invoice_id); no third page fetched
+  });
+
+  it("logs the page count fetched per vehicle", async () => {
+    const { pool } = makeFakePool(baseHandler({
+      vehicles: () => ({ rows: [{ id: "veh-1", vin: "5YJ3E1EA7KF000001" }] }),
+    }));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "rt", expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        response: [{ id: "inv-1", vin: "5YJ3E1EA7KF000001", chargeStartDateTime: "2026-08-15T10:00:00Z", energyAdded: 1, cost: 1 }],
+      }));
+
+    await syncChargingInvoices(pool, { id: "int-1" });
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("veh-1"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("1 page(s)"));
+    logSpy.mockRestore();
+  });
 });

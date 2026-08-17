@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Pool, PoolClient } from "pg";
 import { BOOKEND_END_TRACKING_GRACE_MS, HISTORY_RETENTION_MS } from "@/lib/owner/telemetry-policy";
 import type { TelemetryUpdate } from "@/lib/owner/telemetry-ingest";
@@ -29,6 +29,8 @@ const {
   ingestTelemetry,
   numberOrNull,
   sweepHistoryRetention,
+  sweepLocationPointRetention,
+  sweepRetention,
   sweepTripBookends,
 } = await import("@/services/onlyevs-worker/index");
 const { segmentChargeSessions } = await import("@/lib/owner/charge-sessions");
@@ -411,11 +413,100 @@ describe("sweepTripBookends -- trip-window sweep trigger (eng-review Issue 1A) +
   });
 });
 
-describe("sweepHistoryRetention -- 13-month retention sweep", () => {
-  it("deletes history rows past their delete_after", async () => {
-    const { pool, queries } = makeFakePool(() => undefined);
-    await sweepHistoryRetention(pool);
-    expect(findQuery(queries, "delete from public.onlyevs_vehicle_stats_history where delete_after <= now()")).toBeDefined();
+describe("sweepHistoryRetention -- 13-month retention sweep (Lane D: LIMIT-batched)", () => {
+  it("deletes history rows past their delete_after, LIMIT-batched", async () => {
+    const { pool, queries } = makeFakePool(() => ({ rows: [], rowCount: 3 }));
+    const deleted = await sweepHistoryRetention(pool);
+    const del = findQuery(queries, "delete from public.onlyevs_vehicle_stats_history");
+    expect(del).toBeDefined();
+    expect(del!.sql).toContain("delete_after <= now()");
+    expect(del!.sql).toContain("limit 5000");
+    expect(deleted).toBe(3);
+  });
+
+  it("loops in further batches until an under-batch-size page comes back, summing the deleted count", async () => {
+    let calls = 0;
+    const { pool, queries } = makeFakePool(() => {
+      calls += 1;
+      return { rows: [], rowCount: calls === 1 ? 5000 : 120 };
+    });
+    const deleted = await sweepHistoryRetention(pool);
+    expect(calls).toBe(2);
+    expect(deleted).toBe(5120);
+    expect(queries.filter((q) => q.sql.includes("onlyevs_vehicle_stats_history"))).toHaveLength(2);
+  });
+});
+
+describe("sweepLocationPointRetention -- 30-day location-point retention sweep (Lane D)", () => {
+  it("deletes location-point rows past their delete_after, LIMIT-batched", async () => {
+    const { pool, queries } = makeFakePool(() => ({ rows: [], rowCount: 7 }));
+    const deleted = await sweepLocationPointRetention(pool);
+    const del = findQuery(queries, "delete from private.onlyevs_vehicle_location_points");
+    expect(del).toBeDefined();
+    expect(del!.sql).toContain("delete_after <= now()");
+    expect(del!.sql).toContain("limit 5000");
+    expect(deleted).toBe(7);
+  });
+});
+
+describe("sweepRetention -- hourly-gated orchestrator over both retention tables (Lane D)", () => {
+  // sweepRetention's once-per-hour guard is deliberate module-scope state
+  // (see its comment in index.ts), so it persists across every test in this
+  // file/process, not just this describe block. Each test below pins an
+  // explicit system time via fake timers, at least a day past any time a
+  // previous test in this suite could plausibly have used, so the guard is
+  // reliably clear at the start of every test regardless of run order --
+  // and the one test that specifically exercises the guard advances time by
+  // only minutes for its second call, deliberately staying inside the
+  // window.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("runs both tables' sweeps and logs the deleted counts when the guard allows it", async () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const { pool, queries } = makeFakePool((sql) => {
+      if (sql.includes("onlyevs_vehicle_stats_history")) return { rows: [], rowCount: 2 };
+      if (sql.includes("onlyevs_vehicle_location_points")) return { rows: [], rowCount: 9 };
+      return undefined;
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await sweepRetention(pool);
+
+    expect(queries.some((q) => q.sql.includes("onlyevs_vehicle_stats_history"))).toBe(true);
+    expect(queries.some((q) => q.sql.includes("onlyevs_vehicle_location_points"))).toBe(true);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("2 onlyevs_vehicle_stats_history"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("9 onlyevs_vehicle_location_points"));
+    logSpy.mockRestore();
+  });
+
+  it("does not log when nothing was deleted", async () => {
+    vi.setSystemTime(new Date("2026-01-02T00:00:00Z"));
+    const { pool } = makeFakePool(() => ({ rows: [], rowCount: 0 }));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await sweepRetention(pool);
+
+    expect(logSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
+  it("skips a second sweep called immediately after the first (hourly guard), running neither table's delete again", async () => {
+    vi.setSystemTime(new Date("2026-01-03T00:00:00Z"));
+    const { pool, queries } = makeFakePool(() => ({ rows: [], rowCount: 1 }));
+
+    await sweepRetention(pool);
+    const queriesAfterFirst = queries.length;
+    expect(queriesAfterFirst).toBeGreaterThan(0); // sanity: the first call actually ran
+
+    vi.setSystemTime(new Date("2026-01-03T00:05:00Z")); // +5 min, well inside the 1h window
+    await sweepRetention(pool);
+
+    expect(queries.length).toBe(queriesAfterFirst);
   });
 });
 

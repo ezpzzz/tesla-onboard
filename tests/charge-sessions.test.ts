@@ -174,6 +174,13 @@ describe("reconcileHomeRateCost", () => {
     expect(priced.costUsd).toBeNull();
     expect(priced.costProvenance).toBeNull();
   });
+
+  it("never rate-prices a gap-affected ac_home session, even with a known kWh and a configured rate", () => {
+    const session = dcFast({ id: "s1", vehicleId: "veh-1", startedAt: T0, endedAt: T0 + MIN, kWhAdded: 20, gapAffected: true });
+    const priced = reconcileHomeRateCost({ session, ratePerKwh: 0.25 });
+    expect(priced.costUsd).toBeNull();
+    expect(priced.costProvenance).toBeNull();
+  });
 });
 
 describe("isChargeSessionKwhUnknown / formatSessionKwhLabel", () => {
@@ -236,6 +243,48 @@ describe("reconcileChargingInvoices", () => {
     const result = reconcileChargingInvoices(sessions, invoices);
     expect(result.sessions[0].tripId).toBeNull();
     expect(result.sessions[0].kind).toBe("dc_fast");
+  });
+
+  it("sums two invoices onto one session when both best-overlap the same (telemetry-merged) session", () => {
+    // A single ac_home-segmented session spans two real Supercharger stops
+    // (e.g. a brief charging-state gap under CHARGE_SESSION_GAP_MS kept them
+    // merged) — both invoices' best overlap is this one session.
+    const sessions = [dcFast({ id: "s1", vehicleId: "veh-1", startedAt: T0, endedAt: T0 + 60 * MIN })];
+    const invoices = [
+      invoice({ providerInvoiceId: "inv-1", startedAtMs: T0, endedAtMs: T0 + 20 * MIN, kWhAdded: 15, costUsd: 8 }),
+      invoice({ providerInvoiceId: "inv-2", startedAtMs: T0 + 40 * MIN, endedAtMs: T0 + 60 * MIN, kWhAdded: 12, costUsd: 6 }),
+    ];
+    const result = reconcileChargingInvoices(sessions, invoices);
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0]).toMatchObject({ kind: "dc_fast", kWhAdded: 27, costUsd: 14, costProvenance: "invoice" });
+    expect(result.unmatchedInvoices).toHaveLength(0);
+  });
+
+  it("matches an invoice to the session with the best overlap, even when a worse-overlapping session is earlier in the list", () => {
+    const sessions = [
+      // s1 (listed first) only brushes the invoice window; s2 (listed
+      // second) contains almost all of it — a first-match strategy would
+      // have wrongly picked s1.
+      dcFast({ id: "s1", vehicleId: "veh-1", startedAt: T0, endedAt: T0 + 5 * MIN }),
+      dcFast({ id: "s2", vehicleId: "veh-1", startedAt: T0 + 4 * MIN, endedAt: T0 + 30 * MIN }),
+    ];
+    const invoices = [invoice({ providerInvoiceId: "inv-1", startedAtMs: T0 + 3 * MIN, endedAtMs: T0 + 28 * MIN })];
+    const result = reconcileChargingInvoices(sessions, invoices);
+    expect(result.sessions[0].kind).toBe("ac_home");
+    expect(result.sessions[1]).toMatchObject({ kind: "dc_fast", kWhAdded: 30, costUsd: 15, costProvenance: "invoice" });
+    expect(result.unmatchedInvoices).toHaveLength(0);
+  });
+
+  it("keeps a truly non-overlapping invoice unmatched even when other invoices merge onto a session", () => {
+    const sessions = [dcFast({ id: "s1", vehicleId: "veh-1", startedAt: T0, endedAt: T0 + 30 * MIN })];
+    const invoices = [
+      invoice({ providerInvoiceId: "inv-1", startedAtMs: T0, endedAtMs: T0 + 10 * MIN, kWhAdded: 10, costUsd: 5 }),
+      invoice({ providerInvoiceId: "inv-2", startedAtMs: T0 + 20 * MIN, endedAtMs: T0 + 25 * MIN, kWhAdded: 8, costUsd: 4 }),
+      invoice({ providerInvoiceId: "inv-3", startedAtMs: T0 + 200 * MIN, endedAtMs: T0 + 210 * MIN, kWhAdded: 99, costUsd: 99 }),
+    ];
+    const result = reconcileChargingInvoices(sessions, invoices);
+    expect(result.sessions[0]).toMatchObject({ kind: "dc_fast", kWhAdded: 18, costUsd: 9, costProvenance: "invoice" });
+    expect(result.unmatchedInvoices).toEqual([invoices[2]]);
   });
 });
 

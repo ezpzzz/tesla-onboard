@@ -53,4 +53,13 @@ describe("fetchVehicleStatsHistoryBuckets", () => {
     const series = await fetchVehicleStatsHistoryBuckets(SCOPE, "veh-1", since, until);
     expect(series).toEqual({ vehicleId: "veh-1", since, until, buckets: [] });
   });
+
+  it("throws for an RPC error that isn't the pre-migration missing-schema case", async () => {
+    handler = () => ({ data: null, error: { message: "permission denied for function", code: "42501" } });
+    const since = Date.now() - 1000;
+    const until = Date.now();
+    await expect(fetchVehicleStatsHistoryBuckets(SCOPE, "veh-1", since, until)).rejects.toThrow(
+      "permission denied for function",
+    );
+  });
 });

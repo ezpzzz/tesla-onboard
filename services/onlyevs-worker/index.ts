@@ -33,7 +33,11 @@ import {
 } from "@/lib/owner/bookends";
 import type { BookendEdge } from "@/lib/owner/access-types";
 import { segmentChargeSessions } from "@/lib/owner/charge-sessions";
-import { parseTeslaChargingHistory } from "@/lib/owner/tesla-charging-client";
+import {
+  chargingHistoryHasMorePages,
+  chargingHistoryRawRowCount,
+  parseTeslaChargingHistory,
+} from "@/lib/owner/tesla-charging-client";
 import {
   normalizeGoogleCalendarEvent,
   type CalendarCandidateInput,
@@ -1369,15 +1373,35 @@ async function chargingSyncContext(client: PoolClient, integrationId: string): P
  * lib/owner/telemetry-policy.ts (imported above) per the plan's
  * cross-cutting no-inline-threshold rule (Issue 2, 2A). */
 
+/** Assumed page size for `GET /api/1/dx/charging/history` requests. Same
+ * "least-documented surface" caveat as the field-name parsing in
+ * tesla-charging-client.ts -- UNVERIFIED against a real response (gate 5,
+ * docs/rollouts/2026-08-17-vehicle-telemetry-go-no-go.md). Only ever used
+ * to build the request and as chargingHistoryHasMorePages' weakest
+ * ("raw row count reached what we asked for") signal, never assumed
+ * correct on its own. */
+const CHARGING_HISTORY_PAGE_SIZE = 50;
+
+/** Hard ceiling on charging-history pages fetched per vehicle per sync
+ * attempt. Deliberately hardcoded here rather than in
+ * lib/owner/telemetry-policy.ts, which is owned by another lane this
+ * session -- see the file's cross-cutting no-inline-threshold rule above
+ * for why it would otherwise live there. The per-page zero-new-invoice-ids
+ * dedup guard below is what actually terminates a normal sync; this cap
+ * only protects against a misbehaving/echo-style endpoint that keeps
+ * emitting a "there's more" signal against already-seen rows forever. */
+const MAX_CHARGING_HISTORY_PAGES_PER_VEHICLE = 10;
+
 /**
  * Charging-invoice sync (T10 worker half, same claim-queue pattern as
  * processTelemetry/processCalendar). Per integration: refresh the Tesla
  * token, pull each active vehicle's charging-history invoices for the
- * lookback window, and upsert them into onlyevs_charging_invoices
- * (idempotent on (workspace_id, provider_invoice_id) — a resync never
- * double-counts). Reconciliation to derived sessions happens at read time
- * in lib/owner/charge-session-repository.ts, never here — this job's only
- * job is durably storing what Tesla returned.
+ * lookback window (paginated -- see the per-vehicle page loop below), and
+ * upsert them into onlyevs_charging_invoices (idempotent on (workspace_id,
+ * provider_invoice_id) — a resync never double-counts). Reconciliation to
+ * derived sessions happens at read time in
+ * lib/owner/charge-session-repository.ts, never here — this job's only job
+ * is durably storing what Tesla returned.
  *
  * A single vehicle's fetch failing (e.g. a car this integration doesn't
  * actually have a charging-history record for) never aborts the rest of
@@ -1387,7 +1411,13 @@ async function chargingSyncContext(client: PoolClient, integrationId: string): P
  * by URL, but a present-and-mismatched invoice.vin is also dropped and
  * counted rather than trusted on request-URL scoping alone (see the VIN
  * check inside the loop below) -- a dropped-count > 0 logs a single
- * console.warn per sync attempt. Takes `pool` as a parameter (unlike
+ * console.warn per sync attempt. Pagination is deliberately tolerant
+ * (chargingHistoryHasMorePages, lib/owner/tesla-charging-client.ts) and
+ * doubly bounded per vehicle: a hard MAX_CHARGING_HISTORY_PAGES_PER_VEHICLE
+ * cap, and a per-page dedup guard that stops as soon as a page contributes
+ * zero new invoice ids -- so an under- or over-eager continuation signal
+ * can cost at most a few extra harmless (idempotent) fetches, never an
+ * unbounded historical backfill or an infinite loop. Takes `pool` as a parameter (unlike
  * processGrant/processTelemetry/processCalendar, which close over the
  * module-scope pool) so it can be contract-tested with a fake pool, the
  * same convention sweepTripBookends/ingestTelemetry already use.
@@ -1423,58 +1453,95 @@ export async function syncChargingInvoices(pool: Pool, row: ChargingSyncRow) {
     const sinceMs = Date.now() - CHARGING_SYNC_LOOKBACK_MS;
     let vinMismatchCount = 0;
     for (const vehicle of vehicles.rows) {
-      const url = new URL("api/1/dx/charging/history", `${context.region_base_url.replace(/\/$/, "")}/`);
-      url.searchParams.set("vin", vehicle.vin);
-      url.searchParams.set("startTime", new Date(sinceMs).toISOString());
-      url.searchParams.set("endTime", new Date().toISOString());
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" },
-        cache: "no-store",
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          const error = new Error(`tesla_charging_history_${response.status}`);
-          (error as Error & { reauth?: boolean }).reauth = true;
-          throw error;
+      // Per-vehicle, per-sync dedup set (Lane D pagination hardening): not
+      // a cross-sync cache (the (workspace_id, provider_invoice_id) upsert
+      // already makes cross-sync dedup idempotent) -- this exists purely to
+      // detect a page that contributed nothing new, which is this loop's
+      // stop condition alongside chargingHistoryHasMorePages below.
+      const seenInvoiceIdsThisVehicle = new Set<string>();
+      let pageCount = 0;
+      let cumulativeRawRowCount = 0;
+      for (let pageNo = 1; pageNo <= MAX_CHARGING_HISTORY_PAGES_PER_VEHICLE; pageNo++) {
+        const url = new URL("api/1/dx/charging/history", `${context.region_base_url.replace(/\/$/, "")}/`);
+        url.searchParams.set("vin", vehicle.vin);
+        url.searchParams.set("startTime", new Date(sinceMs).toISOString());
+        url.searchParams.set("endTime", new Date().toISOString());
+        // pageNo/pageSize param names are an assumption -- see
+        // CHARGING_HISTORY_PAGE_SIZE's comment above; unverified until gate
+        // 5. Harmless if Tesla ignores them (falls back to a single
+        // effective page, same as before this pagination hardening).
+        url.searchParams.set("pageNo", String(pageNo));
+        url.searchParams.set("pageSize", String(CHARGING_HISTORY_PAGE_SIZE));
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" },
+          cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            const error = new Error(`tesla_charging_history_${response.status}`);
+            (error as Error & { reauth?: boolean }).reauth = true;
+            throw error;
+          }
+          // Non-fatal per vehicle (e.g. no charging-history record for this
+          // car): stop paginating this vehicle, keep syncing the rest --
+          // but a systematic 429/5xx must still be visible, not a silent
+          // `break`, so it's logged (vehicle id + status + page only, never
+          // the token or the query-string-bearing URL).
+          console.warn(
+            `syncChargingInvoices: charging-history fetch failed for vehicle ${vehicle.id} (integration ${row.id}, status ${response.status}, page ${pageNo})`,
+          );
+          break;
         }
-        // Non-fatal per vehicle (e.g. no charging-history record for this
-        // car): skip it this cycle, keep syncing the rest -- but a
-        // systematic 429/5xx for one vehicle must still be visible, not a
-        // silent `continue`, so it's logged (vehicle id + status only, never
-        // the token or the query-string-bearing URL).
-        console.warn(
-          `syncChargingInvoices: charging-history fetch failed for vehicle ${vehicle.id} (integration ${row.id}, status ${response.status})`,
-        );
-        continue;
+        pageCount = pageNo;
+        const body = await response.json().catch(() => null);
+        cumulativeRawRowCount += chargingHistoryRawRowCount(body);
+        const invoices = parseTeslaChargingHistory(body);
+        let newInvoiceCount = 0;
+        for (const invoice of invoices) {
+          // Requested per-VIN (url.searchParams.set("vin", vehicle.vin)
+          // above), but charging/history is "the least-documented surface in
+          // the design" (tesla-charging-client.ts's header comment) --
+          // defend against it ever returning a row for a different vehicle
+          // rather than trusting request-URL scoping alone. A present-but-
+          // mismatched VIN is dropped and counted; an absent/null VIN
+          // (structurally unreachable today -- parseTeslaChargingInvoice
+          // already requires one -- but defended here in case that parser
+          // ever loosens) keeps today's request-scoped attribution.
+          if (invoice.vin && invoice.vin !== vehicle.vin) {
+            vinMismatchCount += 1;
+            continue;
+          }
+          if (!seenInvoiceIdsThisVehicle.has(invoice.providerInvoiceId)) {
+            newInvoiceCount += 1;
+            seenInvoiceIdsThisVehicle.add(invoice.providerInvoiceId);
+          }
+          await client.query(`
+            insert into public.onlyevs_charging_invoices
+              (workspace_id, vehicle_id, provider_invoice_id, started_at, ended_at, kwh_added, cost_usd, synced_at)
+            values ($1, $2, $3, $4, $5, $6, $7, now())
+            on conflict (workspace_id, provider_invoice_id) do update set
+              started_at = excluded.started_at, ended_at = excluded.ended_at,
+              kwh_added = excluded.kwh_added, cost_usd = excluded.cost_usd, synced_at = now()
+          `, [
+            context.workspace_id, vehicle.id, invoice.providerInvoiceId,
+            new Date(invoice.startedAtMs), new Date(invoice.endedAtMs), invoice.kWhAdded, invoice.costUsd,
+          ]);
+        }
+        // Per-page dedup guard: a page that contributed zero NEW invoice
+        // ids means either we've reached the real end of this vehicle's
+        // history or the endpoint is an echo-style API returning the same
+        // content regardless of the page parameter -- either way,
+        // continuing would only ever re-upsert rows already synced this
+        // pass (harmless -- the insert is idempotent on provider_invoice_id
+        // -- but pointless), so stop rather than run out the hard cap.
+        if (newInvoiceCount === 0) break;
+        if (!chargingHistoryHasMorePages(body, CHARGING_HISTORY_PAGE_SIZE, cumulativeRawRowCount)) break;
       }
-      const body = await response.json().catch(() => null);
-      const invoices = parseTeslaChargingHistory(body);
-      for (const invoice of invoices) {
-        // Requested per-VIN (url.searchParams.set("vin", vehicle.vin)
-        // above), but charging/history is "the least-documented surface in
-        // the design" (tesla-charging-client.ts's header comment) --
-        // defend against it ever returning a row for a different vehicle
-        // rather than trusting request-URL scoping alone. A present-but-
-        // mismatched VIN is dropped and counted; an absent/null VIN
-        // (structurally unreachable today -- parseTeslaChargingInvoice
-        // already requires one -- but defended here in case that parser
-        // ever loosens) keeps today's request-scoped attribution.
-        if (invoice.vin && invoice.vin !== vehicle.vin) {
-          vinMismatchCount += 1;
-          continue;
-        }
-        await client.query(`
-          insert into public.onlyevs_charging_invoices
-            (workspace_id, vehicle_id, provider_invoice_id, started_at, ended_at, kwh_added, cost_usd, synced_at)
-          values ($1, $2, $3, $4, $5, $6, $7, now())
-          on conflict (workspace_id, provider_invoice_id) do update set
-            started_at = excluded.started_at, ended_at = excluded.ended_at,
-            kwh_added = excluded.kwh_added, cost_usd = excluded.cost_usd, synced_at = now()
-        `, [
-          context.workspace_id, vehicle.id, invoice.providerInvoiceId,
-          new Date(invoice.startedAtMs), new Date(invoice.endedAtMs), invoice.kWhAdded, invoice.costUsd,
-        ]);
+      if (pageCount > 0) {
+        console.log(
+          `syncChargingInvoices: vehicle ${vehicle.id} (integration ${row.id}) fetched ${pageCount} page(s) of charging history`,
+        );
       }
     }
     if (vinMismatchCount > 0) {
@@ -1850,13 +1917,90 @@ async function startTelemetryConsumer(): Promise<Consumer | null> {
   return consumer;
 }
 
+/** Rows deleted per DELETE statement while enforcing retention (Lane D
+ * retention enforcement). LIMIT-batched via a self-join-on-ctid subquery
+ * (Postgres DELETE has no direct LIMIT clause) so a large backlog -- e.g.
+ * after this sweep was dormant, or a first run against a long-lived
+ * pre-existing table -- can't hold one long-running delete lock; each batch
+ * is its own statement/transaction. */
+const RETENTION_DELETE_BATCH_SIZE = 5_000;
+
+/** Runs `delete from <table> where <whereClause>` in
+ * RETENTION_DELETE_BATCH_SIZE-row batches until a batch comes back under
+ * the batch size (i.e. nothing left to delete), returning the total row
+ * count deleted. `table`/`whereClause` are always internal constants below,
+ * never request-derived, so string interpolation here carries no injection
+ * risk. */
+async function batchedRetentionDelete(pool: Pool, table: string, whereClause: string): Promise<number> {
+  let total = 0;
+  for (;;) {
+    const result = await pool.query(
+      `delete from ${table} where ctid in (select ctid from ${table} where ${whereClause} limit ${RETENTION_DELETE_BATCH_SIZE})`,
+    );
+    const count = result.rowCount ?? 0;
+    total += count;
+    if (count < RETENTION_DELETE_BATCH_SIZE) break;
+  }
+  return total;
+}
+
 /** 13-month history retention sweep (Phase 1), same pattern as the
- * location-points sweep in runOnce(); delete_after is set once per row at
- * ingest time from HISTORY_RETENTION_MS. Exported standalone (rather than
- * inlined in runOnce()) so it's independently contract-testable with a
- * fake pool. */
-export async function sweepHistoryRetention(pool: Pool): Promise<void> {
-  await pool.query("delete from public.onlyevs_vehicle_stats_history where delete_after <= now()");
+ * location-points sweep below; delete_after is set once per row at ingest
+ * time from HISTORY_RETENTION_MS. Exported standalone (rather than inlined
+ * in sweepRetention) so it's independently contract-testable with a fake
+ * pool, matching how it was already tested before the batching in this Lane
+ * D pass. Returns the row count deleted. */
+export async function sweepHistoryRetention(pool: Pool): Promise<number> {
+  return batchedRetentionDelete(pool, "public.onlyevs_vehicle_stats_history", "delete_after <= now()");
+}
+
+/** 30-day location-point retention sweep -- delete_after is set once per
+ * row at ingest time from LOCATION_RETENTION_MS (see ingestLocation's
+ * insert above), telemetry-policy.ts's own name for the design rule this
+ * table exists under: "coarse, encrypted, trip-scoped, retention-deleted"
+ * (CLAUDE.md's durable-integrations-and-telemetry section). Exported
+ * standalone for the same independent-contract-test reason as
+ * sweepHistoryRetention. Returns the row count deleted (counts only --
+ * never coordinates, matching that same design rule). */
+export async function sweepLocationPointRetention(pool: Pool): Promise<number> {
+  return batchedRetentionDelete(pool, "private.onlyevs_vehicle_location_points", "delete_after <= now()");
+}
+
+/** Module-scope guard so sweepRetention only actually runs once per
+ * RETENTION_SWEEP_INTERVAL_MS of wall-clock time, not on every 15-second
+ * runOnce() tick -- both swept tables are gated purely by wall-clock age
+ * (delete_after), so a fresher pass than that buys nothing: nothing about
+ * running again 15 seconds later makes an already-expired row more
+ * expired. Reset to 0 on worker restart, which just means the first
+ * runOnce() after a restart always sweeps -- harmless, since the batched
+ * delete is idempotent and cheap when there's nothing overdue. */
+let lastRetentionSweepAt = 0;
+const RETENTION_SWEEP_INTERVAL_MS = 60 * 60 * 1_000;
+
+/**
+ * Retention enforcement (Lane D go-live gate, T-retention): the two tables
+ * that carry a documented retention promise -- public.onlyevs_vehicle_
+ * stats_history (13 months, HISTORY_RETENTION_MS) and private.onlyevs_
+ * vehicle_location_points (30 days, LOCATION_RETENTION_MS) -- previously
+ * had delete_after set at write time but nothing ever enforcing it. This
+ * runs at most hourly (lastRetentionSweepAt guard above), batches each
+ * table's delete (RETENTION_DELETE_BATCH_SIZE/statement) so it stays cheap
+ * even against a large backlog, and logs the deleted counts (never the
+ * underlying rows) once per sweep that actually deleted something.
+ */
+export async function sweepRetention(pool: Pool): Promise<void> {
+  if (Date.now() - lastRetentionSweepAt < RETENTION_SWEEP_INTERVAL_MS) return;
+  lastRetentionSweepAt = Date.now();
+
+  const [historyDeleted, locationDeleted] = await Promise.all([
+    sweepHistoryRetention(pool),
+    sweepLocationPointRetention(pool),
+  ]);
+  if (historyDeleted > 0 || locationDeleted > 0) {
+    console.log(
+      `sweepRetention: deleted ${historyDeleted} onlyevs_vehicle_stats_history row(s), ${locationDeleted} onlyevs_vehicle_location_points row(s)`,
+    );
+  }
 }
 
 /**
@@ -1906,8 +2050,7 @@ export async function advanceTripStatusesAndComposePackets(pool: Pool): Promise<
 async function runOnce() {
   await processEmailJobs(pool, workerId);
   await Promise.all([
-    pool.query("delete from private.onlyevs_vehicle_location_points where delete_after <= now()"),
-    sweepHistoryRetention(pool),
+    sweepRetention(pool),
     pool.query("select public.cleanup_onlyevs_expired_trip_link_secrets()"),
     pool.query(`update public.onlyevs_vehicle_stats_current
       set connectivity = 'stale', ingested_at = now()

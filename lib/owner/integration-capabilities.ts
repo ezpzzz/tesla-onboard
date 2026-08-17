@@ -45,6 +45,20 @@ function hasValidKeyring(value: string | undefined): boolean {
   }
 }
 
+/** Mirrors lib/tesla.ts's `AUTH_MODE` derivation exactly (mirrored, not
+ * imported, because that module fixes itself to `process.env` while this
+ * one takes an injectable `env` for testing): production always fails safe
+ * to live, and any non-"live" setting — including an unset
+ * NEXT_PUBLIC_TESLA_AUTH_MODE, not only a literal "mock" — defaults to mock
+ * outside production. A strict `=== "mock"` check here previously diverged
+ * from lib/tesla.ts on exactly that unset case, so an external dev server
+ * (var unset, NODE_ENV !== "production") ran the guest flow against mock
+ * Tesla per lib/tesla.ts while this module reported Tesla as unconfigured,
+ * hiding the owner dashboard's "Import Tesla fleet" link. */
+function teslaAuthModeIsMock(env: IntegrationEnvironment): boolean {
+  return env.NEXT_PUBLIC_TESLA_AUTH_MODE !== "live" && env.NODE_ENV !== "production";
+}
+
 /**
  * Produces the browser-safe connection contract from server configuration.
  * It intentionally reports capabilities, never credential values.
@@ -53,7 +67,7 @@ export function deriveOwnerIntegrationCapabilities(
   env: IntegrationEnvironment,
 ): OwnerIntegrationCapabilities {
   const operationsEnabled = env.NEXT_PUBLIC_ONLYEVS_OPERATIONS_ENABLED === "true";
-  const mockTesla = env.NEXT_PUBLIC_TESLA_AUTH_MODE === "mock" && env.NODE_ENV !== "production";
+  const mockTesla = teslaAuthModeIsMock(env);
   const teslaReadConfigured = mockTesla || (
     present(env.TESLA_CLIENT_ID)
     && present(env.TESLA_CLIENT_SECRET)

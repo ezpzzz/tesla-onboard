@@ -21,7 +21,15 @@
  * the sync job itself is safe to run in the meantime (it is a true no-op
  * until an integration re-consents the vehicle_charging_cmds scope, and an
  * unparseable response degrades to zero invoices synced, never a crash).
+ *
+ * Two Lane D hardening additions live here for the same "unverified shape"
+ * reason: `contentFingerprint`/the parser's providerInvoiceId fallback
+ * (stable dedup identity for a row with no provider key field at all) and
+ * `chargingHistoryHasMorePages` (tolerant pagination-continuation detection
+ * for the worker's page loop) — see each function's own comment.
  */
+
+import { createHash } from "node:crypto";
 
 export interface TeslaChargingHistoryInvoice {
   providerInvoiceId: string;
@@ -97,19 +105,61 @@ function firstNonNegativeNumber(row: Record<string, unknown>, keys: string[]): n
   return null;
 }
 
+/** Plain (sign-agnostic) numeric coercion, used only for pagination
+ * metadata (page/total counters) below -- unlike firstNonNegativeNumber,
+ * these are never a fabricable business value, so there's no negative-value
+ * honesty concern here, just "is this usable as a count at all". */
+function firstNumber(row: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = row[key];
+    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/** Deterministic fallback identity for a charging-history row that carries
+ * no provider-assigned key field at all (none of the id/sessionId/... names
+ * parseTeslaChargingInvoice already tries below) -- some accounts/regions
+ * have been reported to omit it entirely on this endpoint. Dropping every
+ * such row would make the sync job useless wherever this happens; minting a
+ * fresh random id per poll would insert a duplicate invoice every sync
+ * cycle instead. Hashing the fields that actually identify one real
+ * charging session (vehicle, start, end, energy, cost) means the same
+ * underlying session parsed on a later poll -- even reordered by pagination
+ * -- always produces the same fingerprint, so the existing
+ * (workspace_id, provider_invoice_id) upsert in syncChargingInvoices still
+ * dedups it correctly. This is only ever reached once every other required
+ * field (vin/startedAtMs/kWhAdded/costUsd, plus the resolved endedAtMs) is
+ * already known non-null -- a row missing any of *those* is dropped before
+ * this is called, same as before this fallback existed. */
+function contentFingerprint(
+  vin: string,
+  startedAtMs: number,
+  endedAtMs: number,
+  kWhAdded: number,
+  costUsd: number,
+): string {
+  const digest = createHash("sha256").update(`${vin}|${startedAtMs}|${endedAtMs}|${kWhAdded}|${costUsd}`).digest("hex");
+  return `fp:${digest}`;
+}
+
 /** Tolerant parse of one charging-history row into an invoice; null (row
  * dropped) when any required field is unrecoverable. */
 export function parseTeslaChargingInvoice(raw: unknown): TeslaChargingHistoryInvoice | null {
   const row = record(raw);
-  const providerInvoiceId = firstString(row, ["id", "sessionId", "session_id", "chargeSessionId", "invoiceId"]);
+  const keyedProviderInvoiceId = firstString(row, ["id", "sessionId", "session_id", "chargeSessionId", "invoiceId"]);
   const vin = firstString(row, ["vin", "vehicleVin", "vehicle_vin"]);
   const startedAtMs = firstMs(row, ["chargeStartDateTime", "startTime", "started_at", "sessionStartDateTime"]);
   const endedAtMsRaw = firstMs(row, ["chargeStopDateTime", "stopTime", "ended_at", "sessionEndDateTime"]);
   const kWhAdded = firstNonNegativeNumber(row, ["energyAdded", "energy_added", "kwhAdded", "kWhAdded", "totalEnergyKwh"]);
   const costUsd = firstNonNegativeNumber(row, ["totalDue", "total_due", "amountDue", "totalCost", "cost", "totalDueUsd"]);
-  if (
-    !providerInvoiceId || !vin || startedAtMs === null || kWhAdded === null || costUsd === null
-  ) {
+  // vin/startedAtMs/kWhAdded/costUsd (plus endedAtMs, resolved just below)
+  // are the complete set of fields contentFingerprint hashes -- so this is
+  // also the fallback-identity gate: a row missing any of these is dropped
+  // here regardless of whether a provider key field was present, same as
+  // before the fingerprint fallback existed.
+  if (!vin || startedAtMs === null || kWhAdded === null || costUsd === null) {
     return null;
   }
   // An absent end timestamp legitimately falls back to a zero-duration
@@ -121,6 +171,11 @@ export function parseTeslaChargingInvoice(raw: unknown): TeslaChargingHistoryInv
   // other unrecoverable field.
   if (endedAtMsRaw !== null && endedAtMsRaw < startedAtMs) return null;
   const endedAtMs = endedAtMsRaw ?? startedAtMs;
+  // Stable-identity fallback (Lane D hardening): only when NO provider key
+  // field was present at all does this fall through to the content
+  // fingerprint -- a row that has, say, `id` but is missing `vin` already
+  // returned null above, and a row that has `vin` but no `id` reaches here.
+  const providerInvoiceId = keyedProviderInvoiceId ?? contentFingerprint(vin, startedAtMs, endedAtMs, kWhAdded, costUsd);
   return {
     providerInvoiceId,
     vin,
@@ -139,4 +194,69 @@ export function parseTeslaChargingHistory(body: unknown): TeslaChargingHistoryIn
     const parsed = parseTeslaChargingInvoice(row);
     return parsed ? [parsed] : [];
   });
+}
+
+/** Raw row count on one charging-history page (before per-row parse
+ * tolerance is applied) -- exported so the worker's page loop can track a
+ * cumulative rows-seen-so-far count across pages for
+ * chargingHistoryHasMorePages' totalResults signal below, without
+ * duplicating the response-shape unwrapping this file already does. */
+export function chargingHistoryRawRowCount(body: unknown): number {
+  return rows(body).length;
+}
+
+/**
+ * Tolerant continuation detector for one `GET /api/1/dx/charging/history`
+ * page (Lane D pagination hardening, T10). Tesla publishes no field-name
+ * reference for this endpoint (see this file's header comment), so, same
+ * posture as the row parser above, this checks several plausible
+ * continuation signals rather than assuming one exact shape -- from
+ * strongest/most-explicit to weakest:
+ *
+ *  1. An explicit total-count field (`totalResults`/`total_results`/
+ *     `total`/`totalCount`/`total_count`) that exceeds `rowsSeenSoFar` --
+ *     the CUMULATIVE raw row count across every page fetched so far
+ *     (including this one), not just this page alone. Deliberately
+ *     cumulative rather than per-page: a server that paginates with fewer
+ *     rows per page than the caller requested (still valid pagination,
+ *     just not maximally full pages) would otherwise make a naive
+ *     per-page comparison against total never converge. Strongest signal:
+ *     it's an explicit claim about the full result set.
+ *  2. An echoed page-size field (`pageSize`/`page_size`) alongside THIS
+ *     page's raw row count reaching it -- confirms the endpoint IS
+ *     paginating (it echoed pagination metadata back) and this page came
+ *     back full, the normal "there's probably more" signal for a paged
+ *     API. A *partial* page on a confirmed-paginated endpoint is instead
+ *     the normal "this was the last page" signal, and correctly reads as
+ *     no-more here.
+ *  3. Neither of the above (no pagination metadata in the response at all)
+ *     but THIS page's raw row count exactly reaches the page size WE
+ *     requested -- the weakest signal, since an endpoint that just happens
+ *     to return exactly that many total rows would false-positive here.
+ *     Used only as a last resort. A false positive here costs at most one
+ *     extra fetch: the worker's hard page cap and per-page
+ *     zero-new-invoice-ids dedup guard
+ *     (services/onlyevs-worker/index.ts's syncChargingInvoices) are what
+ *     actually bound the damage, never this function alone.
+ *
+ * Once gate 5 (docs/rollouts/2026-08-17-vehicle-telemetry-go-no-go.md)
+ * produces one real response, whichever signal it actually uses should be
+ * pinned here as the only check, and the other two removed.
+ */
+export function chargingHistoryHasMorePages(body: unknown, requestedPageSize: number, rowsSeenSoFar: number): boolean {
+  const rawRowCount = rows(body).length;
+  const root = record(body);
+  const response = Object.prototype.hasOwnProperty.call(root, "response") ? record(root.response) : root;
+
+  const totalResults = firstNumber(response, ["totalResults", "total_results", "total", "totalCount", "total_count"]);
+  if (totalResults !== null && totalResults > rowsSeenSoFar) return true;
+
+  const echoedPageSize = firstNumber(response, ["pageSize", "page_size"]);
+  if (echoedPageSize !== null && echoedPageSize > 0 && rawRowCount >= echoedPageSize) return true;
+
+  if (totalResults === null && echoedPageSize === null && requestedPageSize > 0 && rawRowCount >= requestedPageSize) {
+    return true;
+  }
+
+  return false;
 }

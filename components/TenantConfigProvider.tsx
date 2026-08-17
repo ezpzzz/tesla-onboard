@@ -60,18 +60,36 @@ const TenantConfigContext = createContext<TenantConfigContextValue>(DEFAULT_CONT
 // (e.g. the owner dashboard's OwnerDataProvider, gated on
 // useTenantConfig().loading) would drop back into its own loading state even
 // though this exact route already resolved a value moments earlier in this
-// browser tab. Keyed by the same (pathname, search) the resolution effect
-// itself keys on, so a real route/query change still resolves fresh.
+// browser tab. Keyed by (pathname, search) the resolution effect itself
+// keys on, so a real route/query change still resolves fresh — plus the
+// current rtr:tenant:v1 localStorage value, so a same-tab tenant switch that
+// writes a new active tenant WITHOUT a route change (pathname/search
+// unchanged) also invalidates the cache instead of a stale remount
+// synchronously repainting the previous tenant's config for a beat before
+// the effect below catches up.
 let lastResolvedKey: string | null = null;
 let lastResolvedValue: TenantConfigContextValue | null = null;
 
+function currentTenantStorageIdentity(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(LAST_TENANT_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function cacheKey(pathname: string, search: string): string {
+  return `${pathname}?${search}#${currentTenantStorageIdentity()}`;
+}
+
 function resolvedFor(pathname: string, search: string): TenantConfigContextValue | null {
-  const key = `${pathname}?${search}`;
+  const key = cacheKey(pathname, search);
   return lastResolvedKey === key ? lastResolvedValue : null;
 }
 
 function rememberResolved(pathname: string, search: string, next: TenantConfigContextValue) {
-  lastResolvedKey = `${pathname}?${search}`;
+  lastResolvedKey = cacheKey(pathname, search);
   lastResolvedValue = next;
 }
 

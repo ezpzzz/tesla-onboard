@@ -59,6 +59,14 @@ export const CHARGING_SYNC_RETRY_MS = 15 * 60 * 1_000;
  * (lib/tesla-server.ts, Phase 4 home-area sub-task, design-review 8A). */
 export const LOCATION_READ_TIMEOUT_MS = 4_000;
 
+/** Minimum spacing between locate-setup reads for the same vehicle
+ * (app/api/owner/vehicles/[id]/locate-setup/route.ts). Every call is a
+ * live, billable, potentially vehicle-waking Tesla `vehicle_data` read
+ * gated only by owner auth -- this cooldown is the only thing standing
+ * between an impatient double-click (or a scripted retry loop) and
+ * repeated Fleet API charges/wakes. */
+export const LOCATE_SETUP_COOLDOWN_MS = 60_000;
+
 export interface TelemetryLocationEnvelope {
   vin: string;
   observedAt: number;
