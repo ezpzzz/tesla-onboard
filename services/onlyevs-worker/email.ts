@@ -1,13 +1,19 @@
-import { createDecipheriv, createHash, randomUUID } from "node:crypto";
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { Pool, PoolClient } from "pg";
-import { decodeEvmailEnvelope, decodeEvmailPlaintext, evmailAad, type NormalizedEmailManifest } from "@evhost/email-ingest-contract";
+import PostalMime from "postal-mime";
+import type { Attachment as PostalMimeAttachment } from "postal-mime";
+import {
+  decodeEvmailEnvelope, decodeEvmailPlaintext, encodeEvmailEnvelope, evmailAad, lengthPrefixedBytes,
+  type NormalizedEmailManifest,
+} from "@evhost/email-ingest-contract";
+import { buildSnippet, extractEmailMessageText } from "@/lib/email/plaintext";
 import { approvedTuroTemplateFingerprints, parseTuroEmail } from "@/lib/email/turo-parser";
 import { credentialKeyringFromEnv, decryptCredential, encryptCredential } from "@/lib/owner/credential-envelope";
 import { createEncryptedTripLink } from "@/lib/owner/trip-link-secret-core";
 import { sendGridConfigFromEnv, sendGridEmailAction, SendGridDeliveryError } from "@/lib/owner/sendgrid-core";
 
-type EmailJobType = "parse" | "action" | "delivery" | "retention" | "reconcile" | "canary";
+type EmailJobType = "parse" | "action" | "delivery" | "retention" | "reconcile" | "canary" | "index_backfill";
 interface EmailJob { id: string; workspace_id: string; entity_id: string; attempt_count: number; job_type: EmailJobType }
 interface InboundContext {
   id: string; workspace_id: string; integration_id: string; accepted_alias_revision: string;
@@ -33,6 +39,10 @@ function decryptGcm(ciphertextWithTag: Uint8Array, key: Buffer, iv: Uint8Array, 
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 }
 
+function r2Bucket(): string {
+  return process.env.EVHOST_EMAIL_R2_BUCKET ?? "evhost-email-private";
+}
+
 function s3Client() {
   const endpoint = process.env.EVHOST_EMAIL_R2_ENDPOINT; const accessKeyId = process.env.EVHOST_EMAIL_R2_ACCESS_KEY_ID; const secretAccessKey = process.env.EVHOST_EMAIL_R2_SECRET_ACCESS_KEY;
   if (!endpoint || !accessKeyId || !secretAccessKey) throw new Error("email_r2_not_configured");
@@ -45,8 +55,16 @@ async function bodyBytes(body: Awaited<ReturnType<S3Client["send"]>> extends nev
   return stream.transformToByteArray();
 }
 
-async function loadAndDecrypt(row: InboundContext): Promise<NormalizedEmailManifest> {
-  const result = await s3Client().send(new GetObjectCommand({ Bucket: process.env.EVHOST_EMAIL_R2_BUCKET ?? "evhost-email-private", Key: row.r2_object_key }));
+/**
+ * Decrypts a captured envelope and returns both halves `encodeEvmailPlaintext`
+ * originally packed together (services/email-ingest-worker/src/index.ts): the
+ * `NormalizedEmailManifest` the parse job has always used, and now also the
+ * original raw MIME bytes -- needed by T8/T9's attachment extraction, which
+ * (per Premise 5) must never re-derive attachments from anything but the raw
+ * message. Previously this function discarded `rawMessage` entirely.
+ */
+async function loadAndDecrypt(row: InboundContext): Promise<{ manifest: NormalizedEmailManifest; rawMessage: Buffer }> {
+  const result = await s3Client().send(new GetObjectCommand({ Bucket: r2Bucket(), Key: row.r2_object_key }));
   const encrypted = await bodyBytes(result.Body);
   if (createHash("sha256").update(encrypted).digest("hex") !== row.ciphertext_sha256) throw new Error("email_ciphertext_hash_mismatch");
   const envelope = decodeEvmailEnvelope(encrypted); const key = parseKeks(process.env.EVHOST_EMAIL_KEK_KEYS ?? "").get(envelope.kekVersion);
@@ -56,7 +74,209 @@ async function loadAndDecrypt(row: InboundContext): Promise<NormalizedEmailManif
   const plaintext = decryptGcm(envelope.ciphertext, dek, envelope.contentIv, aad);
   const decoded = decodeEvmailPlaintext(plaintext);
   if (createHash("sha256").update(decoded.normalizedJson).digest("hex") !== row.normalized_sha256) throw new Error("email_normalized_hash_mismatch");
-  return JSON.parse(Buffer.from(decoded.normalizedJson).toString("utf8")) as NormalizedEmailManifest;
+  const manifest = JSON.parse(Buffer.from(decoded.normalizedJson).toString("utf8")) as NormalizedEmailManifest;
+  return { manifest, rawMessage: Buffer.from(decoded.rawMessage) };
+}
+
+// ---------------------------------------------------------------------------
+// T8/T9 shared: mail index + attachment extraction (Premise 5, 2A, 3A, 4A).
+// ---------------------------------------------------------------------------
+
+/**
+ * Domain of a From-header address (bare or "Display Name <addr>" form) and
+ * whether it's turo.com or a subdomain of it. Deliberately duplicated from
+ * the equivalent private helpers in lib/email/turo-parser.ts (fromDomain /
+ * isTuroSenderDomain) rather than exporting and importing them -- this file
+ * only needs the same ~10 lines of pure string logic, and keeping them
+ * private here avoids widening turo-parser.ts's exported surface for a
+ * concurrently-edited shared module.
+ */
+function fromDomainLocal(from: string): string | null {
+  const bracketMatch = /<([^>]+)>\s*$/.exec(from);
+  const address = (bracketMatch ? bracketMatch[1] : from).trim();
+  const at = address.lastIndexOf("@");
+  if (at < 0 || at === address.length - 1) return null;
+  return address.slice(at + 1).trim().toLowerCase();
+}
+
+function isTuroSenderDomainLocal(domain: string | null): boolean {
+  if (!domain) return false;
+  return domain === "turo.com" || domain.endsWith(".turo.com");
+}
+
+/** Collapsed pass|fail|unknown -> boolean|null, matching the message index's
+ * nullable per-mechanism columns (null = legitimately unknown, never a
+ * guessed default). */
+function authBool(verdict: "pass" | "fail" | "unknown"): boolean | null {
+  return verdict === "pass" ? true : verdict === "fail" ? false : null;
+}
+
+function toBuffer(content: ArrayBuffer | Uint8Array | string): Buffer {
+  if (typeof content === "string") return Buffer.from(content, "utf8");
+  if (content instanceof Uint8Array) return Buffer.from(content);
+  return Buffer.from(content);
+}
+
+function encryptGcm(plaintext: Buffer, key: Buffer, aad: Uint8Array): { iv: Buffer; ciphertextWithTag: Buffer } {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(aad));
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return { iv, ciphertextWithTag: Buffer.concat([ciphertext, cipher.getAuthTag()]) };
+}
+
+/**
+ * AAD for one attachment's own encrypted R2 envelope (3A: "each attachment
+ * written as its own encrypted R2 object ... keep AAD binding to the
+ * attachment row identity"). Deliberately a distinct domain-separated shape
+ * from evmailAad (message-level envelopes) -- an attachment envelope and its
+ * parent message envelope must never decrypt with each other's AAD even if
+ * some field values coincided.
+ */
+function attachmentAad(input: { workspaceId: string; messageIndexId: string; attachmentId: string; r2ObjectKey: string }): Uint8Array {
+  return lengthPrefixedBytes([
+    "evhost-evmail-attachment-aad-v1",
+    input.workspaceId, input.messageIndexId, input.attachmentId, input.r2ObjectKey,
+  ]);
+}
+
+/** Same EVMAIL1 envelope shape/KEK keyring as message capture, encrypted
+ * with node:crypto (this process, unlike services/email-ingest-worker, runs
+ * in Node -- not a Workers runtime -- so this is encryptGcm's mirror of
+ * decryptGcm above, not a Web Crypto reimplementation). */
+function encryptEmailBytes(plaintext: Buffer, aad: Uint8Array): Buffer {
+  const keys = parseKeks(process.env.EVHOST_EMAIL_KEK_KEYS ?? "");
+  const version = Math.max(...keys.keys());
+  const kek = keys.get(version)!;
+  const dek = randomBytes(32);
+  const wrap = encryptGcm(dek, kek, aad);
+  const content = encryptGcm(plaintext, dek, aad);
+  return Buffer.from(encodeEvmailEnvelope({
+    kekVersion: version, wrapIv: wrap.iv, wrappedDek: wrap.ciphertextWithTag,
+    contentIv: content.iv, ciphertext: content.ciphertextWithTag,
+  }));
+}
+
+async function r2Put(key: string, bytes: Uint8Array): Promise<void> {
+  await s3Client().send(new PutObjectCommand({ Bucket: r2Bucket(), Key: key, Body: bytes, ContentType: "application/octet-stream" }));
+}
+
+/** Deletes every key independently (never lets one failing key abort the
+ * rest -- T10/T5 both need per-object error capture, not all-or-nothing). */
+async function deleteR2ObjectsWithReport(keys: readonly string[]): Promise<{ deleted: string[]; failed: Array<{ key: string; error: string }> }> {
+  const deleted: string[] = [];
+  const failed: Array<{ key: string; error: string }> = [];
+  for (const key of keys) {
+    try {
+      await s3Client().send(new DeleteObjectCommand({ Bucket: r2Bucket(), Key: key }));
+      deleted.push(key);
+    } catch (error) {
+      failed.push({ key, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { deleted, failed };
+}
+
+/** Parses the raw MIME message for its attachment parts only (T8/T9's own
+ * concern is extraction, not body text -- html/text already come from the
+ * normalized manifest). A malformed/unparseable raw message must never abort
+ * indexing the message itself -- callers get zero attachments, not a thrown
+ * error, matching "has_attachments: false" being an honest empty state
+ * rather than a failure. */
+async function parseRawAttachments(rawMessage: Buffer): Promise<PostalMimeAttachment[]> {
+  try {
+    const parsed = await PostalMime.parse(rawMessage, { attachmentEncoding: "arraybuffer" });
+    return parsed.attachments;
+  } catch (error) {
+    console.error(`onlyevs-email-worker: attachment parse failed (indexing continues with zero attachments): ${error instanceof Error ? error.message : error}`);
+    return [];
+  }
+}
+
+async function storeEmailAttachment(
+  client: PoolClient,
+  attachment: PostalMimeAttachment,
+  ctx: { workspaceId: string; messageIndexId: string; inboundEmailId: string },
+): Promise<void> {
+  const attachmentId = randomUUID();
+  const r2ObjectKey = `onlyevs-email-attachments/${ctx.workspaceId}/${ctx.inboundEmailId}/${attachmentId}.evmail`;
+  const contentBytes = toBuffer(attachment.content);
+  const sha256 = createHash("sha256").update(contentBytes).digest("hex");
+  const aad = attachmentAad({ workspaceId: ctx.workspaceId, messageIndexId: ctx.messageIndexId, attachmentId, r2ObjectKey });
+  await r2Put(r2ObjectKey, encryptEmailBytes(contentBytes, aad));
+  await client.query(
+    `insert into private.onlyevs_email_attachments
+       (id, workspace_id, message_index_id, filename, content_type, size_bytes, content_id, sha256, r2_object_key)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     on conflict (workspace_id, r2_object_key) do nothing`,
+    [
+      attachmentId, ctx.workspaceId, ctx.messageIndexId,
+      attachment.filename ?? null, attachment.mimeType ?? null, contentBytes.byteLength,
+      attachment.contentId ?? null, sha256, r2ObjectKey,
+    ],
+  );
+}
+
+interface MessageIndexUpsertInput {
+  workspaceId: string;
+  shopSlug: string;
+  inboundEmailId: string;
+  manifest: NormalizedEmailManifest;
+  rawMessage: Buffer;
+  occurredAt: Date;
+  candidateId: string | null;
+}
+
+/**
+ * Idempotent by `inbound_email_id` (the table's own unique constraint) --
+ * the parse job (T8, new mail) and the reconciler (T9, already-captured
+ * mail) both call this, and either can safely race or retry the other
+ * without duplicating a row. Attachments are extracted from the *same* raw
+ * message every call; re-running this for a message that already has
+ * attachment rows produces a second set of (harmlessly orphaned, since
+ * `r2_object_key` embeds a fresh uuid each time) R2 objects rather than
+ * duplicate rows -- `on conflict (workspace_id, r2_object_key) do nothing`
+ * guards the row, not the object. See T9's own idempotency note: the
+ * reconciler's claim query only ever selects inbound rows that still lack an
+ * index row, so this whole function runs at most once per message under
+ * normal operation; the only way to re-run it is a mid-transaction crash
+ * after the R2 PUT(s) but before this transaction commits, which is the same
+ * class of at-least-once R2 side effect the capture pipeline itself already
+ * accepts (services/email-ingest-worker/src/index.ts's own R2 put precedes
+ * its finalize call).
+ */
+async function upsertEmailMessageIndexAndAttachments(client: PoolClient, input: MessageIndexUpsertInput): Promise<void> {
+  const messageText = extractEmailMessageText(input.manifest) ?? "";
+  const snippet = buildSnippet(messageText);
+  const attachments = await parseRawAttachments(input.rawMessage);
+  const hasAttachments = attachments.length > 0;
+  const dkimPass = authBool(input.manifest.receiverAuth.dkim);
+  const spfPass = authBool(input.manifest.receiverAuth.spf);
+  const dmarcPass = authBool(input.manifest.receiverAuth.dmarc);
+  const fromDomainAligned = isTuroSenderDomainLocal(fromDomainLocal(input.manifest.from));
+
+  const indexRow = await client.query<{ id: string }>(
+    `insert into private.onlyevs_email_message_index
+       (workspace_id, shop_slug, inbound_email_id, subject, sender, sent_at, snippet, body_tsv,
+        has_attachments, dkim_pass, spf_pass, dmarc_pass, from_domain_aligned, candidate_id)
+     values ($1,$2,$3,$4,$5,$6,$7, to_tsvector('english', $8), $9,$10,$11,$12,$13,$14)
+     on conflict (inbound_email_id) do update set
+       subject = excluded.subject, sender = excluded.sender, sent_at = excluded.sent_at,
+       snippet = excluded.snippet, body_tsv = excluded.body_tsv, has_attachments = excluded.has_attachments,
+       dkim_pass = excluded.dkim_pass, spf_pass = excluded.spf_pass, dmarc_pass = excluded.dmarc_pass,
+       from_domain_aligned = excluded.from_domain_aligned,
+       candidate_id = coalesce(excluded.candidate_id, private.onlyevs_email_message_index.candidate_id)
+     returning id`,
+    [
+      input.workspaceId, input.shopSlug, input.inboundEmailId, input.manifest.subject, input.manifest.from,
+      input.occurredAt, snippet, messageText, hasAttachments, dkimPass, spfPass, dmarcPass, fromDomainAligned,
+      input.candidateId,
+    ],
+  );
+  const messageIndexId = indexRow.rows[0]!.id;
+  for (const attachment of attachments) {
+    await storeEmailAttachment(client, attachment, { workspaceId: input.workspaceId, messageIndexId, inboundEmailId: input.inboundEmailId });
+  }
 }
 
 /**
@@ -70,13 +290,16 @@ async function loadAndDecrypt(row: InboundContext): Promise<NormalizedEmailManif
  * actually safe to move (an in-flight validating-or-later action is never
  * touched).
  */
-async function processParseJob(pool: Pool, job: EmailJob, workerId: string) {
+// Exported (only) for the T8 regression-pin test (services/onlyevs-worker/test/
+// email-mail-index.test.ts) -- not called directly by anything outside this
+// file otherwise; dispatchEmailJob below remains the only production caller.
+export async function processParseJob(pool: Pool, job: EmailJob, workerId: string) {
   const client = await pool.connect();
   try {
     const selected = await client.query<InboundContext>(`select e.*, a.alias_hash from public.onlyevs_inbound_emails e join private.onlyevs_email_aliases a on a.integration_id=e.integration_id and a.revision=e.accepted_alias_revision where e.id=$1 and e.workspace_id=$2`, [job.entity_id, job.workspace_id]);
     const row = selected.rows[0]; if (!row) throw new Error("email_inbound_missing");
     await client.query("update public.onlyevs_inbound_emails set state='processing',claimed_by=$2,claim_expires_at=now()+interval '2 minutes',attempt_count=attempt_count+1 where id=$1 and state='queued'", [row.id, workerId]);
-    const normalized = await loadAndDecrypt(row);
+    const { manifest: normalized, rawMessage } = await loadAndDecrypt(row);
     // The parser needs an IANA zone to resolve the email's local wall-clock
     // trip times into a UTC instant. There is no per-vehicle timezone in the
     // schema; the best available real signal for "what timezone does this
@@ -118,6 +341,45 @@ async function processParseJob(pool: Pool, job: EmailJob, workerId: string) {
       // so this is always safe to call speculatively.
       await client.query("select private.supersede_onlyevs_email_candidate_and_action($1,$2)", [row.workspace_id, priorLiveCandidateId]);
     }
+
+    // T8: mail index + attachment extraction (Premise 5, 4A). Deliberately
+    // after candidate creation, in the same transaction -- see
+    // upsertEmailMessageIndexAndAttachments' doc comment for why atomicity
+    // here is what keeps this idempotent under a crash. This is purely
+    // additive: it writes to private.onlyevs_email_message_index /
+    // private.onlyevs_email_attachments only, never touches `inserted`,
+    // `parsed`, or any column this transaction already wrote to
+    // onlyevs_email_candidates -- the CRITICAL regression pin (candidate
+    // output byte-identical vs pre-change) holds regardless of what happens
+    // below. shop_slug is fetched fresh rather than reused from the
+    // calendarZone query above because that query's join requires a
+    // connected google_calendar integration and returns nothing otherwise --
+    // every email integration always has its own shop_slug independent of
+    // that.
+    const emailIntegration = await client.query<{ shop_slug: string }>(
+      `select shop_slug from public.onlyevs_email_integrations where id=$1 and workspace_id=$2`,
+      [row.integration_id, row.workspace_id],
+    );
+    const shopSlug = emailIntegration.rows[0]?.shop_slug ?? null;
+    if (shopSlug) {
+      const candidateId = inserted.rows[0]?.id
+        ?? (await client.query<{ id: string }>(
+          `select id from public.onlyevs_email_candidates where workspace_id=$1 and inbound_email_id=$2`,
+          [row.workspace_id, row.id],
+        )).rows[0]?.id
+        ?? null;
+      await upsertEmailMessageIndexAndAttachments(client, {
+        workspaceId: row.workspace_id, shopSlug, inboundEmailId: row.id,
+        manifest: normalized, rawMessage, occurredAt: new Date(parsed.occurredAt), candidateId,
+      });
+    } else {
+      // Should not happen (every email integration row carries a shop_slug
+      // at creation) -- if it somehow does, the candidate/classification
+      // path above must still succeed; only the search index/attachments
+      // are skipped for this message, logged so it's never silently lost.
+      console.error(`onlyevs-email-worker: parse — no shop_slug for integration ${row.integration_id}, skipping mail index/attachments for inbound ${row.id}`);
+    }
+
     await client.query("update public.onlyevs_inbound_emails set state='classified',parser_version='turo-v1',template_version=$2,claimed_by=null,claim_expires_at=null where id=$1 and state='processing'", [row.id, parsed.templateFingerprint]);
     await client.query("update public.onlyevs_email_outbox set state='completed',claimed_by=null,claim_expires_at=null where id=$1 and state='claimed'", [job.id]);
     await client.query("commit");
@@ -383,12 +645,376 @@ async function processActionJob(pool: Pool, job: EmailJob, workerId: string) {
   await pool.query("update public.onlyevs_email_outbox set state='completed',claimed_by=null,claim_expires_at=null where id=$1", [job.id]).catch(() => undefined);
 }
 
+// ---------------------------------------------------------------------------
+// T9 -- standing index_backfill reconciler (2A). Claims already-classified
+// inbound rows that still lack a private.onlyevs_email_message_index row
+// (private.claim_onlyevs_due_email_index_backfill,
+// 20260817140000_onlyevs_workspace_mail.sql) and indexes them the exact same
+// way T8 indexes new mail -- migration backfill and post-launch self-healing
+// are one mechanism, not two, per that migration's own doc comment.
+// ---------------------------------------------------------------------------
+
+/** Bare row shape `claim_onlyevs_due_email_index_backfill` returns --
+ * `setof public.onlyevs_inbound_emails`, i.e. every column that table has,
+ * but critically *not* `alias_hash` (that only exists by joining
+ * private.onlyevs_email_aliases, same as processParseJob's own select). */
+interface BackfillInboundRow {
+  id: string;
+  workspace_id: string;
+  integration_id: string;
+  accepted_alias_revision: string;
+  raw_sha256: string;
+  normalized_sha256: string;
+  ciphertext_sha256: string;
+  r2_object_key: string | null;
+  kek_version: number;
+  state: string;
+}
+
+const EMAIL_INDEX_BACKFILL_BATCH_SIZE = 10;
+
+/** Releases a backfill claim (resets claimed_by/claim_expires_at) without
+ * touching `state` -- indexing is never a state-machine edge for
+ * onlyevs_inbound_emails (migration comment, same file). Used on every exit
+ * path (indexed, corrupt-envelope skip, missing-shop-slug skip, missing R2
+ * key skip) so a processed row is never left claimed until its 2-minute
+ * lease expires on its own. */
+async function releaseBackfillClaim(pool: Pool, id: string): Promise<void> {
+  await pool.query(
+    "update public.onlyevs_inbound_emails set claimed_by=null, claim_expires_at=null where id=$1",
+    [id],
+  ).catch(() => undefined);
+}
+
+async function processIndexBackfillRow(pool: Pool, row: BackfillInboundRow, workerId: string): Promise<"indexed" | "skipped"> {
+  // A row can be claimed here with its raw envelope already gone (purged --
+  // T4's purge core nulls r2_object_key precisely so a purge is never
+  // silently defeated by a stale reference). Nothing left to index; this is
+  // an honest empty state, not corruption -- skip without logging it as an
+  // error.
+  if (!row.r2_object_key) {
+    await releaseBackfillClaim(pool, row.id);
+    return "skipped";
+  }
+  const r2ObjectKey = row.r2_object_key;
+
+  const aliasRow = await pool.query<{ alias_hash: string }>(
+    `select alias_hash from private.onlyevs_email_aliases where integration_id=$1 and revision=$2`,
+    [row.integration_id, row.accepted_alias_revision],
+  );
+  const aliasHash = aliasRow.rows[0]?.alias_hash;
+  const integrationRow = await pool.query<{ shop_slug: string }>(
+    `select shop_slug from public.onlyevs_email_integrations where id=$1 and workspace_id=$2`,
+    [row.integration_id, row.workspace_id],
+  );
+  const shopSlug = integrationRow.rows[0]?.shop_slug;
+  if (!aliasHash || !shopSlug) {
+    console.error(`onlyevs-email-worker: index_backfill skip (missing alias/integration) inbound=${row.id}`);
+    await releaseBackfillClaim(pool, row.id);
+    return "skipped";
+  }
+
+  let decrypted: { manifest: NormalizedEmailManifest; rawMessage: Buffer };
+  try {
+    decrypted = await loadAndDecrypt({
+      id: row.id, workspace_id: row.workspace_id, integration_id: row.integration_id,
+      accepted_alias_revision: row.accepted_alias_revision, raw_sha256: row.raw_sha256,
+      normalized_sha256: row.normalized_sha256, ciphertext_sha256: row.ciphertext_sha256,
+      r2_object_key: r2ObjectKey, kek_version: row.kek_version, alias_hash: aliasHash,
+    });
+  } catch (error) {
+    // Corrupt/undecryptable envelope: skip + logged count (never fabricate a
+    // partial index row), matching the design's explicit failure mode for
+    // this exact codepath.
+    console.error(`onlyevs-email-worker: index_backfill skip (corrupt envelope) inbound=${row.id}: ${error instanceof Error ? error.message : error}`);
+    await releaseBackfillClaim(pool, row.id);
+    return "skipped";
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const candidate = await client.query<{ id: string }>(
+      `select id from public.onlyevs_email_candidates where workspace_id=$1 and inbound_email_id=$2`,
+      [row.workspace_id, row.id],
+    );
+    await upsertEmailMessageIndexAndAttachments(client, {
+      workspaceId: row.workspace_id, shopSlug, inboundEmailId: row.id,
+      manifest: decrypted.manifest, rawMessage: decrypted.rawMessage,
+      occurredAt: new Date(decrypted.manifest.date ?? Date.now()),
+      candidateId: candidate.rows[0]?.id ?? null,
+    });
+    await client.query(
+      "update public.onlyevs_inbound_emails set claimed_by=null, claim_expires_at=null where id=$1",
+      [row.id],
+    );
+    await client.query("commit");
+    return "indexed";
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    console.error(`onlyevs-email-worker: index_backfill failed inbound=${row.id}: ${error instanceof Error ? error.message : error}`);
+    await releaseBackfillClaim(pool, row.id);
+    return "skipped";
+  } finally {
+    client.release();
+  }
+}
+
+export async function sweepEmailIndexBackfill(pool: Pool, workerId: string): Promise<void> {
+  const claimed = await pool.query<BackfillInboundRow>(
+    "select * from private.claim_onlyevs_due_email_index_backfill($1,$2)",
+    [workerId, EMAIL_INDEX_BACKFILL_BATCH_SIZE],
+  );
+  if (!claimed.rows.length) return;
+  let indexed = 0;
+  let skipped = 0;
+  for (const row of claimed.rows) {
+    const result = await processIndexBackfillRow(pool, row, workerId);
+    if (result === "indexed") indexed += 1; else skipped += 1;
+  }
+  console.log(`sweepEmailIndexBackfill: indexed ${indexed}, skipped ${skipped}`);
+}
+
+// ---------------------------------------------------------------------------
+// T5 -- per-workspace retention sweep (5A). Hourly-guarded like
+// sweepRetention in index.ts. Deletes the search index/attachment copies and
+// the raw R2 envelope once an integration's configured
+// retention_window_days has elapsed (private.list_onlyevs_email_
+// retention_due) -- and *only* those. It deliberately never touches
+// onlyevs_email_candidates.proposed_state (messageText/guestMessageText) or
+// writes to private.onlyevs_email_purge_audit -- scrubbing that
+// pre-existing plaintext copy and recording an audit trail is exclusively
+// purge's job (T4/T10), a deliberate manager-triggered action, not an
+// automatic time-based one (Premise 3).
+// ---------------------------------------------------------------------------
+
+const EMAIL_RETENTION_DUE_BATCH_SIZE = 200;
+
+async function sweepEmailRetentionDue(pool: Pool): Promise<{ expired: number; r2Failures: number }> {
+  const due = await pool.query<{ workspace_id: string; inbound_email_id: string }>(
+    "select * from private.list_onlyevs_email_retention_due($1)",
+    [EMAIL_RETENTION_DUE_BATCH_SIZE],
+  );
+  let expired = 0;
+  let r2Failures = 0;
+  for (const row of due.rows) {
+    const client = await pool.connect();
+    try {
+      const attachmentKeys = await client.query<{ r2_object_key: string }>(
+        `select a.r2_object_key
+           from private.onlyevs_email_attachments a
+           join private.onlyevs_email_message_index i
+             on i.workspace_id = a.workspace_id and i.id = a.message_index_id
+          where i.workspace_id = $1 and i.inbound_email_id = $2`,
+        [row.workspace_id, row.inbound_email_id],
+      );
+      const envelope = await client.query<{ r2_object_key: string | null }>(
+        `select r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2`,
+        [row.workspace_id, row.inbound_email_id],
+      );
+      const keys = attachmentKeys.rows.map((r) => r.r2_object_key);
+      const envelopeKey = envelope.rows[0]?.r2_object_key ?? null;
+      if (envelopeKey) keys.push(envelopeKey);
+      if (keys.length === 0) continue; // already cleaned up by a prior purge/sweep
+
+      // R2 deletes happen BEFORE any DB row is touched: if any key fails to
+      // delete, this row's DB state is left completely untouched (`continue`
+      // below, no partial cleanup) so the next hourly sweep retries the
+      // whole thing from a clean, well-defined starting point rather than
+      // orphaning an object this run can no longer find.
+      const report = await deleteR2ObjectsWithReport(keys);
+      if (report.failed.length > 0) {
+        r2Failures += report.failed.length;
+        console.error(`onlyevs-email-worker: retention sweep R2 delete failed inbound=${row.inbound_email_id} keys=${report.failed.map((f) => f.key).join(",")}`);
+        continue;
+      }
+
+      await client.query("begin");
+      await client.query(
+        `delete from private.onlyevs_email_message_index where workspace_id=$1 and inbound_email_id=$2`,
+        [row.workspace_id, row.inbound_email_id],
+      );
+      await client.query(
+        `update public.onlyevs_inbound_emails set r2_object_key=null where workspace_id=$1 and id=$2`,
+        [row.workspace_id, row.inbound_email_id],
+      );
+      await client.query("commit");
+      expired += 1;
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      console.error(`onlyevs-email-worker: retention sweep failed inbound=${row.inbound_email_id}: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      client.release();
+    }
+  }
+  return { expired, r2Failures };
+}
+
+let lastEmailRetentionSweepAt = 0;
+const EMAIL_RETENTION_SWEEP_INTERVAL_MS = 60 * 60 * 1_000;
+
+/** Exported standalone (bypassing the hourly gate) so it's independently
+ * contract-testable, matching sweepHistoryRetention/sweepLocationPointRetention
+ * in index.ts. The hourly-guarded entry point workers actually call is
+ * sweepEmailRetentionHourly below. */
+export async function sweepEmailRetention(pool: Pool): Promise<{ expired: number; r2Failures: number }> {
+  return sweepEmailRetentionDue(pool);
+}
+
+export async function sweepEmailRetentionHourly(pool: Pool): Promise<void> {
+  if (Date.now() - lastEmailRetentionSweepAt < EMAIL_RETENTION_SWEEP_INTERVAL_MS) return;
+  lastEmailRetentionSweepAt = Date.now();
+  const { expired, r2Failures } = await sweepEmailRetention(pool);
+  if (expired > 0 || r2Failures > 0) {
+    console.log(`sweepEmailRetentionHourly: expired ${expired} message(s), ${r2Failures} R2 delete failure(s)`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T10 -- purge executor. public.purge_onlyevs_email_message/reservation/guest
+// (20260817140000_onlyevs_workspace_mail.sql) are `authenticated`-only --
+// gated on `auth.uid()`, which only resolves inside a real Supabase/
+// PostgREST session -- and their shared private.purge_onlyevs_email_
+// message_core is explicitly revoked from onlyevs_worker. Neither is
+// callable from this process's plain onlyevs_worker Postgres connection.
+// executeEmailPurge instead performs the exact same sequence of writes that
+// core function performs, using the table-level grants onlyevs_worker
+// already holds on every table involved (private.onlyevs_email_message_index
+// / private.onlyevs_email_attachments: full CRUD; public.onlyevs_email_
+// candidates / public.onlyevs_inbound_emails / public.onlyevs_trips: full
+// CRUD via their pre-existing "for all to onlyevs_worker" RLS policies;
+// private.onlyevs_email_purge_audit: select+insert) -- then deletes the
+// returned R2 object keys with per-object error capture, which no SQL
+// function can do on its own. The caller is responsible for having already
+// authorized `actorUserId` as a workspace manager (this function, like
+// purge_onlyevs_email_message_core, performs no authorization check of its
+// own) and for resolving `scope`'s target inbound_email_id(s) -- reservation/
+// guest-scoped purges are a small loop over this per Premise 3's key rules,
+// same shape as the SQL RPCs' own lateral join.
+// ---------------------------------------------------------------------------
+
+export interface EmailPurgeRequest {
+  workspaceId: string;
+  inboundEmailId: string;
+  actorUserId: string;
+  scope: "message" | "reservation" | "guest";
+  reason?: string | null;
+}
+
+export interface EmailPurgeResult {
+  r2ObjectKeys: string[];
+  r2DeletedKeys: string[];
+  r2FailedKeys: Array<{ key: string; error: string }>;
+}
+
+export async function executeEmailPurge(pool: Pool, request: EmailPurgeRequest): Promise<EmailPurgeResult> {
+  const client = await pool.connect();
+  let r2ObjectKeys: string[] = [];
+  try {
+    await client.query("begin");
+    const inbound = await client.query<{ id: string; r2_object_key: string | null }>(
+      `select id, r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2 for update`,
+      [request.workspaceId, request.inboundEmailId],
+    );
+    const inboundRow = inbound.rows[0];
+    if (!inboundRow) throw new Error("email_message_not_found");
+
+    const attachmentKeys = await client.query<{ r2_object_key: string }>(
+      `select a.r2_object_key
+         from private.onlyevs_email_attachments a
+         join private.onlyevs_email_message_index i
+           on i.workspace_id = a.workspace_id and i.id = a.message_index_id
+        where i.workspace_id = $1 and i.inbound_email_id = $2`,
+      [request.workspaceId, request.inboundEmailId],
+    );
+    r2ObjectKeys = attachmentKeys.rows.map((r) => r.r2_object_key);
+    if (inboundRow.r2_object_key) r2ObjectKeys.push(inboundRow.r2_object_key);
+
+    await client.query(
+      `delete from private.onlyevs_email_message_index where workspace_id=$1 and inbound_email_id=$2`,
+      [request.workspaceId, request.inboundEmailId],
+    );
+
+    const candidate = await client.query<{ id: string; effective_trip_id: string | null }>(
+      `select id, effective_trip_id from public.onlyevs_email_candidates where workspace_id=$1 and inbound_email_id=$2 for update`,
+      [request.workspaceId, request.inboundEmailId],
+    );
+    const candidateRow = candidate.rows[0];
+    if (candidateRow) {
+      // Matches purge_onlyevs_email_message_core exactly: only messageText/
+      // guestMessageText are removed from proposed_state (jsonb key
+      // deletion), every other structured fact -- and the candidate row
+      // itself -- is retained (Premise 3). Bumping revision here is what
+      // makes an in-flight confirm/apply action for this candidate bounce to
+      // needs_review/validation_conflict on its next validating-step re-read
+      // (existing state machine, 20260816150000_onlyevs_email_action_
+      // lifecycle.sql) -- fail-closed by design, not a bug.
+      await client.query(
+        `update public.onlyevs_email_candidates set
+           proposed_state = proposed_state - 'messageText' - 'guestMessageText',
+           revision = revision + 1
+         where id = $1`,
+        [candidateRow.id],
+      );
+      if (candidateRow.effective_trip_id) {
+        await client.query(
+          `update public.onlyevs_trips set pii_scrubbed_at = now() where workspace_id=$1 and id=$2`,
+          [request.workspaceId, candidateRow.effective_trip_id],
+        );
+      }
+    }
+
+    // Nulled so a purge can never be silently defeated by a stale reference
+    // -- the reconciler's own claim query treats a null r2_object_key as
+    // "nothing left to index" (processIndexBackfillRow above), and this same
+    // null is what T5's retention sweep already relies on to skip an
+    // already-purged message.
+    await client.query(
+      `update public.onlyevs_inbound_emails set r2_object_key = null where id = $1`,
+      [inboundRow.id],
+    );
+
+    await client.query(
+      `insert into private.onlyevs_email_purge_audit
+         (workspace_id, scope, inbound_email_id, actor_user_id, reason, r2_object_keys)
+       values ($1,$2,$3,$4,$5,$6)`,
+      [request.workspaceId, request.scope, inboundRow.id, request.actorUserId, request.reason ?? null, r2ObjectKeys],
+    );
+
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const deleteReport = await deleteR2ObjectsWithReport(r2ObjectKeys);
+  if (deleteReport.failed.length > 0) {
+    console.error(
+      `onlyevs-email-worker: purge completed its DB rows (audited) for inbound ${request.inboundEmailId} but failed to delete ${deleteReport.failed.length} R2 object(s): ${deleteReport.failed.map((f) => f.key).join(", ")}`,
+    );
+  }
+  return { r2ObjectKeys, r2DeletedKeys: deleteReport.deleted, r2FailedKeys: deleteReport.failed };
+}
+
 async function dispatchEmailJob(pool: Pool, job: EmailJob, workerId: string): Promise<void> {
   switch (job.job_type) {
     case "parse":
       return processParseJob(pool, job, workerId);
     case "action":
       return processActionJob(pool, job, workerId);
+    case "index_backfill":
+      // Outbox rows of this job_type are only ever a scheduling knob (see
+      // the migration's own comment on claim_onlyevs_due_email_index_
+      // backfill) -- the standing reconciler in processEmailJobs below
+      // already runs unconditionally every tick, independent of whether one
+      // of these was ever enqueued. Nothing produces one yet; if something
+      // eventually does, running the sweep here rather than silently
+      // completing it keeps that knob meaningful instead of a no-op.
+      await sweepEmailIndexBackfill(pool, workerId);
+      await pool.query("update public.onlyevs_email_outbox set state='completed',claimed_by=null,claim_expires_at=null where id=$1", [job.id]).catch(() => undefined);
+      return;
     default:
       // 'delivery' | 'retention' | 'reconcile' | 'canary': not produced by
       // this build yet (see the spec's RPC inventory). Never leave an
@@ -405,4 +1031,11 @@ export async function processEmailJobs(pool: Pool, workerId: string): Promise<vo
   for (let index = 0; index < jobs.rows.length; index += 2) {
     await Promise.allSettled(jobs.rows.slice(index, index + 2).map((job) => dispatchEmailJob(pool, job, workerId)));
   }
+  // T9: standing reconciler -- runs every tick the email lane is enabled, not
+  // just on outbox jobs (2A: "it IS the backfill and the self-heal").
+  await sweepEmailIndexBackfill(pool, workerId);
+  // T5: retention sweep -- hourly-guarded internally (sweepEmailRetentionHourly),
+  // so calling it every tick here is cheap/idempotent, same pattern as
+  // sweepRetention in index.ts.
+  await sweepEmailRetentionHourly(pool);
 }
