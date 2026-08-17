@@ -7,6 +7,7 @@ import {
   isoToLocalWallTimeInput,
   localWallTimeToIso,
   parseEmailCandidateFacts,
+  selectDisplayMessage,
 } from "@/components/owner/InboxCandidateCard";
 
 describe("parseEmailCandidateFacts", () => {
@@ -72,6 +73,7 @@ describe("parseEmailCandidateFacts", () => {
       tripStartsAt: null, tripEndsAt: null, tripTimezone: null,
       tripStartLocalText: null, tripEndLocalText: null,
       currentTripStartsAt: null, currentTripEndsAt: null,
+      messageText: null,
     });
     expect(parseEmailCandidateFacts("not-an-object", []).guestName).toBeNull();
   });
@@ -80,6 +82,34 @@ describe("parseEmailCandidateFacts", () => {
     const facts = parseEmailCandidateFacts({ avatarUrl: "https://images.turo.com/media/driver/x.jpg", phone: "+15555550100" }, {});
     expect(facts.guestAvatarUrl).toBe("https://images.turo.com/media/driver/x.jpg");
     expect(facts.guestPhoneE164).toBe("+15555550100");
+  });
+
+  it("reads messageText -- the subject+body fallback carried on every candidate, unknown-template included", () => {
+    const facts = parseEmailCandidateFacts(
+      { subject: "Please verify your email address", messageText: "Subject: Please verify your email address\n\nSynthetic body with a verification link." },
+      {},
+    );
+    expect(facts.messageText).toBe("Subject: Please verify your email address\n\nSynthetic body with a verification link.");
+  });
+
+  it("leaves messageText null when the parser found nothing readable at all", () => {
+    expect(parseEmailCandidateFacts({ subject: "x" }, {}).messageText).toBeNull();
+  });
+});
+
+describe("selectDisplayMessage", () => {
+  it("shows the full message for a non-guest_message candidate (e.g. an unknown-template notice)", () => {
+    expect(selectDisplayMessage({ guestMessage: null, messageText: "Subject: Please verify your email address\n\n..." }, "unknown"))
+      .toBe("Subject: Please verify your email address\n\n...");
+  });
+  it("suppresses the full message for guest_message when the short guest text is already shown, to avoid duplicating it", () => {
+    expect(selectDisplayMessage({ guestMessage: "What time works?", messageText: "Subject: ...\n\nWhat time works?" }, "guest_message")).toBeNull();
+  });
+  it("still falls back to the full message for guest_message if the short guest text wasn't extracted", () => {
+    expect(selectDisplayMessage({ guestMessage: null, messageText: "Subject: ...\n\nbody" }, "guest_message")).toBe("Subject: ...\n\nbody");
+  });
+  it("renders nothing when neither is present", () => {
+    expect(selectDisplayMessage({ guestMessage: null, messageText: null }, "unknown")).toBeNull();
   });
 });
 
