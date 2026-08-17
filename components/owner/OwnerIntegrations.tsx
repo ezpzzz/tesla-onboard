@@ -296,7 +296,7 @@ export const TURO_EMAIL_SETUP_STEPS = [
 ] as const;
 
 export const TURO_EMAIL_FORWARDING_NOTE =
-  "Turo notices land in your personal inbox unchanged, and EVhost files a review card for each — approve or dismiss in Inbox.";
+  "Until you verify Cloudflare's forwarding address, Turo notices appear only as a review card in Inbox here. Once verified, Turo notices land in your personal inbox unchanged too, and EVhost still files a review card for each — approve or dismiss in Inbox.";
 
 interface TuroEmailState {
   id: string;
@@ -355,7 +355,7 @@ function TuroEmailIntegration({ scope, configured, intakeEnabled, automationEnab
         <SetupStep number="1" title={TURO_EMAIL_SETUP_STEPS[0]} done={Boolean(integration.alias_address)}><div className="mt-2 break-all rounded bg-white p-2 text-xs ring-1 ring-line">{integration.alias_address}</div><Button variant="ghost" className="mt-2" onClick={() => void navigator.clipboard.writeText(integration.alias_address)}>Copy</Button></SetupStep>
         <SetupStep number="2" title={TURO_EMAIL_SETUP_STEPS[1]} done={connected}><p className="mt-2 text-muted">In Turo, go to Account → Notification settings and set this as your booking email.</p></SetupStep>
         <SetupStep number="3" title={TURO_EMAIL_SETUP_STEPS[2]} done={connected}>
-          <p className="mt-2 text-muted">Two automated emails may arrive in your personal inbox — click the link in each to finish.</p>
+          <p className="mt-2 text-muted">Cloudflare's verification email arrives first — click Verify to activate forwarding. Only after that does Turo's verification notice (and all future Turo mail) reach your personal inbox too; until then it's a review card in Inbox here.</p>
           <TuroEmailVerificationDetail />
         </SetupStep>
         <SetupStep number="4" title={TURO_EMAIL_SETUP_STEPS[3]} done={connected}><Button variant="secondary" className="mt-2" disabled={busy || !intakeEnabled} onClick={() => void change("test")}>{intakeEnabled ? "Send test" : "Intake is off"}</Button></SetupStep>
@@ -378,13 +378,13 @@ export function TuroEmailVerificationDetail() {
       <summary className="cursor-pointer select-none font-semibold text-ink-soft">What are these emails?</summary>
       <div className="mt-2 space-y-3 text-muted">
         <div>
-          <p className="font-semibold text-ink-soft">Cloudflare &lt;noreply@notify.cloudflare.com&gt;</p>
+          <p className="font-semibold text-ink-soft">Arrives first: Cloudflare &lt;noreply@notify.cloudflare.com&gt;</p>
           <p>Subject: &quot;[Action required] Verify your Email Routing address&quot;</p>
-          <p className="mt-1">Sent because EVhost forwards your Turo mail to your personal inbox. The account name shown in the email (a short random string) is EVhost&apos;s mail infrastructure, not a mistake — it&apos;s expected. Click &quot;Verify email address.&quot;</p>
+          <p className="mt-1">The account name shown in the email (a short random string) is EVhost&apos;s mail infrastructure, not a mistake — it&apos;s expected. Click &quot;Verify email address&quot; to activate forwarding to your personal inbox.</p>
         </div>
         <div>
-          <p className="font-semibold text-ink-soft">Turo &mdash; &quot;Please verify your email address&quot;</p>
-          <p className="mt-1">Click Turo&apos;s link to confirm your booking address. The same notice also appears as a Review card in Inbox here.</p>
+          <p className="font-semibold text-ink-soft">After that: Turo &mdash; &quot;Please verify your email address&quot;</p>
+          <p className="mt-1">Once Cloudflare&apos;s forwarding is verified, Turo&apos;s verification notice (and all future Turo mail) reaches your personal inbox too — click Turo&apos;s link to confirm your booking address. Until Cloudflare is verified, this notice appears only as a Review card in Inbox here, where you can read it and complete verification.</p>
         </div>
       </div>
     </details>

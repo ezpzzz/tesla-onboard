@@ -39,6 +39,15 @@ describe("Turo email setup UX", () => {
     expect(markup).toMatch(/Review card in Inbox/i);
   });
 
+  it("sequences the two emails honestly: Cloudflare first, Turo's inbox delivery conditional on that", () => {
+    const markup = renderToStaticMarkup(createElement(TuroEmailVerificationDetail));
+
+    expect(markup).toMatch(/Arrives first:.*Cloudflare/i);
+    expect(markup).toMatch(/After that:.*Turo/i);
+    expect(markup).toMatch(/Once Cloudflare.*verified.*reaches your personal inbox/i);
+    expect(markup).toMatch(/Until Cloudflare is verified, this notice appears only as a Review card in Inbox here/i);
+  });
+
   it("stays truthful without asserting live delivery status (no Cloudflare API calls or connected-state claims)", () => {
     const markup = renderToStaticMarkup(createElement(TuroEmailVerificationDetail));
 
