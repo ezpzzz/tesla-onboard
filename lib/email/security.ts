@@ -4,6 +4,7 @@ import {
   EMAIL_ALIAS_SIGNATURE_CHARS,
   EMAIL_ALIAS_TOKEN_BYTES,
   EMAIL_SIGNATURE_WINDOW_SECONDS,
+  lowerBase32Prefix,
 } from "@evhost/email-ingest-contract";
 
 export interface VersionedKeyring {
@@ -41,12 +42,17 @@ export function createWorkspaceAlias(keyring: VersionedKeyring): {
   // fail-closed grammar in SQL, the Worker, and the shared contract. Sizes
   // (EMAIL_ALIAS_TOKEN_BYTES, EMAIL_ALIAS_SIGNATURE_CHARS) are shared with
   // the Worker's verifyAlias and documented in @evhost/email-ingest-contract
-  // -- keep the local part comfortably under RFC 5321's 64-octet cap.
+  // -- keep the local part comfortably under RFC 5321's 64-octet cap. The
+  // signature is base32 (not base64url) specifically so the unconditional
+  // .toLowerCase() verifyWorkspaceAlias applies to the incoming local part
+  // is entropy-lossless -- see the sizing comment on
+  // EMAIL_ALIAS_SIGNATURE_CHARS in @evhost/email-ingest-contract.
   const token = randomBytes(EMAIL_ALIAS_TOKEN_BYTES).toString("hex");
   const keyVersion = keyring.activeVersion;
   const key = keyring.keys.get(keyVersion);
   if (!key) throw new Error("email_alias_key_missing");
-  const signature = createHmac("sha256", key).update(`evhost-email-alias-v1\u001f${token}`).digest("base64url").slice(0, EMAIL_ALIAS_SIGNATURE_CHARS).toLowerCase();
+  const digest = createHmac("sha256", key).update(`evhost-email-alias-v1\u001f${token}`).digest();
+  const signature = lowerBase32Prefix(digest, EMAIL_ALIAS_SIGNATURE_CHARS);
   const localPart = `${token}.${signature}`;
   return {
     address: `${localPart}@mail.evhost.app`,
@@ -61,7 +67,7 @@ export function verifyWorkspaceAlias(localPart: string, keyring: VersionedKeyrin
   const [token, signature, extra] = normalized.split(".");
   if (extra !== undefined || !token || !signature) return false;
   for (const key of keyring.keys.values()) {
-    const expected = createHmac("sha256", key).update(`evhost-email-alias-v1\u001f${token}`).digest("base64url").slice(0, EMAIL_ALIAS_SIGNATURE_CHARS).toLowerCase();
+    const expected = lowerBase32Prefix(createHmac("sha256", key).update(`evhost-email-alias-v1\u001f${token}`).digest(), EMAIL_ALIAS_SIGNATURE_CHARS);
     if (expected.length === signature.length && timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) return true;
   }
   return false;

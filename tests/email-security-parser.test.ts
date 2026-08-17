@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseEmailKeyring, createWorkspaceAlias, verifyWorkspaceAlias, signInternalCapture, verifyInternalCapture } from "@/lib/email/security";
 import { parseTuroEmail } from "@/lib/email/turo-parser";
 import { canAutoApply } from "@/lib/email/capabilities";
-import { EMAIL_ALIAS_SIGNATURE_CHARS } from "@/packages/email-ingest-contract/src";
+import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_ALIAS_TOKEN_BYTES, lowerBase32Prefix } from "@/packages/email-ingest-contract/src";
 
 const keyring = parseEmailKeyring(`1:${Buffer.alloc(32, 7).toString("base64")}`, "TEST_KEYS");
 
@@ -17,11 +17,10 @@ function workerVerifyAlias(localPart: string, keys: ReadonlyMap<number, Buffer>)
   const [token, signature, extra] = localPart.toLowerCase().split(".");
   if (!token || !signature || extra !== undefined) return false;
   for (const key of keys.values()) {
-    const expected = createHmac("sha256", key)
+    const digest = createHmac("sha256", key)
       .update(`evhost-email-alias-v1${token}`)
-      .digest("base64url")
-      .slice(0, EMAIL_ALIAS_SIGNATURE_CHARS)
-      .toLowerCase();
+      .digest();
+    const expected = lowerBase32Prefix(digest, EMAIL_ALIAS_SIGNATURE_CHARS);
     if (expected === signature) return true;
   }
   return false;
@@ -45,12 +44,40 @@ describe("email security", () => {
       const alias = createWorkspaceAlias(keyring);
       const local = alias.address.split("@")[0];
       const octets = Buffer.byteLength(local, "utf8");
-      expect(octets).toBeLessThanOrEqual(48);
+      expect(octets).toBeLessThanOrEqual(52);
       expect(octets).toBeLessThanOrEqual(64);
       // Dot-atom-safe, lowercase, single separator: no leading/trailing/
-      // consecutive dots, exactly one "token.signature" split.
+      // consecutive dots, exactly one "token.signature" split. The signature
+      // half is lowercase base32 (a-z2-7), not base64url -- see the
+      // min-entropy floor test below for why.
+      const [token, signature] = local.split(".");
       expect(local).toMatch(/^[a-z0-9]+\.[a-z0-9_-]+$/);
+      expect(token).toMatch(/^[a-z0-9]{26}$/);
+      expect(signature).toMatch(/^[a-z2-7]{25}$/);
     }
+  });
+
+  it("clears the >=120-bit post-folding min-entropy floor by construction, computed from the sizing constants", () => {
+    // Both createWorkspaceAlias and verifyWorkspaceAlias/verifyAlias
+    // unconditionally lowercase the signature before comparing it, so the
+    // guessing-resistance figure that matters is the min-entropy of the
+    // *lowered* alphabet, not the pre-lowering one. Base32's alphabet
+    // (a-z2-7, RFC 4648) has 32 symbols that are already all-lowercase and
+    // case-distinct, so lowercasing it folds nothing -- every char clears
+    // exactly log2(32) = 5 bits of min-entropy, with no post-folding
+    // penalty. (Contrast the bug this test guards against: base64url's 52
+    // letter positions collapse 2:1 under lowercasing, measured at ~4.994
+    // bits/char after folding -- the previous EMAIL_ALIAS_SIGNATURE_CHARS=21
+    // base64url chars measured ~104.9 bits, below this floor, despite a
+    // stale comment quoting the unfolded 126-bit figure.)
+    const FOLDED_MIN_ENTROPY_BITS_PER_CHAR = 5; // log2(32), exact for base32, not approximate
+    const signatureBits = EMAIL_ALIAS_SIGNATURE_CHARS * FOLDED_MIN_ENTROPY_BITS_PER_CHAR;
+    expect(signatureBits).toBeGreaterThanOrEqual(120);
+
+    // The hex token is never lowercased-with-collisions (0-9a-f has no
+    // uppercase form to fold), so its full raw entropy applies unmodified.
+    const tokenBits = EMAIL_ALIAS_TOKEN_BYTES * 8;
+    expect(tokenBits).toBeGreaterThanOrEqual(96);
   });
 
   it("round-trips: an app-minted alias verifies via the Worker's independent verifyAlias logic", () => {

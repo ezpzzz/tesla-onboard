@@ -1,6 +1,6 @@
 import { env as realEnv } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_MAX_RAW_BYTES } from "@evhost/email-ingest-contract";
+import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_MAX_RAW_BYTES, lowerBase32Prefix } from "@evhost/email-ingest-contract";
 import worker from "../../src/index";
 // Reuse the existing synthetic fixture from the workspace package's test
 // dir -- it's already reviewed content (see
@@ -67,9 +67,6 @@ function toBase64(bytes: Uint8Array): string {
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
-function toBase64Url(bytes: ArrayBuffer): string {
-  return toBase64(new Uint8Array(bytes)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-}
 async function hmacSha256(key: Uint8Array, value: Uint8Array): Promise<ArrayBuffer> {
   const cryptoKey = await crypto.subtle.importKey("raw", key as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return crypto.subtle.sign("HMAC", cryptoKey, value as BufferSource);
@@ -81,7 +78,8 @@ function keyringEnvValue(key: Uint8Array, version = 1): string {
   return `${version}:${toBase64(key)}`;
 }
 async function validAliasLocalPart(token: string, key: Uint8Array): Promise<string> {
-  const signature = toBase64Url(await hmacSha256(key, encoder.encode(`evhost-email-alias-v1${token}`))).slice(0, EMAIL_ALIAS_SIGNATURE_CHARS).toLowerCase();
+  const digest = await hmacSha256(key, encoder.encode(`evhost-email-alias-v1${token}`));
+  const signature = lowerBase32Prefix(new Uint8Array(digest), EMAIL_ALIAS_SIGNATURE_CHARS);
   return `${token}.${signature}`;
 }
 

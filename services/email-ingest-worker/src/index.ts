@@ -1,8 +1,8 @@
 import PostalMime from "postal-mime";
 import {
   canonicalJsonBytes, encodeEvmailEnvelope, encodeEvmailPlaintext, evmailAad,
-  EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_MAX_RAW_BYTES, type AuthorizeManifest, type CaptureFinalizeManifest,
-  type CaptureInitManifest, type NormalizedEmailManifest,
+  EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_MAX_RAW_BYTES, lowerBase32Prefix, type AuthorizeManifest,
+  type CaptureFinalizeManifest, type CaptureInitManifest, type NormalizedEmailManifest,
 } from "@evhost/email-ingest-contract";
 import { normalizeParsedEmail } from "./normalize";
 
@@ -38,9 +38,13 @@ function parseKeys(raw: string): Map<number, Uint8Array> {
   return result;
 }
 
-async function hmac(key: Uint8Array, value: Uint8Array): Promise<string> {
+async function hmacRaw(key: Uint8Array, value: Uint8Array): Promise<ArrayBuffer> {
   const cryptoKey = await crypto.subtle.importKey("raw", key as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return base64url(await crypto.subtle.sign("HMAC", cryptoKey, value as BufferSource));
+  return crypto.subtle.sign("HMAC", cryptoKey, value as BufferSource);
+}
+
+async function hmac(key: Uint8Array, value: Uint8Array): Promise<string> {
+  return base64url(await hmacRaw(key, value));
 }
 
 async function verifyAlias(localPart: string, keys: Map<number, Uint8Array>): Promise<boolean> {
@@ -49,11 +53,15 @@ async function verifyAlias(localPart: string, keys: Map<number, Uint8Array>): Pr
   // length-agnostic. EMAIL_ALIAS_SIGNATURE_CHARS is shared with
   // lib/email/security.ts's createWorkspaceAlias via
   // @evhost/email-ingest-contract so the two sides can never drift out of
-  // sync on the signature's truncation length.
+  // sync on the signature's truncation length. The signature is base32 (not
+  // base64url), which keeps the unconditional .toLowerCase() below
+  // entropy-lossless -- see the sizing comment on EMAIL_ALIAS_SIGNATURE_CHARS
+  // in @evhost/email-ingest-contract.
   const [token, signature, extra] = localPart.toLowerCase().split(".");
   if (!token || !signature || extra !== undefined) return false;
   for (const key of keys.values()) {
-    const expected = (await hmac(key, encoder.encode(`evhost-email-alias-v1\u001f${token}`))).slice(0, EMAIL_ALIAS_SIGNATURE_CHARS).toLowerCase();
+    const digest = await hmacRaw(key, encoder.encode(`evhost-email-alias-v1\u001f${token}`));
+    const expected = lowerBase32Prefix(new Uint8Array(digest), EMAIL_ALIAS_SIGNATURE_CHARS);
     if (expected === signature) return true;
   }
   return false;
