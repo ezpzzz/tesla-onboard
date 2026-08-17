@@ -62,6 +62,14 @@ export function parseReturnPolicyPct(text: string): number {
 
 /** A vehicle's own return-charge override, falling back to the fleet-wide
  * policy when it has none set. */
+/** Same states `cancel_onlyevs_trip` accepts server-side (`confirmed`,
+ * `armed`, `active` map to owner-visible `upcoming`/`active`) -- pulled out
+ * as a pure function so the "Cancel trip" action's visibility is unit
+ * testable without a React render harness. */
+export function isTripCancellable(status: TripStatus): boolean {
+  return status === "upcoming" || status === "active";
+}
+
 export function resolveVehiclePolicyPct(
   vehicle: Vehicle | null | undefined,
   globalPolicyPct: number
@@ -70,7 +78,7 @@ export function resolveVehiclePolicyPct(
 }
 
 export function fleetStats(snapshot: OwnerSnapshot, policyPct: number): FleetStats {
-  const tripCounts: Record<TripStatus, number> = { upcoming: 0, active: 0, completed: 0 };
+  const tripCounts: Record<TripStatus, number> = { upcoming: 0, active: 0, completed: 0, cancelled: 0 };
   let totalMilesRented = 0;
   let totalEnergyCostUsd = 0;
   let totalSuperchargingCostUsd = 0;

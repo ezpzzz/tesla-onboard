@@ -861,5 +861,86 @@ select is(
   1, 'confirming a calendar candidate still issues an access grant (unlike the email create_trip path)'
 );
 
+-- ---------------------------------------------------------------------------
+-- Hardening: 20260816180000_onlyevs_email_action_hardening.sql's two CHECK
+-- constraints (capability/action_type binding, and the state-scoped
+-- destructive brake).
+-- ---------------------------------------------------------------------------
+select pg_temp.seed_inbound('85000000-0000-4000-8000-000000000301', 'hardening-check-a@turo.com');
+select pg_temp.seed_candidate(
+  '86000000-0000-4000-8000-000000000301', '85000000-0000-4000-8000-000000000301', 'RESHARDENA', 'cancellation',
+  jsonb_build_object('subject', 'Guest cancelled'), now()
+);
+
+-- Negative: a destructive action_type can never be inserted under a
+-- non-destructive capability_name (onlyevs_email_actions_capability_action_binding).
+select throws_ok(
+  $$insert into public.onlyevs_email_actions (
+    workspace_id, candidate_id, action_type, idempotency_key, state,
+    integration_revision, candidate_revision, capability_name, capability_revision,
+    proposed_state_hash, effective_trip_id, next_action_at
+  ) values (
+    '82000000-0000-4000-8000-000000000001', '86000000-0000-4000-8000-000000000301', 'cancel_trip',
+    'email-action:hardening-check-a', 'queued', 1, 1, 'active_safe', 0,
+    repeat('0', 64), null, now()
+  )$$,
+  '23514',
+  null,
+  'a cancel_trip action cannot be inserted with a non-destructive capability_name'
+);
+
+-- Positive (regression, restated explicitly): the existing manual Confirm
+-- cancel_trip flow above (candidate 86000000-0000-4000-8000-000000000201,
+-- lines ~394-419) already asserted state='awaiting_owner_alert' with
+-- brake_deadline null and that assertion still passed with both new
+-- constraints in place -- 'awaiting_owner_alert' is not one of the
+-- brake-scoped constraint's blocked states, so the announce-then-brake
+-- window is untouched. Confirmed again here directly against that same row.
+select is(
+  (select state from public.onlyevs_email_actions where candidate_id = '86000000-0000-4000-8000-000000000201'),
+  'succeeded', 'the earlier Confirm cancel_trip flow still reached succeeded under the new constraints'
+);
+select ok(
+  (select brake_deadline from public.onlyevs_email_actions where candidate_id = '86000000-0000-4000-8000-000000000201') is not null,
+  'and its brake_deadline was populated by the time it reached a post-acceptance state, as the scoped constraint requires'
+);
+
+-- Negative: UPDATE-ing a destructive row into the first post-acceptance
+-- state (revocation_pending) without a brake_deadline throws
+-- (onlyevs_email_actions_destructive_brake_scoped). Uses the queued action
+-- just inserted's sibling scenario B row (86000000-0000-4000-8000-000000000202),
+-- which is already 'succeeded' with brake_deadline set -- reset it on a
+-- fresh in-transaction copy instead so this doesn't disturb an assertion
+-- already made against that row.
+select pg_temp.seed_inbound('85000000-0000-4000-8000-000000000302', 'hardening-check-b@turo.com');
+select pg_temp.seed_candidate(
+  '86000000-0000-4000-8000-000000000302', '85000000-0000-4000-8000-000000000302', 'RESHARDENB', 'cancellation',
+  jsonb_build_object('subject', 'Guest cancelled'), now()
+);
+insert into public.onlyevs_email_actions (
+  workspace_id, candidate_id, action_type, idempotency_key, state,
+  integration_revision, candidate_revision, capability_name, capability_revision,
+  proposed_state_hash, effective_trip_id, next_action_at, brake_deadline
+) values (
+  '82000000-0000-4000-8000-000000000001', '86000000-0000-4000-8000-000000000302', 'cancel_trip',
+  'email-action:hardening-check-b', 'awaiting_owner_alert', 1, 1, 'active_destructive', 0,
+  repeat('0', 64), null, now(), null
+);
+select throws_ok(
+  $$update public.onlyevs_email_actions
+    set state = 'revocation_pending'
+    where candidate_id = '86000000-0000-4000-8000-000000000302'$$,
+  '23514',
+  null,
+  'a destructive action cannot reach revocation_pending without a brake_deadline'
+);
+-- Same row, brake_deadline set alongside the transition: allowed.
+select lives_ok(
+  $$update public.onlyevs_email_actions
+    set state = 'revocation_pending', brake_deadline = now() + interval '30 minutes'
+    where candidate_id = '86000000-0000-4000-8000-000000000302'$$,
+  'the same transition succeeds once brake_deadline is set in the same statement'
+);
+
 select * from finish();
 rollback;

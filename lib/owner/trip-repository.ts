@@ -57,7 +57,12 @@ export interface GuestOnboardingLink {
 }
 
 function ownerTripStatus(status: TripRow["status"]): TripStatus | null {
-  if (status === "cancelled" || status === "conflict") return null;
+  // "conflict" (a provider-reported double-booking pending manager review)
+  // stays hidden from the dashboard -- out of scope here, unchanged from
+  // before. "cancelled" is now surfaced rather than dropped: an owner who
+  // cancels a trip needs to see it land in the cancelled state, not vanish.
+  if (status === "conflict") return null;
+  if (status === "cancelled") return "cancelled";
   if (status === "active") return "active";
   if (status === "completed") return "completed";
   return "upcoming";
@@ -389,6 +394,20 @@ export async function confirmCalendarCandidate(input: {
     throw new Error(result?.error ?? "The calendar event could not be confirmed.");
   }
   return { tripId: result.tripId, guestUrl: result.guestUrl };
+}
+
+export async function cancelTrip(tripId: string, reason?: string): Promise<void> {
+  const response = await fetch(`/api/owner/trips/${encodeURIComponent(tripId)}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: reason?.trim() || undefined }),
+    cache: "no-store",
+  });
+  const result = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+  if (!response.ok || !result?.ok) {
+    throw new Error(result?.error ?? "The trip could not be cancelled.");
+  }
+  notifyOwnerTripsChanged();
 }
 
 export async function sendGuestReminder(tripId: string): Promise<{ recipient: string; sentAt: number }> {

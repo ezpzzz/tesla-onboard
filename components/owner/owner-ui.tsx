@@ -118,6 +118,7 @@ const tripStatusMeta: Record<
   completed: { label: "Completed", tone: "good" },
   active: { label: "Active", tone: "brand" },
   upcoming: { label: "Upcoming", tone: "neutral" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
 };
 
 export function TripStatusBadge({ status }: { status: TripStatus }) {
@@ -243,7 +244,7 @@ function buildDriverRows(drivers: Driver[], trips: Trip[], now: number): DriverR
   return drivers.map((driver) => {
     const p = driver.progress;
     const linkedTrip =
-      trips.find((t) => t.driverId === driver.id && t.status !== "completed") ??
+      trips.find((t) => t.driverId === driver.id && t.status !== "completed" && t.status !== "cancelled") ??
       trips.find((t) => t.driverId === driver.id) ??
       null;
     return {
@@ -338,7 +339,7 @@ export function DriverTable({
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  {row.linkedTrip && row.linkedTrip.status !== "completed" && !row.driver.progress?.isDone ? (
+                  {row.linkedTrip && row.linkedTrip.status !== "completed" && row.linkedTrip.status !== "cancelled" && !row.driver.progress?.isDone ? (
                     <ReminderButton tripId={row.linkedTrip.id} />
                   ) : <span className="text-muted">—</span>}
                 </td>
@@ -380,7 +381,7 @@ export function DriverTable({
                 )}
               </div>
             </Link>
-            {row.linkedTrip && row.linkedTrip.status !== "completed" && !row.driver.progress?.isDone ? <ReminderButton tripId={row.linkedTrip.id} className="mt-4" fullWidth /> : null}
+            {row.linkedTrip && row.linkedTrip.status !== "completed" && row.linkedTrip.status !== "cancelled" && !row.driver.progress?.isDone ? <ReminderButton tripId={row.linkedTrip.id} className="mt-4" fullWidth /> : null}
           </div>
         ))}
       </div>

@@ -7,7 +7,7 @@
  * trips that have actually started.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
@@ -16,6 +16,7 @@ import { useTenantConfig } from "@/components/TenantConfigProvider";
 import {
   formatMiles,
   formatUsd,
+  isTripCancellable,
   parseReturnPolicyPct,
   resolveVehiclePolicyPct,
   sessionsForTrip,
@@ -32,7 +33,7 @@ import {
 import { BatteryReturnGauge, TripTimeline } from "@/components/owner/charts";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconAlert } from "@/components/icons";
-import { regenerateGuestOnboardingLink } from "@/lib/owner/trip-repository";
+import { cancelTrip, regenerateGuestOnboardingLink } from "@/lib/owner/trip-repository";
 import { vehicleWorkspaceScope } from "@/lib/owner/vehicle-repository";
 import { fetchTripChargeSessions, saveManualChargeCostOverride } from "@/lib/owner/charge-session-repository";
 import { formatSessionKwhLabel } from "@/lib/owner/charge-sessions";
@@ -72,8 +73,35 @@ export default function TripDetailPage() {
   const [guestUrl, setGuestUrl] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [derivedSessions, setDerivedSessions] = useState<DerivedChargeSession[]>([]);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const cancelTriggerRef = useRef<HTMLButtonElement>(null);
+  const cancelConfirmRef = useRef<HTMLButtonElement>(null);
+  const wasConfirmingCancelRef = useRef(false);
+  const hasMountedCancelRef = useRef(false);
 
   const trip = trips.find((t) => t.id === tripId) ?? null;
+  const cancellable = trip !== null && isTripCancellable(trip.status);
+
+  // Same focus-preservation idiom as the vehicle "Remove from fleet" control
+  // (app/owner/vehicles/[id]/page.tsx): move focus to whichever control just
+  // became relevant instead of letting it drop to <body> when the trigger
+  // button unmounts.
+  useEffect(() => {
+    if (!hasMountedCancelRef.current) {
+      hasMountedCancelRef.current = true;
+      wasConfirmingCancelRef.current = confirmCancel;
+      return;
+    }
+    if (confirmCancel && !wasConfirmingCancelRef.current) {
+      cancelConfirmRef.current?.focus();
+    } else if (!confirmCancel && wasConfirmingCancelRef.current) {
+      cancelTriggerRef.current?.focus();
+    }
+    wasConfirmingCancelRef.current = confirmCancel;
+  }, [confirmCancel]);
   const driver = trip ? drivers.find((d) => d.id === trip.driverId) ?? null : null;
   const vehicle = trip ? vehicles.find((v) => v.id === trip.vehicleId) ?? null : null;
   const sessions = trip ? sessionsForTrip(chargingSessions, trip.id) : [];
@@ -166,6 +194,23 @@ export default function TripDetailPage() {
     }
   }
 
+  async function handleCancelClick() {
+    if (!confirmCancel) {
+      setConfirmCancel(true);
+      return;
+    }
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await cancelTrip(trip!.id);
+      setConfirmCancel(false);
+    } catch (error) {
+      setCancelError(error instanceof Error ? error.message : "The trip could not be cancelled.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader eyebrow="Trip handoff" title={driver?.name || "Trip"} description={`${vehicle?.displayName || config.car.model} · ${formatDateRange(trip.startAt, trip.endAt)}`} action={<TripStatusBadge status={trip.status} />} />
@@ -236,6 +281,46 @@ export default function TripDetailPage() {
           </div>
         )}
       </Card>
+
+      {cancellable && (
+        <Card className="p-4">
+          <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">
+            Cancel trip
+          </div>
+          <p role="status" aria-live="polite" className="sr-only">
+            {confirmCancel
+              ? "Confirm cancellation: the guest link will stop working and any Tesla access will be revoked."
+              : ""}
+          </p>
+          {cancelError ? (
+            <p role="alert" className="mt-3 rounded-md border border-danger/20 bg-danger/[0.04] p-3 text-sm text-danger">
+              {cancelError}
+            </p>
+          ) : null}
+          {confirmCancel ? (
+            <div className="mt-3 space-y-3">
+              <p className="text-sm text-ink-soft">
+                Cancel this trip? The guest&rsquo;s private link stops working immediately, any Tesla
+                access is revoked, and the trip is kept in history — this cannot be undone.
+              </p>
+              <div className="flex gap-2">
+                <Button ref={cancelConfirmRef} variant="secondary" onClick={handleCancelClick} disabled={cancelling}>
+                  {cancelling ? "Cancelling…" : "Confirm cancellation"}
+                </Button>
+                <Button variant="ghost" onClick={() => setConfirmCancel(false)}>
+                  Keep trip
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3">
+              <Button ref={cancelTriggerRef} variant="secondary" onClick={handleCancelClick}>
+                Cancel trip
+              </Button>
+            </div>
+          )}
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <StatTile label="Miles driven" value={miles === null ? "—" : formatMiles(miles)} />

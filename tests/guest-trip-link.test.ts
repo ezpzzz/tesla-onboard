@@ -70,6 +70,20 @@ describe("private guest trip links", () => {
     expect(createAnonymousClient).not.toHaveBeenCalled();
   });
 
+  it("fails closed for a cancelled trip's link (get_onlyevs_trip_invitation excludes status in ('cancelled','conflict'))", async () => {
+    // The RPC's own `where t.status not in ('cancelled', 'conflict')` clause
+    // (20260815190000_evhost_guest_portal.sql) means a cancelled trip's
+    // public token hash simply matches no row -- exercised here at the seam
+    // this module actually controls.
+    rpc.mockResolvedValue({ data: [], error: null });
+    const token = "a".repeat(43);
+
+    await expect(loadGuestTripPortal(token)).resolves.toBeNull();
+    expect(rpc).toHaveBeenCalledWith("get_onlyevs_trip_invitation", {
+      p_public_token_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+  });
+
   it("fails closed when the guest portal provider is not configured", async () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "");

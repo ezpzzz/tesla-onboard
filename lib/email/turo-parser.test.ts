@@ -490,6 +490,72 @@ describe("parseTuroEmail — vehicle-location-derived timezone strategy", () => 
   });
 });
 
+describe("parseTuroEmail — sender_auth_unverified: DMARC-aligned From-domain binding", () => {
+  it("blocks a DMARC-pass message whose visible From domain is not turo.com (domain binding works)", () => {
+    const parsed = parseTuroEmail(manifest({
+      from: "Turo <noreply@mail.turo-support.example>",
+      receiverAuth: { dkim: "pass", dmarc: "pass", spf: "pass", arc: "unknown" },
+    }));
+    expect(parsed.blockerCodes).toContain("sender_auth_unverified");
+  });
+
+  it("blocks a lookalike domain that merely contains turo.com as a substring, not a real subdomain", () => {
+    const parsed = parseTuroEmail(manifest({
+      from: "notturo.com.evil.example <noreply@notturo.com.evil.example>",
+      receiverAuth: { dkim: "pass", dmarc: "pass", spf: "pass", arc: "unknown" },
+    }));
+    expect(parsed.blockerCodes).toContain("sender_auth_unverified");
+  });
+
+  it("blocks a turo.com From address when DMARC did not pass, even if DKIM alone passed", () => {
+    const dmarcUnknown = parseTuroEmail(manifest({
+      from: "Turo <noreply@mail.turo.com>",
+      receiverAuth: { dkim: "pass", dmarc: "unknown", spf: "pass", arc: "unknown" },
+    }));
+    expect(dmarcUnknown.blockerCodes).toContain("sender_auth_unverified");
+
+    const dmarcFail = parseTuroEmail(manifest({
+      from: "Turo <noreply@mail.turo.com>",
+      receiverAuth: { dkim: "pass", dmarc: "fail", spf: "pass", arc: "unknown" },
+    }));
+    expect(dmarcFail.blockerCodes).toContain("sender_auth_unverified");
+  });
+
+  it("clears the blocker for a bare (non display-name) turo.com address with DMARC pass", () => {
+    const parsed = parseTuroEmail(manifest({
+      from: "noreply@mail.turo.com",
+      receiverAuth: { dkim: "pass", dmarc: "pass", spf: "pass", arc: "unknown" },
+    }));
+    expect(parsed.blockerCodes).not.toContain("sender_auth_unverified");
+  });
+
+  it("clears the blocker case-insensitively for a turo.com subdomain", () => {
+    const parsed = parseTuroEmail(manifest({
+      from: "Turo <NoReply@Notify.TURO.COM>",
+      receiverAuth: { dkim: "pass", dmarc: "pass", spf: "pass", arc: "unknown" },
+    }));
+    expect(parsed.blockerCodes).not.toContain("sender_auth_unverified");
+  });
+
+  // Regression: every legitimate Turo template shape (From noreply@mail.turo.com,
+  // DMARC pass, the `manifest()` helper's default receiverAuth) must never trip
+  // the blocker, across all 6 event types the classifier produces.
+  const legitimateSubjectsByType: Array<[string, string]> = [
+    ["booking", "Riley's trip with your Tesla Model 3 is booked!"],
+    ["change", "You've confirmed Riley's change request with your Tesla Model 3"],
+    ["cancellation", "Taylor has cancelled their trip with your Tesla Model 3"],
+    ["guest_message", "Jordan has sent you a message about your Tesla Model 3"],
+    ["noise", "Your earnings are on the way!"],
+    ["unknown", "A completely different Turo subject line"],
+  ];
+
+  it.each(legitimateSubjectsByType)("clears the blocker for a legitimate %s template", (expectedType, subject) => {
+    const parsed = parseTuroEmail(manifest({ subject, text: subject.includes("earnings") ? "We've sent your earnings payment of $99.88." : "Reservation ID #71234567." }));
+    expect(parsed.eventType).toBe(expectedType);
+    expect(parsed.blockerCodes).not.toContain("sender_auth_unverified");
+  });
+});
+
 describe("resolveLocalInstant (direct unit coverage of the DST algorithm)", () => {
   it("resolves an unambiguous instant", () => {
     const result = resolveLocalInstant({ year: 2026, month: 7, day: 4, hour: 14, minute: 0 }, "America/Chicago");
