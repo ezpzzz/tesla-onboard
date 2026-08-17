@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import type { ProgressSummary } from "@/lib/flow";
 import type { Driver, OwnerSnapshot, Trip, TripStatus } from "./types";
+import type { BookendEdge, TripBookend } from "./access-types";
 import type { VehicleWorkspaceScope } from "./vehicle-repository";
 
 export const OWNER_TRIPS_CHANGED_EVENT = "onlyevs:owner-trips-changed";
@@ -130,6 +131,69 @@ export function notifyOwnerTripsChanged(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(OWNER_TRIPS_CHANGED_EVENT));
 }
 
+interface BookendRow {
+  trip_id: string;
+  edge: BookendEdge;
+  odometer_mi: number | null;
+  odometer_observed_at: string | null;
+  battery_pct: number | null;
+  battery_observed_at: string | null;
+  captured_at: string;
+  stale: boolean;
+}
+
+function mapBookendRow(row: BookendRow): TripBookend {
+  return {
+    tripId: row.trip_id,
+    edge: row.edge,
+    odometerMi: row.odometer_mi,
+    odometerObservedAt: row.odometer_observed_at ? Date.parse(row.odometer_observed_at) : null,
+    batteryPct: row.battery_pct,
+    batteryObservedAt: row.battery_observed_at ? Date.parse(row.battery_observed_at) : null,
+    capturedAt: Date.parse(row.captured_at),
+    stale: row.stale,
+  };
+}
+
+/**
+ * Reads both bookend edges for one trip via the hardened
+ * get_onlyevs_trip_bookends() RPC (manager membership enforced in SQL, no
+ * location data involved). Kept for single-trip surfaces (e.g. the
+ * active-trip card, which only ever needs its own trip's bookends) —
+ * fetchWorkspaceOperationalSnapshot below uses the workspace-scoped
+ * get_onlyevs_workspace_trip_bookends() RPC instead of calling this per trip.
+ */
+export async function fetchTripBookends(tripId: string): Promise<TripBookend[]> {
+  const { data, error } = await createClient().rpc("get_onlyevs_trip_bookends", {
+    p_trip_id: tripId,
+  });
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") return [];
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as BookendRow[]).map(mapBookendRow);
+}
+
+/**
+ * Reads every bookend row for a workspace in one round trip via
+ * get_onlyevs_workspace_trip_bookends() — the single-select join the design
+ * calls for, replacing an earlier N-per-trip fan-out of
+ * get_onlyevs_trip_bookends(). Exported standalone for testability.
+ */
+export async function fetchWorkspaceTripBookends(
+  scope: VehicleWorkspaceScope,
+): Promise<TripBookend[]> {
+  const { data, error } = await createClient().rpc("get_onlyevs_workspace_trip_bookends", {
+    p_workspace_id: scope.workspaceId,
+    p_shop_slug: scope.shopSlug,
+  });
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") return [];
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as BookendRow[]).map(mapBookendRow);
+}
+
 export async function fetchWorkspaceOperationalSnapshot(
   scope: VehicleWorkspaceScope,
 ): Promise<OwnerSnapshot> {
@@ -167,6 +231,9 @@ export async function fetchWorkspaceOperationalSnapshot(
       returnLocation: row.return_location ?? row.pickup_location ?? null,
       accessStatus: row.access_status ?? null,
       reminderLastSentAt: row.reminder_last_sent_at ? Date.parse(row.reminder_last_sent_at) : null,
+      // Populated below from private.onlyevs_trip_bookends via
+      // fetchTripBookends — null here is only the pre-join placeholder, not
+      // the final "not captured" state.
       odometerStartMi: null,
       odometerEndMi: null,
       batteryStartPct: null,
@@ -174,7 +241,39 @@ export async function fetchWorkspaceOperationalSnapshot(
       chargingSessionIds: [],
     });
   }
-  return { drivers, trips, chargingSessions: [], vehicles: [] };
+
+  // Join bookends (Phase 2): one workspace-scoped select, not an N-per-trip
+  // RPC fan-out. A read failure must never break the rest of the snapshot —
+  // the tiles, other trips, and drivers still need to render. Falling back
+  // to "no bookend" for every trip is already a valid, honest state
+  // (absent-data rule: renders as "Not captured at pickup/return"), never a
+  // fabricated one.
+  let bookends: TripBookend[] = [];
+  try {
+    bookends = await fetchWorkspaceTripBookends(scope);
+  } catch {
+    bookends = [];
+  }
+  const bookendsByTrip = new Map<string, TripBookend[]>();
+  for (const bookend of bookends) {
+    const list = bookendsByTrip.get(bookend.tripId);
+    if (list) list.push(bookend);
+    else bookendsByTrip.set(bookend.tripId, [bookend]);
+  }
+  const tripsWithBookends: Trip[] = trips.map((trip) => {
+    const tripBookends = bookendsByTrip.get(trip.id) ?? [];
+    const start = tripBookends.find((bookend) => bookend.edge === "start") ?? null;
+    const end = tripBookends.find((bookend) => bookend.edge === "end") ?? null;
+    return {
+      ...trip,
+      odometerStartMi: start?.odometerMi ?? null,
+      odometerEndMi: end?.odometerMi ?? null,
+      batteryStartPct: start?.batteryPct ?? null,
+      batteryEndPct: end?.batteryPct ?? null,
+    };
+  });
+
+  return { drivers, trips: tripsWithBookends, chargingSessions: [], vehicles: [] };
 }
 
 export async function createManualGuestOnboarding(

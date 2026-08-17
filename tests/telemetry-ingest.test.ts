@@ -1,5 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { parseConnectivityPayload, parseTelemetryPayload, telemetryFields } from "@/lib/owner/telemetry-ingest";
+import {
+  isWithinCurrentStatsFreshnessWindow,
+  parseConnectivityPayload,
+  parseTelemetryPayload,
+  telemetryFields,
+} from "@/lib/owner/telemetry-ingest";
+import { HISTORY_LATE_EVENT_BACKFILL_MS } from "@/lib/owner/telemetry-policy";
 
 describe("Tesla decoded telemetry ingestion", () => {
   beforeAll(() => {
@@ -53,5 +59,55 @@ describe("Tesla decoded telemetry ingestion", () => {
     expect(parseConnectivityPayload({ vin: "5YJ3E1EA7KF000001", connectionStatus: "CONNECTED", createdAt: "2026-08-14T12:00:00Z" }))
       .toEqual({ vin: "5YJ3E1EA7KF000001", connectivity: "connected", observedAt: Date.parse("2026-08-14T12:00:00Z") });
     expect(parseConnectivityPayload({ vin: "5YJ3E1EA7KF000001", status: "unknown" })).toBeNull();
+  });
+
+  it("rejects a connectivity event older than 24h even though the vehicle-stats parser now accepts up to 7 days late", () => {
+    // Connectivity only ever feeds onlyevs_vehicle_stats_current (never
+    // history), so it keeps the original 24h bound -- unaffected by T3's
+    // split late-event policy for vehicle-stats telemetry.
+    const stale = new Date(Date.now() - 25 * 60 * 60 * 1_000).toISOString();
+    expect(parseConnectivityPayload({ vin: "5YJ3E1EA7KF000001", connectionStatus: "CONNECTED", createdAt: stale })).toBeNull();
+  });
+
+  describe("split late-event policy (T3, outside-voice Issue 7A)", () => {
+    it("accepts a vehicle-stats event well past 24h old, up to the 7-day history backfill bound", () => {
+      const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1_000).toISOString();
+      expect(parseTelemetryPayload({
+        vin: "5YJ3E1EA7KF000001",
+        createdAt: fourDaysAgo,
+        data: [{ key: "Soc", value: { doubleValue: 55 } }],
+      })).toEqual({ vin: "5YJ3E1EA7KF000001", observedAt: Date.parse(fourDaysAgo), batteryPct: 55 });
+    });
+
+    it("rejects a vehicle-stats event older than HISTORY_LATE_EVENT_BACKFILL_MS (7 days) outright -- not even history accepts it", () => {
+      const tooOld = new Date(Date.now() - HISTORY_LATE_EVENT_BACKFILL_MS - 60_000).toISOString();
+      expect(parseTelemetryPayload({
+        vin: "5YJ3E1EA7KF000001",
+        createdAt: tooOld,
+        data: [{ key: "Soc", value: { doubleValue: 55 } }],
+      })).toBeNull();
+    });
+
+    it("accepts an event exactly at the 7-day backfill boundary", () => {
+      const atBoundary = new Date(Date.now() - HISTORY_LATE_EVENT_BACKFILL_MS).toISOString();
+      expect(parseTelemetryPayload({
+        vin: "5YJ3E1EA7KF000001",
+        createdAt: atBoundary,
+        data: [],
+      })).not.toBeNull();
+    });
+
+    it("isWithinCurrentStatsFreshnessWindow: true within 24h, false just past it", () => {
+      const now = Date.now();
+      expect(isWithinCurrentStatsFreshnessWindow(now - 23 * 60 * 60 * 1_000, now)).toBe(true);
+      expect(isWithinCurrentStatsFreshnessWindow(now - 24 * 60 * 60 * 1_000, now)).toBe(true);
+      expect(isWithinCurrentStatsFreshnessWindow(now - 24 * 60 * 60 * 1_000 - 1, now)).toBe(false);
+    });
+
+    it("isWithinCurrentStatsFreshnessWindow: an event within the 7-day history bound but past 24h is not current-stats-fresh", () => {
+      const now = Date.now();
+      const threeDaysAgo = now - 3 * 24 * 60 * 60 * 1_000;
+      expect(isWithinCurrentStatsFreshnessWindow(threeDaysAgo, now)).toBe(false);
+    });
   });
 });

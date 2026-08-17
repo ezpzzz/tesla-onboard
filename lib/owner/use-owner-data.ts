@@ -28,6 +28,8 @@ import {
 } from "./trip-repository";
 import { vehicleWorkspaceScope } from "./vehicle-repository";
 import { fetchWorkspaceVehicleStats } from "./vehicle-stats-repository";
+import { fetchWorkspaceChargeSessions } from "./charge-session-repository";
+import { toLegacyChargingSessions } from "./charge-sessions";
 import type { VehicleStatsCurrent } from "./access-types";
 import { ONLYEVS_OPERATIONS_ENABLED } from "@/lib/runtime-features";
 
@@ -82,10 +84,22 @@ function useOwnerDataValue() {
     }
     setOperationalError(null);
     const request = scope
-      ? Promise.all([
-          fetchWorkspaceOperationalSnapshot(scope),
-          ONLYEVS_OPERATIONS_ENABLED ? fetchWorkspaceVehicleStats(scope) : Promise.resolve({}),
-        ]).then(([snap, telemetry]) => ({ snap, telemetry }))
+      ? fetchWorkspaceOperationalSnapshot(scope).then(async (snap) => {
+          // Real charge sessions (Phase 3) are derived read-time from
+          // history, keyed off the trips the snapshot just resolved — so
+          // this has to run after the snapshot, not in parallel with it.
+          // A derivation failure must never take down the rest of the
+          // snapshot: fall back to the honest empty list, same as every
+          // other degraded-read path in this hook.
+          const [telemetry, chargeSessions] = await Promise.all([
+            ONLYEVS_OPERATIONS_ENABLED ? fetchWorkspaceVehicleStats(scope) : Promise.resolve({}),
+            fetchWorkspaceChargeSessions(scope, snap.trips).catch(() => []),
+          ]);
+          return {
+            snap: { ...snap, chargingSessions: toLegacyChargingSessions(chargeSessions) },
+            telemetry,
+          };
+        })
       : getOwnerDataSource().getSnapshot().then((snap) => ({ snap, telemetry: {} }));
     request
       .then(({ snap, telemetry }) => {

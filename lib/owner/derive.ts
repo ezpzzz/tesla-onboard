@@ -153,6 +153,78 @@ export function ownerChecklistScore(
   return { done, total: 4 };
 }
 
+// --- Phase 3: windowed trip rollups (odometer/battery vs. bookends) -------
+//
+// Additive to the tripMiles/vehicleStats functions above (unchanged — CRITICAL
+// regression coverage keeps their existing signatures/behavior locked). This
+// is the honest-partial-data cousin: the ledger, active-trip card, and
+// evidence packets all need to render start-only/end-only/absent bookend
+// combinations without guessing, and an odometer regression (end < start,
+// e.g. a bad manual entry) must render as a data-error state rather than a
+// negative mile count.
+
+export type OdometerRollupState =
+  | { kind: "complete"; milesDriven: number }
+  | { kind: "start-only" }
+  | { kind: "end-only" }
+  | { kind: "none" }
+  | { kind: "data-error"; reason: "odometer-regression" };
+
+export interface TripRollupInput {
+  odometerStartMi: number | null;
+  odometerEndMi: number | null;
+  batteryStartPct: number | null;
+  batteryEndPct: number | null;
+  /** Optional policy context, so the same call site can also render
+   * "miles over allowance" / "below return policy" without a second pass. */
+  milesAllowance?: number | null;
+  policyPct?: number | null;
+}
+
+export interface TripWindowRollup {
+  odometer: OdometerRollupState;
+  /** null unless odometer is `complete` and an allowance was supplied. */
+  milesOverAllowance: number | null;
+  /** null unless both battery readings are present. */
+  batteryDeltaPct: number | null;
+  /** null unless the end battery reading and a policy pct are both present. */
+  batteryBelowPolicy: boolean | null;
+}
+
+/** Windowed delta derivation shared by the ledger, the active-trip card, and
+ * evidence packets. Full/start-only/end-only/absent bookend combinations
+ * each render an honest partial result, never a guessed one; an odometer
+ * regression renders `data-error`, never negative miles. */
+export function tripWindowRollup(input: TripRollupInput): TripWindowRollup {
+  const { odometerStartMi, odometerEndMi, batteryStartPct, batteryEndPct, milesAllowance, policyPct } = input;
+
+  let odometer: OdometerRollupState;
+  if (odometerStartMi !== null && odometerEndMi !== null) {
+    odometer = odometerEndMi < odometerStartMi
+      ? { kind: "data-error", reason: "odometer-regression" }
+      : { kind: "complete", milesDriven: odometerEndMi - odometerStartMi };
+  } else if (odometerStartMi !== null) {
+    odometer = { kind: "start-only" };
+  } else if (odometerEndMi !== null) {
+    odometer = { kind: "end-only" };
+  } else {
+    odometer = { kind: "none" };
+  }
+
+  const milesOverAllowance =
+    odometer.kind === "complete" && milesAllowance != null
+      ? Math.max(0, odometer.milesDriven - milesAllowance)
+      : null;
+
+  const batteryDeltaPct =
+    batteryStartPct !== null && batteryEndPct !== null ? batteryEndPct - batteryStartPct : null;
+
+  const batteryBelowPolicy =
+    batteryEndPct !== null && policyPct != null ? batteryEndPct < policyPct : null;
+
+  return { odometer, milesOverAllowance, batteryDeltaPct, batteryBelowPolicy };
+}
+
 export function formatMiles(n: number): string {
   return `${Math.round(n).toLocaleString("en-US")} mi`;
 }
