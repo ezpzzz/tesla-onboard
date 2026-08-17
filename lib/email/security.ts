@@ -3,6 +3,7 @@ import {
   captureSignaturePayload,
   EMAIL_ALIAS_SIGNATURE_CHARS,
   EMAIL_ALIAS_TOKEN_BYTES,
+  EMAIL_ALIAS_TOKEN_CHARS,
   EMAIL_SIGNATURE_WINDOW_SECONDS,
   lowerBase32Prefix,
 } from "@evhost/email-ingest-contract";
@@ -38,16 +39,19 @@ export function createWorkspaceAlias(keyring: VersionedKeyring): {
   aliasHint: string;
   keyVersion: number;
 } {
-  // Hex deliberately avoids punctuation so the local part satisfies the same
-  // fail-closed grammar in SQL, the Worker, and the shared contract. Sizes
-  // (EMAIL_ALIAS_TOKEN_BYTES, EMAIL_ALIAS_SIGNATURE_CHARS) are shared with
-  // the Worker's verifyAlias and documented in @evhost/email-ingest-contract
-  // -- keep the local part comfortably under RFC 5321's 64-octet cap. The
-  // signature is base32 (not base64url) specifically so the unconditional
-  // .toLowerCase() verifyWorkspaceAlias applies to the incoming local part
-  // is entropy-lossless -- see the sizing comment on
-  // EMAIL_ALIAS_SIGNATURE_CHARS in @evhost/email-ingest-contract.
-  const token = randomBytes(EMAIL_ALIAS_TOKEN_BYTES).toString("hex");
+  // Both halves are base32 (RFC 4648 "a-z2-7"), not hex/base64url, so the
+  // local part avoids punctuation for the same fail-closed grammar in SQL,
+  // the Worker, and the shared contract, AND the unconditional
+  // .toLowerCase() verifyWorkspaceAlias/verifyAlias apply to the incoming
+  // local part is entropy-lossless. Sizes (EMAIL_ALIAS_TOKEN_BYTES,
+  // EMAIL_ALIAS_TOKEN_CHARS, EMAIL_ALIAS_SIGNATURE_CHARS) are shared with
+  // the Worker's verifyAlias via @evhost/email-ingest-contract -- see the
+  // sizing/threat-model comment there. Because both sides read sizing from
+  // these shared constants and verify enforces the resulting lengths
+  // exactly, changing either constant is a coordinated app+Worker deploy,
+  // not an independent one: see 20260816160000_onlyevs_email_alias_format's
+  // migration note for the required rollout order.
+  const token = lowerBase32Prefix(randomBytes(EMAIL_ALIAS_TOKEN_BYTES), EMAIL_ALIAS_TOKEN_CHARS);
   const keyVersion = keyring.activeVersion;
   const key = keyring.keys.get(keyVersion);
   if (!key) throw new Error("email_alias_key_missing");
@@ -66,6 +70,15 @@ export function verifyWorkspaceAlias(localPart: string, keyring: VersionedKeyrin
   const normalized = localPart.trim().toLowerCase();
   const [token, signature, extra] = normalized.split(".");
   if (extra !== undefined || !token || !signature) return false;
+  // Exact-length check, not merely non-empty: sizing is pinned to
+  // EMAIL_ALIAS_TOKEN_CHARS / EMAIL_ALIAS_SIGNATURE_CHARS, the same
+  // constants the Worker's verifyAlias checks against, so a token or
+  // signature of the wrong length can never have been minted by
+  // createWorkspaceAlias and is rejected before any HMAC comparison runs.
+  // This makes alias sizing a coordinated app+Worker deploy, not an
+  // independent one -- changing either constant without redeploying both
+  // sides breaks every alias minted under the old size until rotated.
+  if (token.length !== EMAIL_ALIAS_TOKEN_CHARS || signature.length !== EMAIL_ALIAS_SIGNATURE_CHARS) return false;
   for (const key of keyring.keys.values()) {
     const expected = lowerBase32Prefix(createHmac("sha256", key).update(`evhost-email-alias-v1\u001f${token}`).digest(), EMAIL_ALIAS_SIGNATURE_CHARS);
     if (expected.length === signature.length && timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) return true;

@@ -1,6 +1,6 @@
 import { env as realEnv } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_MAX_RAW_BYTES, lowerBase32Prefix } from "@evhost/email-ingest-contract";
+import { EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_ALIAS_TOKEN_CHARS, EMAIL_MAX_RAW_BYTES, lowerBase32Prefix } from "@evhost/email-ingest-contract";
 import worker from "../../src/index";
 // Reuse the existing synthetic fixture from the workspace package's test
 // dir -- it's already reviewed content (see
@@ -78,6 +78,12 @@ function keyringEnvValue(key: Uint8Array, version = 1): string {
   return `${version}:${toBase64(key)}`;
 }
 async function validAliasLocalPart(token: string, key: Uint8Array): Promise<string> {
+  // src/index.ts's verifyAlias now enforces EMAIL_ALIAS_TOKEN_CHARS exactly
+  // (not merely non-empty), so every fixture token passed in here must be
+  // exactly that many characters or the "happy path" tests below would
+  // start failing generic-alias-verification instead of exercising what
+  // they're named for.
+  if (token.length !== EMAIL_ALIAS_TOKEN_CHARS) throw new Error(`test fixture token must be ${EMAIL_ALIAS_TOKEN_CHARS} chars, got "${token}" (${token.length})`);
   const digest = await hmacSha256(key, encoder.encode(`evhost-email-alias-v1${token}`));
   const signature = lowerBase32Prefix(new Uint8Array(digest), EMAIL_ALIAS_SIGNATURE_CHARS);
   return `${token}.${signature}`;
@@ -152,7 +158,7 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
       "/api/internal/turo-email/capture?phase=finalize": () => ({ id: crypto.randomUUID(), state: "finalized" }),
     });
 
-    const to = `${await validAliasLocalPart("happytoken", aliasKey)}@mail.evhost.app`;
+    const to = `${await validAliasLocalPart("happytoken23456", aliasKey)}@mail.evhost.app`;
     const message = buildMessage({ to, raw: encoder.encode(syntheticBookingEml) });
 
     await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true" });
@@ -168,21 +174,45 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
     expect(stored!.customMetadata?.format).toBe("EVMAIL1");
   });
 
-  it("rejects generically when email intake is disabled (the dark-ship default, no overrides)", async () => {
-    // Deliberately uses baseEnv unmodified: EVHOST_EMAIL_INGEST_ENABLED comes
-    // straight from wrangler.jsonc's committed "false" default.
-    expect(baseEnv.EVHOST_EMAIL_INGEST_ENABLED).toBe("false");
+  it("rejects generically when email intake is disabled (fail-closed gate behavior)", async () => {
+    // The gate's fail-closed behavior is the thing under test, not any
+    // particular deployment's committed wrangler.jsonc value -- intake is a
+    // live deployment decision (see PR #27) and can legitimately be "true"
+    // in the checked-in config. So this test pins the gate explicitly rather
+    // than relying on -- or asserting -- what's currently committed.
     const fetchMock = stubFetch({});
 
-    const to = `${await validAliasLocalPart("disabledtoken", aliasKey)}@mail.evhost.app`;
+    const to = `${await validAliasLocalPart("disabledtoken27", aliasKey)}@mail.evhost.app`;
     const message = buildMessage({ to, raw: encoder.encode("irrelevant, never read") });
 
-    await worker.email(message, baseEnv);
+    await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "false" });
 
     expect(message.setReject).toHaveBeenCalledTimes(1);
     expect(message.setReject).toHaveBeenCalledWith("EVhost email intake is paused");
     expect(fetchMock).not.toHaveBeenCalled();
     expect((await baseEnv.EMAIL_BUCKET.list()).objects).toHaveLength(0);
+  });
+
+  it("proceeds past the intake gate when enabled (twin of the disabled-gate test above)", async () => {
+    // Confirms the gate is a genuine on/off switch, not a test that happens
+    // to pass because the fixture's alias/app-origin plumbing never gets
+    // exercised. This mirrors the happy-path test's setup but asserts only
+    // on gate behavior (reaching authorize), not the full pipeline.
+    const objectKey = `email/${crypto.randomUUID()}`;
+    const inboundId = crypto.randomUUID();
+    const fetchMock = stubFetch({
+      "/api/internal/turo-email/authorize": () => ({ inbound_id: inboundId, accepted_alias_revision: 1, object_key: objectKey }),
+      "/api/internal/turo-email/capture?phase=init": () => ({ id: crypto.randomUUID(), state: "init" }),
+      "/api/internal/turo-email/capture?phase=finalize": () => ({ id: crypto.randomUUID(), state: "finalized" }),
+    });
+
+    const to = `${await validAliasLocalPart("enabledtoken234", aliasKey)}@mail.evhost.app`;
+    const message = buildMessage({ to, raw: encoder.encode(syntheticBookingEml) });
+
+    await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true" });
+
+    expect(message.setReject).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/internal/turo-email/authorize"), expect.anything());
   });
 
   it("rejects generically for an unknown/invalid alias, without ever reaching the app origin", async () => {
@@ -202,7 +232,7 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
       "/api/internal/turo-email/authorize": () => ({ inbound_id: crypto.randomUUID(), accepted_alias_revision: 1, object_key: objectKey }),
     });
 
-    const to = `${await validAliasLocalPart("oversizetoken", aliasKey)}@mail.evhost.app`;
+    const to = `${await validAliasLocalPart("oversizetoken27", aliasKey)}@mail.evhost.app`;
     // The size guard reads the envelope-declared size before streaming, so
     // the actual bytes here can stay tiny -- only `rawSize` needs to exceed
     // the cap to exercise the email_raw_too_large path.
@@ -226,7 +256,7 @@ describe("email-ingest-worker email() handler (Workers runtime, real R2)", () =>
       "/api/internal/turo-email/capture?phase=init": () => ({}),
     });
 
-    const to = `${await validAliasLocalPart("malformedtoken", aliasKey)}@mail.evhost.app`;
+    const to = `${await validAliasLocalPart("malformedtoken2", aliasKey)}@mail.evhost.app`;
     const message = buildMessage({ to, raw: encoder.encode(syntheticBookingEml) });
 
     await worker.email(message, { ...baseEnv, EVHOST_EMAIL_INGEST_ENABLED: "true" });

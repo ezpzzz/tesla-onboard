@@ -48,10 +48,17 @@ as a public unauthenticated service.
 
 ## Private email intake rollout
 
-The Cloudflare Email Worker lives in `services/email-ingest-worker`. Its checked
-in Wrangler configuration has no route and keeps intake disabled. Do not attach
-`mail.evhost.app`, create or replace MX records, populate secrets, or enable any
-flag until `docs/spikes/2026-08-16-turo-email-ingestion-go-no-go.md` is approved.
+The Cloudflare Email Worker lives in `services/email-ingest-worker`. Its
+`EVHOST_EMAIL_INGEST_ENABLED` var is a deployment decision, not a fixed
+checked-in default: PR #27 flipped it to `"true"` under the owner's
+authorized go-live (rollout step 6), and routing rules (MX, Email Routing
+catch-all, `mail.evhost.app` attachment) live in Cloudflare configuration
+outside this repo, not in the committed Wrangler file. The fail-closed path
+(intake disabled -> generic reject, no app-origin call, nothing written to
+R2) remains covered by the workerd test suite regardless of which value is
+currently committed. Do not create or replace MX records, populate secrets,
+or flip any of the four `ONLYEVS_EMAIL_AUTO_*` gates until
+`docs/spikes/2026-08-16-turo-email-ingestion-go-no-go.md` is approved.
 
 When approved, create a private R2 bucket with a verified 30-day lifecycle,
 inject the alias/capture/KEK keyrings through secret storage, deploy an immutable

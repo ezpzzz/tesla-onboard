@@ -1,7 +1,7 @@
 import PostalMime from "postal-mime";
 import {
   canonicalJsonBytes, encodeEvmailEnvelope, encodeEvmailPlaintext, evmailAad,
-  EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_MAX_RAW_BYTES, lowerBase32Prefix, type AuthorizeManifest,
+  EMAIL_ALIAS_SIGNATURE_CHARS, EMAIL_ALIAS_TOKEN_CHARS, EMAIL_MAX_RAW_BYTES, lowerBase32Prefix, type AuthorizeManifest,
   type CaptureFinalizeManifest, type CaptureInitManifest, type NormalizedEmailManifest,
 } from "@evhost/email-ingest-contract";
 import { normalizeParsedEmail } from "./normalize";
@@ -48,17 +48,20 @@ async function hmac(key: Uint8Array, value: Uint8Array): Promise<string> {
 }
 
 async function verifyAlias(localPart: string, keys: Map<number, Uint8Array>): Promise<boolean> {
-  // Token length is not checked here -- verifyAlias only requires it to be
-  // a non-empty run of characters before the ".", so it is already
-  // length-agnostic. EMAIL_ALIAS_SIGNATURE_CHARS is shared with
-  // lib/email/security.ts's createWorkspaceAlias via
-  // @evhost/email-ingest-contract so the two sides can never drift out of
-  // sync on the signature's truncation length. The signature is base32 (not
-  // base64url), which keeps the unconditional .toLowerCase() below
-  // entropy-lossless -- see the sizing comment on EMAIL_ALIAS_SIGNATURE_CHARS
-  // in @evhost/email-ingest-contract.
+  // Token and signature lengths are checked exactly, not merely required
+  // non-empty: EMAIL_ALIAS_TOKEN_CHARS / EMAIL_ALIAS_SIGNATURE_CHARS are
+  // shared with lib/email/security.ts's createWorkspaceAlias via
+  // @evhost/email-ingest-contract, so the two sides can never drift out of
+  // sync on sizing -- but that also means alias sizing is now a coordinated
+  // app+Worker deploy, not an independent one: changing either constant
+  // without redeploying both sides breaks every alias minted under the old
+  // size until it is rotated. The signature is base32 (not base64url),
+  // which keeps the unconditional .toLowerCase() below entropy-lossless --
+  // see the sizing comment on EMAIL_ALIAS_SIGNATURE_CHARS in
+  // @evhost/email-ingest-contract.
   const [token, signature, extra] = localPart.toLowerCase().split(".");
   if (!token || !signature || extra !== undefined) return false;
+  if (token.length !== EMAIL_ALIAS_TOKEN_CHARS || signature.length !== EMAIL_ALIAS_SIGNATURE_CHARS) return false;
   for (const key of keys.values()) {
     const digest = await hmacRaw(key, encoder.encode(`evhost-email-alias-v1\u001f${token}`));
     const expected = lowerBase32Prefix(new Uint8Array(digest), EMAIL_ALIAS_SIGNATURE_CHARS);
@@ -137,7 +140,12 @@ export default {
       const sourceMessageId = message.headers?.get("message-id")?.trim().slice(0, 998) || null;
 
       phase = "authorize";
-      const authorize: AuthorizeManifest = { version: 1, aliasId: localPart.slice(-8), envelopeRecipientHash: aliasHash, sourceMessageId, requestedInboundId, timestamp: Math.floor(Date.now() / 1_000), nonce: randomBase64url(16) };
+      // aliasId is the last 8 chars of the *token* half only (matching
+      // lib/email/security.ts's createWorkspaceAlias aliasHint =
+      // token.slice(-8)), not of the whole local part -- at the current
+      // 8-char signature length, `localPart.slice(-8)` would be the entire
+      // HMAC signature, and a manifest is not where that belongs.
+      const authorize: AuthorizeManifest = { version: 1, aliasId: localPart.split(".")[0].slice(-8), envelopeRecipientHash: aliasHash, sourceMessageId, requestedInboundId, timestamp: Math.floor(Date.now() / 1_000), nonce: randomBase64url(16) };
       const authorizeResponse = await signedPost(env, "authorize", "/api/internal/turo-email/authorize", canonicalJsonBytes(authorize));
       const authorized = assertAuthorizeResponse(authorizeResponse);
 
