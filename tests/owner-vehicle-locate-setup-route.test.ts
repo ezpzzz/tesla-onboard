@@ -1,0 +1,155 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+
+const createClient = vi.fn();
+const fetchVehicleLocationReading = vi.fn();
+const getConfig = vi.fn();
+const resolveRegionBase = vi.fn();
+const unseal = vi.fn();
+
+vi.mock("@/lib/supabase/server", () => ({ createClient }));
+vi.mock("@/lib/tesla-server", () => ({ fetchVehicleLocationReading, getConfig, resolveRegionBase, unseal }));
+
+const { GET } = await import("@/app/api/owner/vehicles/[id]/locate-setup/route");
+
+const vehicleId = "00000000-0000-4000-8000-000000000002";
+const context = { params: Promise.resolve({ id: vehicleId }) } as RouteContext<"/api/owner/vehicles/[id]/locate-setup">;
+
+function request(withCookie?: string) {
+  const req = new NextRequest(`https://evhost.app/api/owner/vehicles/${vehicleId}/locate-setup`);
+  if (withCookie !== undefined) req.cookies.set("rtr_owner_tesla", withCookie);
+  return req;
+}
+
+/** Table access tracker: fails the test loudly if the route ever touches a
+ * table other than onlyevs_vehicles (its one honest read), and records every
+ * insert/update call so "never writes location tables" can be asserted. */
+function makeSupabase(vehicleRow: unknown, writes: string[]) {
+  return {
+    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "owner-1" } } }) },
+    from: vi.fn((table: string) => {
+      if (table !== "onlyevs_vehicles") throw new Error(`unexpected table access: ${table}`);
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn().mockResolvedValue({ data: vehicleRow, error: null }),
+          })),
+        })),
+        insert: vi.fn(() => { writes.push(`insert:${table}`); return { error: null }; }),
+        update: vi.fn(() => { writes.push(`update:${table}`); return { eq: vi.fn(() => ({ error: null })) }; }),
+      };
+    }),
+  };
+}
+
+describe("GET /api/owner/vehicles/[id]/locate-setup", () => {
+  let writes: string[];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    writes = [];
+    getConfig.mockReturnValue({
+      sessionSecret: "a-session-secret-that-is-at-least-32-bytes-long",
+      audience: "https://fleet-api.prd.na.vn.cloud.tesla.com",
+    });
+    createClient.mockResolvedValue(
+      makeSupabase({ id: vehicleId, vin: "5YJ3E1EA0PF000001" }, writes),
+    );
+  });
+
+  it("returns vehicle_not_found for an unknown vehicle without reading Tesla", async () => {
+    createClient.mockResolvedValue(makeSupabase(null, writes));
+    const response = await GET(request(), context);
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ state: "vehicle_not_found" });
+    expect(fetchVehicleLocationReading).not.toHaveBeenCalled();
+  });
+
+  it("returns vin_unknown when the vehicle has no VIN on file", async () => {
+    createClient.mockResolvedValue(makeSupabase({ id: vehicleId, vin: null }, writes));
+    const response = await GET(request(), context);
+    await expect(response.json()).resolves.toEqual({ state: "vin_unknown" });
+    expect(fetchVehicleLocationReading).not.toHaveBeenCalled();
+  });
+
+  it("reports reconnect_required when no transient Tesla session cookie is present", async () => {
+    const response = await GET(request(), context);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ state: "reconnect_required" });
+    expect(fetchVehicleLocationReading).not.toHaveBeenCalled();
+  });
+
+  it("reports reconnect_required when the sealed session has expired", async () => {
+    unseal.mockReturnValue({
+      kind: "transient_fleet",
+      accessToken: "tok",
+      verifiedSubject: "sub",
+      expiresAt: Date.now() - 1_000,
+    });
+    const response = await GET(request("sealed-session"), context);
+    await expect(response.json()).resolves.toEqual({ state: "reconnect_required" });
+    expect(fetchVehicleLocationReading).not.toHaveBeenCalled();
+  });
+
+  it("performs a one-shot read on success and never writes to any table", async () => {
+    unseal.mockReturnValue({
+      kind: "transient_fleet",
+      accessToken: "tok",
+      verifiedSubject: "sub",
+      expiresAt: Date.now() + 60_000,
+    });
+    resolveRegionBase.mockResolvedValue("https://fleet-api.prd.na.vn.cloud.tesla.com");
+    fetchVehicleLocationReading.mockResolvedValue({ latitude: 33.45, longitude: -111.94 });
+
+    const response = await GET(request("sealed-session"), context);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      state: "reading",
+      latitude: 33.45,
+      longitude: -111.94,
+    });
+    expect(fetchVehicleLocationReading).toHaveBeenCalledWith(
+      "https://fleet-api.prd.na.vn.cloud.tesla.com",
+      "tok",
+      "5YJ3E1EA0PF000001",
+    );
+    expect(writes).toEqual([]);
+    // One-shot: the transient session cookie must be consumed regardless of outcome.
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/rtr_owner_tesla=;/);
+  });
+
+  it("reports read_failed without throwing (and writes nothing) when the Tesla read fails", async () => {
+    unseal.mockReturnValue({
+      kind: "transient_fleet",
+      accessToken: "tok",
+      verifiedSubject: "sub",
+      expiresAt: Date.now() + 60_000,
+    });
+    resolveRegionBase.mockResolvedValue("https://fleet-api.prd.na.vn.cloud.tesla.com");
+    fetchVehicleLocationReading.mockResolvedValue(null);
+
+    const response = await GET(request("sealed-session"), context);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ state: "read_failed" });
+    expect(writes).toEqual([]);
+  });
+
+  it("reports read_failed (never a 500) when the Tesla call throws", async () => {
+    unseal.mockReturnValue({
+      kind: "transient_fleet",
+      accessToken: "tok",
+      verifiedSubject: "sub",
+      expiresAt: Date.now() + 60_000,
+    });
+    resolveRegionBase.mockRejectedValue(new Error("network down"));
+
+    const response = await GET(request("sealed-session"), context);
+
+    expect(response.status).not.toBe(500);
+    await expect(response.json()).resolves.toEqual({ state: "read_failed" });
+    expect(writes).toEqual([]);
+  });
+});
