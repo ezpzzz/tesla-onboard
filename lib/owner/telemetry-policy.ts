@@ -101,6 +101,37 @@ export const TELEMETRY_REMOVAL_MAX_ATTEMPTS = 20;
  * while the deployment gap remains unfixed. */
 export const TELEMETRY_CONFIG_ERROR_RETRY_MS = 15 * 60 * 1_000;
 
+/** THE single source of truth for which `TeslaTelemetryError` codes count as
+ * a *deployment's own* configuration gap (never a property of the vehicle
+ * or its Tesla account) -- currently the signed configure() write's proxy
+ * base and the plain-REST status()/remove() calls' region base
+ * (`TeslaTelemetryClient.resolveBase`, lib/owner/tesla-telemetry-client.ts).
+ *
+ * Two independent consumers must agree on exactly this set or an enrollment
+ * silently gets stranded:
+ *   1. `isDeploymentConfigTelemetryError` (services/onlyevs-worker/index.ts)
+ *      derives from this constant -- never an inline string/array literal --
+ *      so the worker's "retry on TELEMETRY_CONFIG_ERROR_RETRY_MS, not the
+ *      365-day vehicle park" branch fires for exactly this set.
+ *   2. `private.claim_onlyevs_due_telemetry`'s deployment-config allowlist
+ *      (supabase/migrations/20260818210000_onlyevs_telemetry_config_error_reclaim.sql
+ *      and any later migration that CREATE OR REPLACEs it), plus the
+ *      matching partial index, must list exactly this same set of codes --
+ *      otherwise a row the worker marks `status = 'error'` with a short
+ *      retry is never re-evaluated by the ONE query that claims due rows,
+ *      making the "short retry" dead code (the exact defect this constant
+ *      exists to prevent from recurring). This is SQL, so it cannot import
+ *      the constant directly; instead
+ *      services/onlyevs-worker/test/telemetry-config-error-code-lockstep.test.ts
+ *      reads the migration SQL from disk and asserts its allowlist is
+ *      exactly this set. Any change here MUST be paired with a new
+ *      migration widening both the claim predicate and the partial index,
+ *      or that guard test fails. */
+export const TELEMETRY_DEPLOYMENT_CONFIG_ERROR_CODES = [
+  "telemetry_proxy_not_configured",
+  "telemetry_region_not_configured",
+] as const;
+
 /** Once an enrollment reaches 'active', the worker's status() poll backs
  * off to this interval instead of the short one used for every other state
  * -- tesla-api-alignment-20260818.md D1: the prior unconditional 5-minute

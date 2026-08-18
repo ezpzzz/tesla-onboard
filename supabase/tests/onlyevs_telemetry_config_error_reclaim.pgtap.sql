@@ -6,16 +6,34 @@
 -- pre-existing predicate filtered status = 'error' out categorically and
 -- never evaluated next_action_at for it at all.
 --
+-- Defect 1B (20260818220000_onlyevs_telemetry_config_error_reclaim_widen.sql):
+-- the same dead-code shape recurred for a SECOND deployment-config code,
+-- telemetry_region_not_configured, when the worker's predicate widened to
+-- include it but the SQL allowlist above wasn't widened to match. This
+-- suite now seeds a distinct row for EVERY code in the deployment-config
+-- allowlist (not just the first) and claims them all in the SAME call
+-- alongside a genuinely-permanent vehicle-specific error row and an
+-- 'unsupported' row, so it proves each code is independently claimable
+-- while those two stay excluded -- exactly the shape of check that would
+-- have caught defect 1B. Keeping this list of codes, the migration's
+-- allowlist, and TELEMETRY_DEPLOYMENT_CONFIG_ERROR_CODES
+-- (lib/owner/telemetry-policy.ts) from drifting apart is
+-- services/onlyevs-worker/test/telemetry-config-error-code-lockstep.test.ts's
+-- job, not this file's -- this file is plain SQL and cannot import a
+-- TypeScript constant.
+--
 -- The whole point of this suite is to exercise the real claim predicate
 -- against real rows, never a SQL string -- that is exactly the kind of test
 -- that would have caught the dead code the first time.
 
 begin;
-select plan(8);
+select plan(9);
 
 -- =====================================================================
--- Fixtures: one workspace, one Tesla integration, three vehicles each
--- with a distinct enrollment shape.
+-- Fixtures: one workspace, one Tesla integration, six vehicles each with a
+-- distinct enrollment shape -- one per deployment-config allowlist code,
+-- plus a permanent-error vehicle, an unsupported vehicle, and an ordinary
+-- requested vehicle.
 -- =====================================================================
 
 insert into public.workspaces (id, name, slug)
@@ -35,7 +53,9 @@ insert into public.onlyevs_integrations (
 insert into public.onlyevs_vehicles (id, workspace_id, shop_slug, display_name, model, year, color)
 values
   ('92300000-0000-4000-8000-000000000001', '92100000-0000-4000-8000-000000000001',
-    'telemetry-reclaim-test', 'Deployment Gap Vehicle', 'Model 3', 2024, 'White'),
+    'telemetry-reclaim-test', 'Proxy Not Configured Vehicle', 'Model 3', 2024, 'White'),
+  ('92300000-0000-4000-8000-000000000006', '92100000-0000-4000-8000-000000000001',
+    'telemetry-reclaim-test', 'Region Not Configured Vehicle', 'Model 3', 2024, 'Pearl White'),
   ('92300000-0000-4000-8000-000000000002', '92100000-0000-4000-8000-000000000001',
     'telemetry-reclaim-test', 'Permanent Failure Vehicle', 'Model Y', 2024, 'Black'),
   ('92300000-0000-4000-8000-000000000003', '92100000-0000-4000-8000-000000000001',
@@ -43,9 +63,9 @@ values
   ('92300000-0000-4000-8000-000000000004', '92100000-0000-4000-8000-000000000001',
     'telemetry-reclaim-test', 'Requested Vehicle', 'Model X', 2023, 'Blue');
 
--- (1) Blocked ONLY by an unconfigured deployment: status='error',
--- last_error_code is in the deployment-config allowlist, next_action_at is
--- already due.
+-- (1) Blocked ONLY by an unconfigured deployment proxy: status='error',
+-- last_error_code = 'telemetry_proxy_not_configured' (first code in the
+-- allowlist), next_action_at is already due.
 insert into public.onlyevs_telemetry_enrollments (
   workspace_id, vehicle_id, integration_id, status, last_error_code, attempt_count, next_action_at
 ) values (
@@ -53,9 +73,21 @@ insert into public.onlyevs_telemetry_enrollments (
   '92200000-0000-4000-8000-000000000001', 'error', 'telemetry_proxy_not_configured', 0, now() - interval '1 minute'
 );
 
+-- (1b) Blocked ONLY by an unconfigured deployment region base: status='error',
+-- last_error_code = 'telemetry_region_not_configured' (second code in the
+-- allowlist -- the exact code defect 1B left permanently stranded), also
+-- already due. Seeding both codes and claiming them in the SAME call below
+-- is what proves the allowlist covers every code, not just the first.
+insert into public.onlyevs_telemetry_enrollments (
+  workspace_id, vehicle_id, integration_id, status, last_error_code, attempt_count, next_action_at
+) values (
+  '92100000-0000-4000-8000-000000000001', '92300000-0000-4000-8000-000000000006',
+  '92200000-0000-4000-8000-000000000001', 'error', 'telemetry_region_not_configured', 0, now() - interval '1 minute'
+);
+
 -- (2) A genuinely vehicle-specific / permanent error: status='error' but a
 -- last_error_code NOT in the allowlist -- must stay excluded exactly as
--- before this migration.
+-- before this migration, even with two other 'error' rows now claimable.
 insert into public.onlyevs_telemetry_enrollments (
   workspace_id, vehicle_id, integration_id, status, last_error_code, attempt_count, next_action_at
 ) values (
@@ -94,32 +126,40 @@ select results_eq(
   $$
     values
       ('92300000-0000-4000-8000-000000000001'),
-      ('92300000-0000-4000-8000-000000000004')
+      ('92300000-0000-4000-8000-000000000004'),
+      ('92300000-0000-4000-8000-000000000006')
   $$,
-  'exactly the deployment-config-blocked row and the ordinary requested row are claimed -- not the permanent-error row, not the unsupported row'
+  'exactly BOTH deployment-config-blocked rows (one per allowlist code) and the ordinary requested row are claimed -- not the permanent-error row, not the unsupported row'
 );
 
 -- =====================================================================
--- (5) The claimed deployment-config row's own state proves it is a real
--- reclaim, not a no-op: claimed_by/claim_expires_at are now set.
+-- (5) Each claimed deployment-config row's own state proves it is a real
+-- reclaim, not a no-op: claimed_by/claim_expires_at are now set. Checked
+-- for BOTH codes, not just telemetry_proxy_not_configured.
 -- =====================================================================
 
 select is(
   (select claimed_by from public.onlyevs_telemetry_enrollments
     where vehicle_id = '92300000-0000-4000-8000-000000000001'),
   'pgtap-test-worker-1',
-  'the deployment-config-blocked row is actually marked claimed by the worker'
+  'the telemetry_proxy_not_configured row is actually marked claimed by the worker'
 );
 select ok(
   (select claim_expires_at from public.onlyevs_telemetry_enrollments
     where vehicle_id = '92300000-0000-4000-8000-000000000001') > now(),
-  'the claim lease on the reclaimed row is in the future'
+  'the claim lease on the telemetry_proxy_not_configured row is in the future'
 );
 select is(
   (select status from public.onlyevs_telemetry_enrollments
     where vehicle_id = '92300000-0000-4000-8000-000000000001'),
   'error',
   'claiming does not itself change status away from error -- only processTelemetry does that once it actually runs'
+);
+select is(
+  (select claimed_by from public.onlyevs_telemetry_enrollments
+    where vehicle_id = '92300000-0000-4000-8000-000000000006'),
+  'pgtap-test-worker-1',
+  'the telemetry_region_not_configured row is ALSO actually marked claimed by the worker -- this is the exact row defect 1B left permanently stranded'
 );
 
 -- =====================================================================
@@ -151,7 +191,7 @@ select is(
 );
 
 -- =====================================================================
--- (8) Sanity: a status='error' row with the allowlisted code but
+-- (8) Sanity: a status='error' row with an allowlisted code but
 -- next_action_at still in the future is NOT due yet.
 -- =====================================================================
 
@@ -162,7 +202,7 @@ insert into public.onlyevs_telemetry_enrollments (
   workspace_id, vehicle_id, integration_id, status, last_error_code, attempt_count, next_action_at
 ) values (
   '92100000-0000-4000-8000-000000000001', '92300000-0000-4000-8000-000000000005',
-  '92200000-0000-4000-8000-000000000001', 'error', 'telemetry_proxy_not_configured', 0, now() + interval '10 minutes'
+  '92200000-0000-4000-8000-000000000001', 'error', 'telemetry_region_not_configured', 0, now() + interval '10 minutes'
 );
 select is(
   (select count(*)::integer from private.claim_onlyevs_due_telemetry('pgtap-test-worker-3', 10)),
