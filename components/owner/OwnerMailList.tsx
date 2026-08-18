@@ -18,7 +18,7 @@
  * reaches the same empty state through a real, empty RPC response.
  */
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type SubmitEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useOwnerTenant } from "./OwnerTenantProvider";
@@ -132,7 +132,7 @@ export function OwnerMailList() {
   // `cursor` advanced (matching OwnerInbox.tsx's own load-effect split).
   useEffect(() => { void load(false); }, [scope?.key, crossLinkKey, activeSearch, filters]);
 
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
+  function submitSearch(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setActiveSearch(searchInput.trim());
   }

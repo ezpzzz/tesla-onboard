@@ -1,7 +1,13 @@
-"use client";
-
 /**
  * Rendering + data-shaping for a single Turo-email inbox candidate.
+ *
+ * No "use client" directive here -- this file has no client-only APIs of its
+ * own (hooks, browser globals) and is only ever imported from
+ * OwnerInbox.tsx, which already carries "use client". A redundant directive
+ * on a non-entry file makes Next.js treat its exported function props
+ * (onToggle, onRemoteImagesAllowed below) as a client/server boundary,
+ * tripping the @next/next "use-client-server-action" warning (71007) for no
+ * behavioral reason.
  *
  * `onlyevs_email_candidates.proposed_state` / `.correction_facts` are opaque
  * jsonb columns produced by the parser (`lib/email/turo-parser.ts`, owned by
