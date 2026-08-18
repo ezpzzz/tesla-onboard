@@ -1,15 +1,23 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  BACKGROUND_ATTR_JAVASCRIPT,
+  BASE_HREF_HIJACK,
   CID_IMAGE,
   CSS_EXFIL_URL,
+  EGRESS_ONLY_FIXTURES,
+  EMBED_TAG,
+  FORM_ACTION_SUBMIT,
   HOSTILE_TRACKING_HOST,
   JAVASCRIPT_HREF,
   KITCHEN_SINK_EGRESS,
   META_REFRESH,
+  OBJECT_TAG,
+  POSTER_ATTR_JAVASCRIPT,
   REMOTE_IMAGE,
   SCRIPT_EXECUTION_FIXTURES,
   SCRIPT_INLINE,
   SCRIPT_SRC,
+  SVG_XLINK_JAVASCRIPT,
   type HostileMailFixture,
 } from "./fixtures/hostile-mail";
 
@@ -108,6 +116,12 @@ test.describe("hostile mail render security (T15, 6A)", () => {
         // action a guest would take, rather than only checking the markup.
         await frame.locator("#hostile-link").click({ force: true }).catch(() => undefined);
       }
+      if (fixture.id === "svg-xlink-javascript") {
+        // Same real-click discipline for the SVG-namespaced sibling of
+        // javascript-href: the strip removes xlink:href, so clicking the
+        // hrefless SVG <a> must be a no-op too.
+        await frame.locator("#hostile-svg-link").click({ force: true }).catch(() => undefined);
+      }
 
       // Give any handler that survived stripping+sandboxing a moment to
       // fire before asserting silence.
@@ -129,22 +143,102 @@ test.describe("hostile mail render security (T15, 6A)", () => {
     expect(await frame.locator("#hostile-link").getAttribute("href")).toBeNull();
   });
 
+  test("javascript: xlink:href is stripped from the DOM entirely, not just neutralized on click", async ({ page }) => {
+    await openHarness(page, SVG_XLINK_JAVASCRIPT);
+    const frame = page.frameLocator(FRAME_SELECTOR);
+    await expect(frame.locator("#hostile-svg-link")).toHaveCount(1);
+    expect(await frame.locator("#hostile-svg-link").getAttribute("xlink:href")).toBeNull();
+  });
+
+  test("javascript: background= attribute is stripped from the DOM entirely", async ({ page }) => {
+    await openHarness(page, BACKGROUND_ATTR_JAVASCRIPT);
+    const frame = page.frameLocator(FRAME_SELECTOR);
+    await expect(frame.locator("#hostile-bg-table")).toHaveCount(1);
+    expect(await frame.locator("#hostile-bg-table").getAttribute("background")).toBeNull();
+  });
+
+  test("javascript: poster= attribute is stripped from the DOM entirely", async ({ page }) => {
+    await openHarness(page, POSTER_ATTR_JAVASCRIPT);
+    const frame = page.frameLocator(FRAME_SELECTOR);
+    await expect(frame.locator("#hostile-poster-video")).toHaveCount(1);
+    expect(await frame.locator("#hostile-poster-video").getAttribute("poster")).toBeNull();
+  });
+
+  test("<object> and <embed> are removed from the DOM entirely, not merely blocked from fetching", async ({ page }) => {
+    await openHarness(page, OBJECT_TAG);
+    await expect(page.frameLocator(FRAME_SELECTOR).locator("#hostile-object")).toHaveCount(0);
+
+    await openHarness(page, EMBED_TAG);
+    await expect(page.frameLocator(FRAME_SELECTOR).locator("#hostile-embed")).toHaveCount(0);
+  });
+
+  test("<form> is removed from the DOM entirely -- the submit control never renders at all", async ({ page }) => {
+    await openHarness(page, FORM_ACTION_SUBMIT);
+    const frame = page.frameLocator(FRAME_SELECTOR);
+    await expect(frame.locator("#hostile-form")).toHaveCount(0);
+    await expect(frame.locator("#hostile-submit")).toHaveCount(0);
+  });
+
   test('iframe carries sandbox="" with no allow-scripts, ever', async ({ page }) => {
     await openHarness(page, SCRIPT_INLINE);
     const sandbox = await page.locator(FRAME_SELECTOR).getAttribute("sandbox");
     expect(sandbox).toBe("");
   });
 
-  test("default CSP blocks scripts and non-data image sources", async ({ page }) => {
+  test("default CSP blocks scripts, non-data image sources, form submission, and base-uri rewriting", async ({ page }) => {
     await openHarness(page, SCRIPT_INLINE);
     const frame = page.frameLocator(FRAME_SELECTOR);
     const cspContent = await frame.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute("content");
     expect(cspContent).toContain("script-src 'none'");
     expect(cspContent).toContain("img-src data:");
+    expect(cspContent).toContain("form-action 'none'");
+    expect(cspContent).toContain("base-uri 'none'");
     expect(cspContent).not.toContain("https:");
   });
 
+  test("<form> submission attempt causes no navigation, even though the <form> was already stripped", async ({ page }) => {
+    const tracker = trackHostileNetwork(page);
+    await openHarness(page, FORM_ACTION_SUBMIT);
+    const startUrl = page.url();
+    // The strip already removed the whole <form>, so there is nothing to
+    // click -- attempt it anyway (force:true against a selector that no
+    // longer exists resolves to zero elements and no-ops) so this test
+    // would fail loudly if a future strip regression ever let the form
+    // survive: form-action 'none' is the CSP's independent second wall.
+    await page.frameLocator(FRAME_SELECTOR).locator("#hostile-submit").click({ force: true, timeout: 1000 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+    expect(page.url()).toBe(startUrl);
+    expectNoEgress(tracker);
+  });
+
+  test("<base href> hijack never redirects the relative link's click, and never resolves through the tracking host", async ({ page }) => {
+    const tracker = trackHostileNetwork(page);
+    await openHarness(page, BASE_HREF_HIJACK);
+    const frame = page.frameLocator(FRAME_SELECTOR);
+    await expect(frame.locator("#hostile-relative-link")).toBeVisible();
+
+    // Even if <base> survived the strip (it's not in REMOVED_TAG_NAMES),
+    // base-uri 'none' must stop the browser from ever honoring it -- so
+    // clicking the relative link must never resolve against the tracking
+    // host. Same-document navigations inside a sandboxed, srcdoc iframe
+    // with no allow-* top-level-navigation token are themselves blocked, so
+    // this also proves the click is fully inert.
+    await frame.locator("#hostile-relative-link").click({ force: true, timeout: 1000 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+    expect(page.url()).toContain(HARNESS_URL);
+    expectNoEgress(tracker);
+  });
+
   test.describe("zero third-party network egress", () => {
+    for (const fixture of EGRESS_ONLY_FIXTURES) {
+      test(`${fixture.id}: never reaches the network`, async ({ page }) => {
+        const tracker = trackHostileNetwork(page);
+        await openHarness(page, fixture);
+        await page.waitForTimeout(300);
+        expectNoEgress(tracker);
+      });
+    }
+
     test("external <script src> never reaches the network", async ({ page }) => {
       const tracker = trackHostileNetwork(page);
       await openHarness(page, SCRIPT_SRC);

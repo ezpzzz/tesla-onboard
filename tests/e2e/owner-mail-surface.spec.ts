@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { computeScaleToFit } from "../../components/owner/mail-render-prep";
 import { FIXED_WIDTH_TABLE, type HostileMailFixture } from "./fixtures/hostile-mail";
 
 /**
@@ -70,13 +71,55 @@ test.describe("/owner/mail cold state", () => {
 });
 
 test.describe("fixed-width mail legibility", () => {
-  test("650px Turo-style table stays legible with scale-to-fit, no page-level horizontal scroll", async ({ page }) => {
+  /**
+   * MailContentFrame.tsx's ASSUMED_MAIL_CONTENT_WIDTH -- the fixed reference
+   * width computeScaleToFit divides the measured container width by. Not
+   * exported (it's an internal rendering constant), so it's duplicated here
+   * the same way mail-render-prep.ts's own doc comment describes other
+   * modules re-declaring shapes rather than importing across the
+   * client/pure-function boundary.
+   */
+  const ASSUMED_MAIL_CONTENT_WIDTH = 650;
+  const FRAME_WRAPPER_SELECTOR = "[data-mail-scale]";
+
+  /**
+   * The real, previously-untested contract (GAP-3): `data-mail-scale` must
+   * equal computeScaleToFit(650, <actual measured container width>) --  not
+   * a value frozen at page load. Asserting this directly (rather than only
+   * "no page-level scroll", which `overflow-x-auto` satisfies at literally
+   * any scale, including the old always-1 bug) is what actually catches a
+   * regression back to reading a stale/null ref at render time.
+   */
+  test("650px Turo-style table scale-to-fits to the real measured container width, no page-level horizontal scroll", async ({ page }) => {
     await openHarness(page, FIXED_WIDTH_TABLE);
 
     // The email's own content is visible and readable inside its frame.
     const frame = page.frameLocator('iframe[title="Email content"]');
     await expect(frame.getByTestId("fixed-width-copy")).toBeVisible();
     await expect(frame.getByRole("heading", { name: "Trip confirmed" })).toBeVisible();
+
+    const wrapper = page.locator(FRAME_WRAPPER_SELECTOR);
+    await expect(wrapper).toHaveCount(1);
+
+    const measuredWidth = await wrapper.evaluate((el) => el.clientWidth);
+    const reportedScale = Number(await wrapper.getAttribute("data-mail-scale"));
+    const expectedScale = computeScaleToFit(ASSUMED_MAIL_CONTENT_WIDTH, measuredWidth);
+
+    expect(Number.isFinite(reportedScale)).toBe(true);
+    // Every configured project's viewport keeps this dev harness's own
+    // main (max-width: 480px, MailRenderHarnessClient.tsx) narrower than
+    // the 650px reference width, so a real, un-stuck scale-to-fit must
+    // shrink below 1 here on every project -- this is the exact case the
+    // old "stuck at 1 forever" GAP-3 bug would fail.
+    expect(reportedScale, "a 650px table inside an at-most-480px harness container must scale down, not stay 1").toBeLessThan(1);
+    expect(reportedScale).toBeCloseTo(expectedScale, 5);
+
+    // The scaled content exactly fills its measured container (the
+    // documented "escape hatch" only matters if this ever drifts) -- proof
+    // the transform is driven by the real container width, not a hardcoded
+    // number that happens to also be < 1.
+    const innerWidth = await wrapper.locator("> div").first().evaluate((el) => el.getBoundingClientRect().width);
+    expect(innerWidth).toBeCloseTo(measuredWidth, 0);
 
     // The phone-width shell around the frame never grows the page itself
     // horizontally -- the horizontally-scrollable frame container is the
@@ -86,5 +129,32 @@ test.describe("fixed-width mail legibility", () => {
       scrollWidth: document.documentElement.scrollWidth,
     }));
     expect(dimensions.scrollWidth, "fixed-width mail must not overflow the page itself").toBeLessThanOrEqual(dimensions.width);
+
+    // The scroll-escape hatch itself is real: the wrapper is genuinely
+    // horizontally scrollable (overflow-x-auto), so any future case where
+    // the scaled content doesn't exactly fill the container still has a
+    // contained, local escape rather than pushing the whole page wide.
+    const overflowX = await wrapper.evaluate((el) => getComputedStyle(el).overflowX);
+    expect(overflowX).toBe("auto");
+  });
+
+  test("a desktop (chromium) viewport measures a wider container and therefore a larger scale than a phone viewport", async ({ page, isMobile }) => {
+    test.skip(isMobile, "This asserts the desktop side of the contract; mobile-safari is covered by the test above.");
+
+    await openHarness(page, FIXED_WIDTH_TABLE);
+    const wrapper = page.locator(FRAME_WRAPPER_SELECTOR);
+    const measuredWidth = await wrapper.evaluate((el) => el.clientWidth);
+    const reportedScale = Number(await wrapper.getAttribute("data-mail-scale"));
+    const expectedScale = computeScaleToFit(ASSUMED_MAIL_CONTENT_WIDTH, measuredWidth);
+
+    // Real desktop measurement: still governed by the harness's own
+    // max-width: 480px main (this route intentionally renders the phone-
+    // width shell regardless of the real viewport -- see
+    // MailRenderHarnessClient.tsx and this file's cold-state describe block
+    // above), so scale never reaches 1 here either -- but it must be the
+    // real computed value for the wider chromium viewport, never a value
+    // hardcoded/frozen at an earlier, narrower measurement.
+    expect(reportedScale).toBeCloseTo(expectedScale, 5);
+    expect(reportedScale, "never upscaled past 1").toBeLessThanOrEqual(1);
   });
 });

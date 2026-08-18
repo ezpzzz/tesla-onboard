@@ -150,6 +150,89 @@ export const CID_IMAGE: HostileMailFixture = {
   inline: { "logo-token": TINY_PNG_DATA_URL },
 };
 
+export const SVG_XLINK_JAVASCRIPT: HostileMailFixture = {
+  id: "svg-xlink-javascript",
+  description: "inline <svg><a xlink:href=\"javascript:...\"> -- the SVG-namespaced sibling of javascript-href, a different attribute name the strip's href/src/action/formaction list must also cover",
+  markerAttribute: "data-hostile-svg-xlink",
+  html:
+    '<p>Your vehicle:</p>'
+    + '<svg width="100" height="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+    + '<a id="hostile-svg-link" xlink:href="javascript:document.body.setAttribute(&quot;data-hostile-svg-xlink&quot;,&quot;true&quot;);console.log(&quot;HOSTILE_EXEC:svg-xlink-javascript&quot;)">'
+    + '<text x="0" y="20">Open</text></a></svg>',
+};
+
+export const BACKGROUND_ATTR_JAVASCRIPT: HostileMailFixture = {
+  id: "background-attr-javascript",
+  description: "legacy <table background=\"javascript:...\"> attribute -- must be stripped from the DOM, not merely inert",
+  html:
+    '<table id="hostile-bg-table" background="javascript:document.title=&quot;pwned&quot;">'
+    + '<tr><td>Trip summary</td></tr></table>',
+};
+
+export const BACKGROUND_ATTR_EGRESS: HostileMailFixture = {
+  id: "background-attr-egress",
+  description: "legacy <table background=\"...\"> pointing at a tracking host -- an egress vector distinct from <img src>, must still be blocked by the CSP's img-src data: default",
+  html: `<table id="hostile-bg-egress-table" background="${hostileUrl("bg-beacon.png")}"><tr><td>Trip summary</td></tr></table>`,
+};
+
+export const POSTER_ATTR_JAVASCRIPT: HostileMailFixture = {
+  id: "poster-attr-javascript",
+  description: "<video poster=\"javascript:...\"> attribute -- must be stripped from the DOM, not merely inert",
+  html: '<video id="hostile-poster-video" poster="javascript:document.title=&quot;pwned&quot;" controls></video>',
+};
+
+export const POSTER_ATTR_EGRESS: HostileMailFixture = {
+  id: "poster-attr-egress",
+  description: "<video poster=\"...\"> pointing at a tracking host -- an image-load egress vector the CSP's img-src data: default must also block",
+  html: `<video id="hostile-poster-egress-video" poster="${hostileUrl("poster-beacon.png")}" controls></video>`,
+};
+
+export const SVG_SCRIPT_FOREIGNOBJECT: HostileMailFixture = {
+  id: "svg-script-foreignobject",
+  description: "<svg> containing both a nested <script> and a <foreignObject> smuggling an HTML <script> across the SVG/HTML namespace boundary",
+  markerAttribute: "data-hostile-svg-foreignobject",
+  html:
+    '<p>Trip photos:</p>'
+    + '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">'
+    + '<script>document.body.setAttribute("data-hostile-svg-foreignobject","true");console.log("HOSTILE_EXEC:svg-script-foreignobject")</script>'
+    + '<foreignObject width="100" height="100">'
+    + '<body xmlns="http://www.w3.org/1999/xhtml">'
+    + '<script>document.body.setAttribute("data-hostile-svg-foreignobject","true");console.log("HOSTILE_EXEC:svg-script-foreignobject")</script>'
+    + '</body></foreignObject></svg>',
+};
+
+export const OBJECT_TAG: HostileMailFixture = {
+  id: "object-tag",
+  description: "<object data=\"...\"> plugin-embed vector pointed at a tracking host -- must be removed outright (REMOVED_TAG_NAMES) and never fetched",
+  html: `<p>Attachment:</p><object id="hostile-object" data="${hostileUrl("payload.swf")}" type="application/x-shockwave-flash"></object>`,
+};
+
+export const EMBED_TAG: HostileMailFixture = {
+  id: "embed-tag",
+  description: "<embed src=\"...\"> plugin-embed vector pointed at a tracking host -- must be removed outright (REMOVED_TAG_NAMES) and never fetched",
+  html: `<p>Attachment:</p><embed id="hostile-embed" src="${hostileUrl("payload.swf")}" type="application/x-shockwave-flash">`,
+};
+
+export const FORM_ACTION_SUBMIT: HostileMailFixture = {
+  id: "form-action-submit",
+  description: "<form action=\"...\"> with a submit control -- the whole <form> is stripped outright (REMOVED_TAG_NAMES), and the CSP's form-action 'none' is the second, independent wall behind that",
+  html:
+    '<p>Confirm your trip:</p>'
+    + `<form id="hostile-form" action="${hostileUrl("submit")}" method="post">`
+    + '<input type="hidden" name="tripId" value="123">'
+    + '<button type="submit" id="hostile-submit">Confirm</button>'
+    + "</form>",
+};
+
+export const BASE_HREF_HIJACK: HostileMailFixture = {
+  id: "base-href-hijack",
+  description: "<base href=\"...\"> rewriting every relative URL in the document to resolve against a tracking host -- not in REMOVED_TAG_NAMES, so the CSP's base-uri 'none' is the only wall",
+  html:
+    `<base href="${hostileUrl("")}">`
+    + '<p>Manage your trip:</p>'
+    + '<a id="hostile-relative-link" href="manage-trip">Open trip</a>',
+};
+
 export const FIXED_WIDTH_TABLE: HostileMailFixture = {
   id: "fixed-width-table",
   description: "650px fixed-width transactional table layout (Turo's real template norm)",
@@ -187,10 +270,23 @@ export const SCRIPT_EXECUTION_FIXTURES: HostileMailFixture[] = [
   TEXTAREA_RAW_TEXT,
   ENCODED_ENTITIES,
   MALFORMED_NESTING,
+  SVG_XLINK_JAVASCRIPT,
+  SVG_SCRIPT_FOREIGNOBJECT,
+];
+
+/** Egress-only fixtures (no script involved) -- the "zero third-party
+ * network egress" test table, covering vectors distinct from a plain
+ * `<img src>` (background=/poster= URL attributes, <object>, <embed>). */
+export const EGRESS_ONLY_FIXTURES: HostileMailFixture[] = [
+  BACKGROUND_ATTR_EGRESS,
+  POSTER_ATTR_EGRESS,
+  OBJECT_TAG,
+  EMBED_TAG,
 ];
 
 export const ALL_HOSTILE_FIXTURES: HostileMailFixture[] = [
   ...SCRIPT_EXECUTION_FIXTURES,
+  ...EGRESS_ONLY_FIXTURES,
   SCRIPT_SRC,
   CSS_EXFIL_URL,
   META_REFRESH,
@@ -198,4 +294,8 @@ export const ALL_HOSTILE_FIXTURES: HostileMailFixture[] = [
   CID_IMAGE,
   FIXED_WIDTH_TABLE,
   KITCHEN_SINK_EGRESS,
+  BACKGROUND_ATTR_JAVASCRIPT,
+  POSTER_ATTR_JAVASCRIPT,
+  FORM_ACTION_SUBMIT,
+  BASE_HREF_HIJACK,
 ];
