@@ -22,6 +22,7 @@ import {
   haversineMiles,
   HISTORY_RETENTION_MS,
   LOCATION_RETENTION_MS,
+  TELEMETRY_CONFIG_ERROR_RETRY_MS,
   TELEMETRY_REMOVAL_MAX_ATTEMPTS,
   validCoordinates,
 } from "@/lib/owner/telemetry-policy";
@@ -1256,6 +1257,19 @@ async function finishTeslaDisconnect(client: PoolClient, integrationId: string) 
   [integrationId]);
 }
 
+/** True for a telemetry failure caused purely by this deployment's own
+ * unset/invalid telemetry-proxy config -- never a property of the vehicle
+ * (TeslaTelemetryClient's constructor, lib/owner/tesla-telemetry-client.ts).
+ * Single predicate so processTelemetry's catch block has one place to
+ * decide "deployment gap, not a vehicle failure" instead of an inline
+ * string compare duplicated across the status/next_action_at/attempt_count
+ * decisions below. See TELEMETRY_CONFIG_ERROR_RETRY_MS's comment
+ * (lib/owner/telemetry-policy.ts) for why this class gets its own short
+ * retry instead of the vehicle-specific 365-day park. */
+export function isDeploymentConfigTelemetryError(error: unknown): boolean {
+  return error instanceof TeslaTelemetryError && error.code === "telemetry_proxy_not_configured";
+}
+
 export async function processTelemetry(row: TelemetryRow, workerPool: Pool = pool) {
   const client = await workerPool.connect();
   let lockedIntegrationId: string | null = null;
@@ -1370,6 +1384,23 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
           }),
         ],
       ).catch(() => undefined);
+      return;
+    }
+    if (isDeploymentConfigTelemetryError(error)) {
+      // A deployment-config gap (e.g. ONLYEVS_TESLA_COMMAND_PROXY_URL unset)
+      // is not the vehicle failing: last_error_code is preserved so the
+      // owner-facing strip can name the real cause
+      // (telemetry-status-strip.tsx), but this must retry on a short
+      // interval -- never the 365-day vehicle-specific park below -- and
+      // must not ratchet attempt_count toward any permanent-failure cap.
+      await client.query(`update public.onlyevs_telemetry_enrollments set status = 'error',
+        last_error_code = $3, next_action_at = now() + ($4)::interval,
+        claimed_by = null, claim_expires_at = null where workspace_id = $1 and vehicle_id = $2`, [
+        row.workspace_id,
+        row.vehicle_id,
+        (error as TeslaTelemetryError).code,
+        `${TELEMETRY_CONFIG_ERROR_RETRY_MS} milliseconds`,
+      ]).catch(() => undefined);
       return;
     }
     const reauth = Boolean((error as Error & { reauth?: boolean }).reauth);

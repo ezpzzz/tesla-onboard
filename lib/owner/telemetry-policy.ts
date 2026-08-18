@@ -88,6 +88,19 @@ export const INTEGRATION_TRANSITIONAL_POLL_MS = 30_000;
  * failure instead of retrying forever. */
 export const TELEMETRY_REMOVAL_MAX_ATTEMPTS = 20;
 
+/** After a telemetry attempt fails purely because this *deployment's own*
+ * telemetry proxy config (e.g. ONLYEVS_TESLA_COMMAND_PROXY_URL) is unset or
+ * invalid -- not a property of the vehicle or its Tesla account -- retry on
+ * this short interval instead of the vehicle-specific permanent-failure
+ * park (services/onlyevs-worker/index.ts's processTelemetry catch block).
+ * Re-attempting costs zero provider API calls (the client throws before any
+ * Tesla request goes out) and self-heals the instant an operator finishes
+ * configuring the proxy, so an enrollment must not sit dead for anywhere
+ * near as long as a genuine per-vehicle failure. 15 minutes keeps the
+ * enrollment reasonably live without hammering the worker's claim loop
+ * while the deployment gap remains unfixed. */
+export const TELEMETRY_CONFIG_ERROR_RETRY_MS = 15 * 60 * 1_000;
+
 export interface TelemetryLocationEnvelope {
   vin: string;
   observedAt: number;
