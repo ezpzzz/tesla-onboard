@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.1 — 2026-08-18
+
+- Fix Tesla integrations that could get stuck in "Disconnecting" forever: a new admin-gated `force_complete_onlyevs_integration_disconnect` recovery RPC finishes a transition that was never claimed by the worker, with its own audit trail row. The Integrations page now polls while an integration is in a transitional state, detects a disconnect that's been stale for 15 minutes, and offers a Force disconnect action to recover it.
+- Make telemetry enrollment errors honest: an error like `telemetry_proxy_not_configured` now says plainly that the telemetry service needs operator configuration, instead of copy that implied it would auto-start.
+- Cap the worker's telemetry removal retries (`TELEMETRY_REMOVAL_MAX_ATTEMPTS`) so a disconnect can never spin forever, while still preserving the `telemetry_removal_unconfirmed` marker and its audit event so the unresolved state stays visible rather than silently dropped.
+- Deflake the date-anchored telemetry-bookend tests.
+
+### For contributors
+
+- No new dependencies.
+- Migration `20260818150000_onlyevs_integration_disconnect_recovery.sql` is standalone-additive and independently applicable.
+
 ## 0.10.0 — 2026-08-17
 
 - Add Workspace Mail: a full-content, per-workspace Turo email inbox (`/owner/mail`) so a manager reads, searches, and shares the team's captured Turo mail from inside the app instead of Gmail. Full HTML renders inside a `sandbox=""` iframe (no `allow-scripts`, ever) behind a strict inner CSP, with a client-side `DOMParser` strip pass as a genuine second layer -- zero script execution and zero third-party egress by default; `cid:` images arrive inlined as `data:` payloads from the decrypt-on-read response, oversized ones render an honest inert placeholder with a download link through the authed attachment route instead of inlining, and remote images load only on an explicit per-message opt-in.
