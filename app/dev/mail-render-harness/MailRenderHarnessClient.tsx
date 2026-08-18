@@ -22,11 +22,18 @@
 
 import { useEffect, useState } from "react";
 import { MailContentFrame } from "@/components/owner/MailContentFrame";
+import type { MailCidAttachmentRef } from "@/components/owner/mail-render-prep";
 
 export interface MailRenderHarnessFixture {
   html: string | null;
   text: string;
   inline: Record<string, string>;
+  /** Optional -- exercises GAP-4's honest cid placeholder (a `cid:` image
+   * with a known, not-inlined attachment renders an inert "available for
+   * download" placeholder instead of a broken image). Omitted by every
+   * existing fixture, which is exactly the "byte-identical without it"
+   * default MailContentFrame's own `attachments = []` provides. */
+  attachments?: MailCidAttachmentRef[];
 }
 
 declare global {
@@ -56,7 +63,7 @@ export function MailRenderHarnessClient() {
       data-testid="mail-harness-root"
       style={{ maxWidth: 480, margin: "0 auto", padding: 16 }}
     >
-      <MailContentFrame html={fixture.html} text={fixture.text} inline={fixture.inline} />
+      <MailContentFrame html={fixture.html} text={fixture.text} inline={fixture.inline} attachments={fixture.attachments} />
     </main>
   );
 }

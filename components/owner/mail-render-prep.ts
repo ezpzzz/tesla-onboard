@@ -85,6 +85,76 @@ export function assembleSrcdoc(strippedHtml: string, csp: string): string {
   );
 }
 
+export type MailAttachmentInlineState = "inlined" | "too_large" | "error";
+
+/**
+ * Structural shape this module needs off an attachment manifest entry --
+ * matches (but does not import) lib/owner/mail-content-client.ts's
+ * MailAttachmentManifestEntry, same "redeclare, don't import" discipline
+ * that module documents for staying decoupled from the server-only file it
+ * shadows. `inlineState` is the contract's source of truth; `inlined` is
+ * read only as a fallback for a manifest entry that predates that field
+ * (an older server response, or a fixture) -- resolved to "inlined" or
+ * "error", never guessed as "too_large" (that distinction requires the real
+ * field).
+ */
+export interface MailCidAttachmentRef {
+  contentId: string | null;
+  inlineState?: MailAttachmentInlineState | null;
+  inlined?: boolean;
+}
+
+export function resolveAttachmentInlineState(attachment: MailCidAttachmentRef): MailAttachmentInlineState {
+  if (attachment.inlineState === "inlined" || attachment.inlineState === "too_large" || attachment.inlineState === "error") {
+    return attachment.inlineState;
+  }
+  return attachment.inlined ? "inlined" : "error";
+}
+
+/**
+ * Matches a complete `<img ...>` tag whose `src` is still a literal
+ * `cid:<token>` reference -- i.e. one `rewriteCidReferences` above did NOT
+ * rewrite to a `data:` URL, because no inline payload was available for it.
+ * Must run AFTER `rewriteCidReferences`, never before, so an image that
+ * genuinely was inlined is never mistaken for one that wasn't.
+ */
+const CID_IMG_TAG_PATTERN = /<img\b[^>]*\bsrc=(["'])cid:([^"'()\s>]+)\1[^>]*>/gi;
+
+/** Inert (no src, no script, no network egress) placeholder markup -- safe
+ * under the strictest `sandbox=""` + CSP the mail viewer ever applies. Never
+ * promises a fetch the sandbox cannot make; the real bytes stay reachable
+ * only through the same-origin, authed attachment-download route. */
+const CID_PLACEHOLDER_MARKUP =
+  '<span data-evhost-cid-placeholder="true" '
+  + 'style="display:inline-block;padding:4px 8px;border:1px solid #d0d5dd;border-radius:4px;'
+  + 'background:#f2f4f7;color:#475467;font-size:12px;line-height:1.4;">'
+  + "Image attachment — available for download</span>";
+
+/**
+ * Replaces every remaining `cid:`-sourced `<img>` with an honest inert
+ * placeholder, for any `cid:` token that matches a known attachment's
+ * `contentId` whose `inlineState` is not `"inlined"` (`"too_large"` or
+ * `"error"`). A `cid:` token with no matching attachment at all is left
+ * alone -- rewriteCidReferences's own "harmless, simply fails to load"
+ * fallback -- since there is nothing concrete to offer a download for.
+ * `attachments` defaults to `[]` so a caller that never learned the
+ * attachment manifest (e.g. an older fixture) gets byte-identical output.
+ */
+export function renderUninlinedCidPlaceholders(
+  html: string,
+  attachments: readonly MailCidAttachmentRef[] = [],
+): string {
+  const nonInlinedContentIds = new Set(
+    attachments
+      .filter((attachment) => attachment.contentId && resolveAttachmentInlineState(attachment) !== "inlined")
+      .map((attachment) => attachment.contentId as string),
+  );
+  if (nonInlinedContentIds.size === 0) return html;
+  return html.replace(CID_IMG_TAG_PATTERN, (match: string, _quote: string, token: string) =>
+    nonInlinedContentIds.has(token) ? CID_PLACEHOLDER_MARKUP : match,
+  );
+}
+
 /**
  * Initial scale-to-fit transform for fixed-width transactional HTML (Turo's
  * 600-650px mail tables are the norm) inside the phone-width shell:

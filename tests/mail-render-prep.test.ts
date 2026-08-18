@@ -3,6 +3,8 @@ import {
   assembleSrcdoc,
   buildMailCsp,
   computeScaleToFit,
+  renderUninlinedCidPlaceholders,
+  resolveAttachmentInlineState,
   rewriteCidReferences,
 } from "@/components/owner/mail-render-prep";
 
@@ -69,6 +71,84 @@ describe("rewriteCidReferences", () => {
   it("is a no-op with an empty inline map", () => {
     const html = '<img src="cid:logo@evhost">';
     expect(rewriteCidReferences(html, {})).toBe(html);
+  });
+});
+
+describe("resolveAttachmentInlineState", () => {
+  it("returns inlineState verbatim when present", () => {
+    expect(resolveAttachmentInlineState({ contentId: "a", inlineState: "too_large" })).toBe("too_large");
+    expect(resolveAttachmentInlineState({ contentId: "a", inlineState: "inlined" })).toBe("inlined");
+    expect(resolveAttachmentInlineState({ contentId: "a", inlineState: "error" })).toBe("error");
+  });
+
+  it("falls back to the legacy inlined boolean when inlineState is absent", () => {
+    expect(resolveAttachmentInlineState({ contentId: "a", inlined: true })).toBe("inlined");
+    expect(resolveAttachmentInlineState({ contentId: "a", inlined: false })).toBe("error");
+  });
+
+  it("falls back to error when neither field is present", () => {
+    expect(resolveAttachmentInlineState({ contentId: "a" })).toBe("error");
+  });
+
+  it("prefers inlineState over a stale/contradictory inlined boolean", () => {
+    expect(resolveAttachmentInlineState({ contentId: "a", inlineState: "too_large", inlined: true })).toBe("too_large");
+  });
+});
+
+describe("renderUninlinedCidPlaceholders", () => {
+  it("is a no-op with no attachments supplied (default param)", () => {
+    const html = '<img src="cid:photo-1">';
+    expect(renderUninlinedCidPlaceholders(html)).toBe(html);
+  });
+
+  it("replaces a cid <img> whose attachment is too_large with an inert placeholder", () => {
+    const html = '<p>See attached</p><img src="cid:photo-1" alt="x">';
+    const out = renderUninlinedCidPlaceholders(html, [{ contentId: "photo-1", inlineState: "too_large" }]);
+    expect(out).not.toContain("<img");
+    expect(out).toContain("Image attachment — available for download");
+    expect(out).toContain("<p>See attached</p>");
+  });
+
+  it("replaces a cid <img> whose attachment errored", () => {
+    const html = '<img src="cid:photo-1">';
+    const out = renderUninlinedCidPlaceholders(html, [{ contentId: "photo-1", inlineState: "error" }]);
+    expect(out).toContain("available for download");
+  });
+
+  it("leaves an <img> alone when its attachment IS inlined (rewriteCidReferences already swapped it, so no literal cid: src remains -- this only covers a defensive direct call)", () => {
+    const html = '<img src="cid:photo-1">';
+    const out = renderUninlinedCidPlaceholders(html, [{ contentId: "photo-1", inlineState: "inlined" }]);
+    expect(out).toBe(html);
+  });
+
+  it("leaves a cid <img> alone when no attachment manifest entry matches its token at all", () => {
+    const html = '<img src="cid:unknown-token">';
+    const out = renderUninlinedCidPlaceholders(html, [{ contentId: "photo-1", inlineState: "too_large" }]);
+    expect(out).toBe(html);
+  });
+
+  it("resolves inlineState via the legacy inlined fallback when inlineState is absent", () => {
+    const html = '<img src="cid:photo-1">';
+    const out = renderUninlinedCidPlaceholders(html, [{ contentId: "photo-1", inlined: false }]);
+    expect(out).toContain("available for download");
+  });
+
+  it("handles multiple non-inlined images and leaves already-inlined data: images untouched", () => {
+    const html = '<img src="data:image/png;base64,AAAA"><img src="cid:a"><img src="cid:b">';
+    const out = renderUninlinedCidPlaceholders(html, [
+      { contentId: "a", inlineState: "too_large" },
+      { contentId: "b", inlineState: "error" },
+    ]);
+    expect(out.match(/data:image\/png;base64,AAAA/g)).toHaveLength(1);
+    expect(out.match(/available for download/g)).toHaveLength(2);
+  });
+
+  it("never introduces a src attribute, script tag, or on* handler", () => {
+    const html = '<img src="cid:a">';
+    const out = renderUninlinedCidPlaceholders(html, [{ contentId: "a", inlineState: "error" }]);
+    expect(out).not.toMatch(/<script/i);
+    expect(out).not.toMatch(/\bon\w+=/i);
+    expect(out).not.toMatch(/\bsrc=/i);
   });
 });
 

@@ -171,6 +171,7 @@ export function OwnerMailDetail({ messageId }: { messageId: string }) {
           html={content.html}
           text={content.text}
           inline={content.inline}
+          attachments={content.attachments}
           initialRemoteImagesAllowed={content.remoteImagesAllowed}
           onRemoteImagesAllowed={() => {
             if (!scope) return;
@@ -207,7 +208,6 @@ export function OwnerMailDetail({ messageId }: { messageId: string }) {
 
       <MailPurgePanel
         scope={scope}
-        messageId={meta.id}
         inboundEmailId={meta.inboundEmailId}
         guestId={meta.guestId}
         reservationId={reservationId}
@@ -231,13 +231,11 @@ function TrustChipRow({ trust }: { trust: MailTrustAuth }) {
 
 function MailPurgePanel({
   scope,
-  messageId,
   inboundEmailId,
   guestId,
   reservationId,
 }: {
   scope: ReturnType<typeof vehicleWorkspaceScope>;
-  messageId: string;
   inboundEmailId: string;
   guestId: string | null;
   reservationId: string | null;

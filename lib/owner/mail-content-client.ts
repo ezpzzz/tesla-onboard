@@ -10,7 +10,13 @@
 
 /** Mirrors lib/owner/mail-content-server.ts's MailAttachmentManifestEntry,
  * redeclared here (not imported) so this client module never pulls in that
- * "server-only"-guarded file even as a type-only reference. */
+ * "server-only"-guarded file even as a type-only reference.
+ *
+ * `inlineState` is the contract's source of truth for GAP-4's honest cid
+ * placeholder (components/owner/mail-render-prep.ts's
+ * resolveAttachmentInlineState); `inlined` stays for a response that
+ * predates that field -- optional and read only as a fallback, never
+ * required. */
 export interface MailAttachmentManifestEntry {
   id: string;
   filename: string | null;
@@ -18,6 +24,7 @@ export interface MailAttachmentManifestEntry {
   sizeBytes: number;
   contentId: string | null;
   inlined: boolean;
+  inlineState?: "inlined" | "too_large" | "error";
 }
 
 export type MailContentFetchState =

@@ -132,7 +132,7 @@ export function OwnerMailList() {
   // `cursor` advanced (matching OwnerInbox.tsx's own load-effect split).
   useEffect(() => { void load(false); }, [scope?.key, crossLinkKey, activeSearch, filters]);
 
-  function submitSearch(event: FormEvent) {
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setActiveSearch(searchInput.trim());
   }

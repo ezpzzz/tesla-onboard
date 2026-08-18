@@ -19,11 +19,26 @@
  * Height is solved without in-frame JS: a fixed max-height plus internal
  * scroll, never a postMessage height handshake, so "zero script execution"
  * stays literally true.
+ *
+ * Scale-to-fit (GAP-3 fix): the container's width is tracked in state via a
+ * ResizeObserver set up in useLayoutEffect, never read off a ref during
+ * render -- a ref is always null on a component's first render, so reading
+ * `containerRef.current` inline made the initial scale permanently 1
+ * whenever nothing else forced a re-render (the dev harness; a race
+ * elsewhere). The wrapper below carries `data-mail-scale` with the exact
+ * scale actually applied, an observable contract e2e tests assert against.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { Button, Card, cn } from "../ui";
-import { assembleSrcdoc, buildMailCsp, computeScaleToFit, rewriteCidReferences } from "./mail-render-prep";
+import {
+  assembleSrcdoc,
+  buildMailCsp,
+  computeScaleToFit,
+  renderUninlinedCidPlaceholders,
+  rewriteCidReferences,
+  type MailCidAttachmentRef,
+} from "./mail-render-prep";
 import { stripUntrustedHtml } from "./mail-strip-html";
 
 /** Fixed-width transactional HTML norm (Turo's own templates run
@@ -37,6 +52,12 @@ export interface MailContentFrameProps {
   text: string;
   /** Keyed by contentId -- exactly T11's `inline` response field. */
   inline: Record<string, string>;
+  /** The content manifest's attachment entries (T11's `attachments` field) --
+   * used only to render an honest inert placeholder for a `cid:` image that
+   * has a known attachment but wasn't inlined (GAP-4). Optional/defaulted so
+   * a caller that doesn't have the manifest (the dev/e2e harness fixture)
+   * renders byte-identical to before. */
+  attachments?: readonly MailCidAttachmentRef[];
   className?: string;
   /** The persisted per-message-per-workspace opt-in (design doc Open
    * Question 1) as of the last content fetch -- initializes the toggle so a
@@ -55,31 +76,45 @@ export function MailContentFrame({
   html,
   text,
   inline,
+  attachments = [],
   className,
   initialRemoteImagesAllowed = false,
   onRemoteImagesAllowed,
 }: MailContentFrameProps) {
   const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(initialRemoteImagesAllowed);
   const [tab, setTab] = useState<ViewTab>(html ? "html" : "text");
-  const containerRef = useRef<HTMLDivElement>(null);
+  // A callback ref (state, not useRef) so the measuring effect below
+  // re-runs when the wrapper element itself mounts/unmounts -- it only
+  // exists in the DOM while `tab === "html" && srcdoc`, so a bare useRef
+  // would silently stop tracking width across a tab switch.
+  const [containerNode, setContainerNode] = useState<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(ASSUMED_MAIL_CONTENT_WIDTH);
 
   const srcdoc = useMemo(() => {
     if (!html) return null;
     const stripped = stripUntrustedHtml(html);
     const withInlineImages = rewriteCidReferences(stripped, inline);
+    const withPlaceholders = renderUninlinedCidPlaceholders(withInlineImages, attachments);
     const csp = buildMailCsp(remoteImagesAllowed);
-    return assembleSrcdoc(withInlineImages, csp);
-  }, [html, inline, remoteImagesAllowed]);
+    return assembleSrcdoc(withPlaceholders, csp);
+  }, [html, inline, attachments, remoteImagesAllowed]);
 
-  // Best-effort initial scale: the container's own current width against the
-  // fixed-width mail-table assumption above. Re-measuring on resize is
-  // deliberately out of scope here -- this is the *initial* scale-to-fit the
-  // design calls for, not a live-tracking transform; the horizontal-scroll
-  // container remains the escape hatch either way.
-  const scale = computeScaleToFit(
-    ASSUMED_MAIL_CONTENT_WIDTH,
-    containerRef.current?.clientWidth ?? ASSUMED_MAIL_CONTENT_WIDTH,
-  );
+  // Real scale-to-fit: measured off the container's actual rendered width,
+  // tracked live via ResizeObserver -- never read off a ref during render
+  // (a ref is always null on first render, which is exactly why the scale
+  // used to stay 1 forever). Recomputes whenever the wrapper (re)mounts or
+  // `srcdoc` changes (a new message), in addition to any real resize.
+  useLayoutEffect(() => {
+    if (!containerNode) return;
+    const measure = () => setContainerWidth(containerNode.clientWidth || ASSUMED_MAIL_CONTENT_WIDTH);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(containerNode);
+    return () => observer.disconnect();
+  }, [containerNode, srcdoc]);
+
+  const scale = computeScaleToFit(ASSUMED_MAIL_CONTENT_WIDTH, containerWidth);
 
   return (
     <Card className={cn("overflow-hidden", className)}>
@@ -125,7 +160,8 @@ export function MailContentFrame({
 
       {tab === "html" && srcdoc ? (
         <div
-          ref={containerRef}
+          ref={setContainerNode}
+          data-mail-scale={scale}
           className="overflow-x-auto overflow-y-hidden bg-white"
           style={{ maxHeight: FRAME_MAX_HEIGHT_PX }}
         >

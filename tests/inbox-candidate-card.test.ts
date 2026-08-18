@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildViewFullEmailHref,
   deriveConsequenceTitle,
+  describeCandidateFullEmailUnavailable,
   formatPhoneDisplay,
   formatTripWindowLabel,
   isTuroDriverAvatarUrl,
@@ -9,12 +10,40 @@ import {
   localWallTimeToIso,
   parseEmailCandidateFacts,
   selectDisplayMessage,
+  selectPrimaryCandidateMessageId,
 } from "@/components/owner/InboxCandidateCard";
 
 describe("buildViewFullEmailHref", () => {
   it("links into /owner/mail's candidate-filtered view, URL-encoded", () => {
     expect(buildViewFullEmailHref("cand-1")).toBe("/owner/mail?candidateId=cand-1");
     expect(buildViewFullEmailHref("cand/with space")).toBe("/owner/mail?candidateId=cand%2Fwith%20space");
+  });
+});
+
+describe("selectPrimaryCandidateMessageId", () => {
+  it("picks the first (most recent, per the RPC's sent_at desc ordering) message", () => {
+    expect(selectPrimaryCandidateMessageId([{ id: "msg-1" }, { id: "msg-2" }])).toBe("msg-1");
+  });
+
+  it("returns null when no message is linked to the candidate yet", () => {
+    expect(selectPrimaryCandidateMessageId([])).toBeNull();
+  });
+});
+
+describe("describeCandidateFullEmailUnavailable", () => {
+  it("gives session-expired copy for an unauthorized fetch", () => {
+    expect(describeCandidateFullEmailUnavailable("unauthorized")).toMatch(/session expired/i);
+  });
+
+  it("maps a generic fetch error onto the decrypt-error copy", () => {
+    expect(describeCandidateFullEmailUnavailable("error")).toMatch(/decrypted/i);
+  });
+
+  it("passes not_found/unconfigured/too_large/decrypt_error straight through to mailContentStateMessage", () => {
+    expect(describeCandidateFullEmailUnavailable("not_found")).toMatch(/couldn't be found/i);
+    expect(describeCandidateFullEmailUnavailable("unconfigured")).toMatch(/isn't available/i);
+    expect(describeCandidateFullEmailUnavailable("too_large")).toMatch(/too large/i);
+    expect(describeCandidateFullEmailUnavailable("decrypt_error")).toMatch(/couldn't be decrypted/i);
   });
 });
 
