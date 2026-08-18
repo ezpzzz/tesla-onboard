@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.2 — 2026-08-18
+
+- Fix telemetry copy honesty: correct an inverted sentence that claimed telemetry would never start even after operator setup, and a lowercase sentence fragment that had been appended after a full stop. The status strip and the live-state card now derive from one shared cause so they can never contradict each other, and neither offers an action the other says will not help.
+- Make deployment-config errors (telemetry proxy or region base URL not configured) reclaimable: previously they were written with a retry interval but excluded from the worker's claim predicate entirely, so they were stranded forever.
+- Add a single source of truth for deployment-config error codes (`TELEMETRY_DEPLOYMENT_CONFIG_ERROR_CODES`, `lib/owner/telemetry-policy.ts`), plus a guard test that reads the migration SQL from disk and fails on any drift between it and the TypeScript constant.
+- Align with Tesla's official Fleet API docs after an audit: an active enrollment now polls its telemetry config every 12 hours instead of every 5 minutes, removing ~288 billable calls/day/vehicle -- exceeding the account billing limit removes fleet telemetry configurations and Tesla does not restore them.
+- Honor Tesla's four distinct skipped-vehicle reasons: a car that merely needs its virtual key paired is retried instead of being parked for 365 days as unsupported hardware, and unrecognized future reasons fail safe (finite retry, honest copy) instead of being mislabeled as unsupported firmware.
+- Send telemetry GET and DELETE directly to the regional Fleet API instead of through the vehicle-command proxy, which only the signed configure call requires -- a disconnect now completes on a deployment with no proxy at all.
+- Correct the owner-facing firmware floor from 2023.20.6 (the legacy CSR-path value) to 2024.26 (the proxy-signed path this app uses), including the go/no-go gate doc.
+- Fix a duplicate migration version prefix that made the repo impossible to replay from an empty database, plus a guard test against recurrence.
+
 ## 0.10.1 — 2026-08-18
 
 - Fix Tesla integrations that could get stuck in "Disconnecting" forever: a new admin-gated `force_complete_onlyevs_integration_disconnect` recovery RPC finishes a transition that was never claimed by the worker, with its own audit trail row. The Integrations page now polls while an integration is in a transitional state, detects a disconnect that's been stale for 15 minutes, and offers a Force disconnect action to recover it.
