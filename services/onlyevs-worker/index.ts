@@ -1386,6 +1386,30 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
       ).catch(() => undefined);
       return;
     }
+    if (row.status === "removal_requested" && isDeploymentConfigTelemetryError(error)) {
+      // A disconnect cannot be confirmed with Tesla while this deployment's
+      // telemetry proxy is unconfigured -- that is not grounds to drop the
+      // 'removal_requested' marker into a plain 'error' row (defect 4: doing
+      // so reintroduces, at the enrollment level, exactly the class of bug
+      // v0.10.1 fixed at the integration level -- a disconnect stranded with
+      // no automatic recovery). Keep retrying on the standard removal
+      // cadence and let attempt_count keep counting toward
+      // TELEMETRY_REMOVAL_MAX_ATTEMPTS -- the cap check above is what
+      // eventually completes the disconnect locally (mirroring
+      // force_complete_onlyevs_integration_disconnect) when the deployment
+      // gap never gets fixed. This must run before the general
+      // isDeploymentConfigTelemetryError branch below, which is only
+      // correct for non-removal enrollments.
+      await client.query(`update public.onlyevs_telemetry_enrollments set status = 'removal_requested',
+        attempt_count = attempt_count + 1, last_error_code = $3,
+        next_action_at = now() + interval '5 minutes',
+        claimed_by = null, claim_expires_at = null where workspace_id = $1 and vehicle_id = $2`, [
+        row.workspace_id,
+        row.vehicle_id,
+        (error as TeslaTelemetryError).code,
+      ]).catch(() => undefined);
+      return;
+    }
     if (isDeploymentConfigTelemetryError(error)) {
       // A deployment-config gap (e.g. ONLYEVS_TESLA_COMMAND_PROXY_URL unset)
       // is not the vehicle failing: last_error_code is preserved so the
@@ -1393,6 +1417,9 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
       // (telemetry-status-strip.tsx), but this must retry on a short
       // interval -- never the 365-day vehicle-specific park below -- and
       // must not ratchet attempt_count toward any permanent-failure cap.
+      // (Reached only for non-removal enrollments -- the branch above
+      // handles 'removal_requested' so its own attempt-based cap, not this
+      // one, governs how long a stuck disconnect retries.)
       await client.query(`update public.onlyevs_telemetry_enrollments set status = 'error',
         last_error_code = $3, next_action_at = now() + ($4)::interval,
         claimed_by = null, claim_expires_at = null where workspace_id = $1 and vehicle_id = $2`, [

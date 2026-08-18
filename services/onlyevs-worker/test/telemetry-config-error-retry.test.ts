@@ -44,8 +44,66 @@ function makeFakePool(handler: QueryHandler) {
   return { pool, client, queries };
 }
 
-function findQuery(queries: QueryLogEntry[], match: string | RegExp): QueryLogEntry | undefined {
-  return queries.find((q) => (typeof match === "string" ? q.sql.includes(match) : match.test(q.sql)));
+// Replays every captured onlyevs_telemetry_enrollments UPDATE against a
+// simulated row and returns the resulting STATE (status, last_error_code,
+// attempt_count, next_action_at) -- so the tests below assert what the row
+// actually ends up looking like, never a raw SQL/param string. Asserting on
+// SQL text alone is exactly how defect 1's dead code slipped through: the
+// query text and params can look completely correct while the ONE thing
+// that determines whether the row is ever reclaimed again
+// (private.claim_onlyevs_due_telemetry's status filter, exercised for real
+// in supabase/tests/onlyevs_telemetry_config_error_reclaim.pgtap.sql) is
+// untouched by this file. This replay only needs to distinguish the three
+// UPDATE shapes processTelemetry's catch block can produce for a
+// non-removal-requested row that isn't the cap/tesla_integration_unavailable
+// case -- see services/onlyevs-worker/index.ts's processTelemetry.
+interface SimulatedEnrollmentState {
+  status: string;
+  last_error_code: string | null;
+  attempt_count: number;
+  next_action_at: Date;
+}
+
+function replayEnrollmentState(
+  initial: SimulatedEnrollmentState,
+  queries: QueryLogEntry[],
+  now: number,
+): SimulatedEnrollmentState {
+  let state = { ...initial };
+  for (const q of queries) {
+    if (!q.sql.includes("update public.onlyevs_telemetry_enrollments")) continue;
+    if (q.sql.includes("($4)::interval")) {
+      // isDeploymentConfigTelemetryError branch (non-removal): status is a
+      // literal 'error', last_error_code/interval come through as params.
+      const code = q.params[2] as string;
+      const intervalLiteral = q.params[3] as string;
+      const ms = Number(String(intervalLiteral).split(" ")[0]);
+      state = { ...state, status: "error", last_error_code: code, next_action_at: new Date(now + ms) };
+    } else if (q.sql.includes("set status = 'removal_requested'") && q.sql.includes("attempt_count = attempt_count + 1")) {
+      // isDeploymentConfigTelemetryError branch for a removal_requested row.
+      const code = q.params[2] as string;
+      state = {
+        ...state,
+        status: "removal_requested",
+        attempt_count: state.attempt_count + 1,
+        last_error_code: code,
+        next_action_at: new Date(now + 5 * 60 * 1000),
+      };
+    } else if (q.sql.includes("set status = $3")) {
+      // Generic reauth/retryable branch.
+      const status = q.params[2] as string;
+      const message = q.params[3] as string;
+      const retriesSoon = status === "requested" || status === "pending_sync" || status === "removal_requested";
+      state = {
+        ...state,
+        status,
+        last_error_code: message,
+        attempt_count: state.attempt_count + 1,
+        next_action_at: new Date(now + (retriesSoon ? 5 * 60 * 1000 : 365 * 24 * 60 * 60 * 1000)),
+      };
+    }
+  }
+  return state;
 }
 
 function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): Response {
@@ -114,14 +172,23 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
       jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }),
     );
 
-    await processTelemetry(baseRow(), pool);
+    const now = Date.now();
+    await processTelemetry(baseRow({ attempt_count: 3 }), pool);
     process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = originalProxyUrl;
 
-    const update = findQuery(queries, "update public.onlyevs_telemetry_enrollments set status = 'error'");
-    expect(update).toBeDefined();
-    expect(update!.params).toContain("telemetry_proxy_not_configured");
-    expect(update!.params).toContain(`${TELEMETRY_CONFIG_ERROR_RETRY_MS} milliseconds`);
-    expect(update!.sql).not.toContain("365 days");
+    const result = replayEnrollmentState(
+      { status: "requested", last_error_code: null, attempt_count: 3, next_action_at: new Date(0) },
+      queries,
+      now,
+    );
+    expect(result.status).toBe("error");
+    expect(result.last_error_code).toBe("telemetry_proxy_not_configured");
+    // Bounded around now + the short config-error interval -- nowhere near
+    // the 365-day vehicle-permanent park.
+    const expected = now + TELEMETRY_CONFIG_ERROR_RETRY_MS;
+    expect(result.next_action_at.getTime()).toBeGreaterThanOrEqual(expected - 5_000);
+    expect(result.next_action_at.getTime()).toBeLessThanOrEqual(expected + 5_000);
+    expect(result.next_action_at.getTime()).toBeLessThan(now + 24 * 60 * 60 * 1000);
   });
 
   it("telemetry_proxy_not_configured does NOT increment attempt_count -- a deployment gap is not the vehicle failing", async () => {
@@ -132,12 +199,16 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
       jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }),
     );
 
+    const now = Date.now();
     await processTelemetry(baseRow({ attempt_count: 3 }), pool);
     process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = originalProxyUrl;
 
-    const update = findQuery(queries, "update public.onlyevs_telemetry_enrollments set status = 'error'");
-    expect(update).toBeDefined();
-    expect(update!.sql).not.toContain("attempt_count = attempt_count + 1");
+    const result = replayEnrollmentState(
+      { status: "requested", last_error_code: null, attempt_count: 3, next_action_at: new Date(0) },
+      queries,
+      now,
+    );
+    expect(result.attempt_count).toBe(3);
   });
 
   it("regression pin: a genuinely vehicle-specific non-retryable error (telemetry_vehicle_skipped) keeps the existing 365-day park and attempt_count bump", async () => {
@@ -148,14 +219,20 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
         jsonResponse(200, { response: { skipped_vehicles: [CONTEXT_ROW.vin] } }),
       );
 
-    await processTelemetry(baseRow({ status: "requested", applied_config_hash: null }), pool);
+    const now = Date.now();
+    await processTelemetry(baseRow({ status: "requested", applied_config_hash: null, attempt_count: 3 }), pool);
 
-    const update = findQuery(queries, "update public.onlyevs_telemetry_enrollments set status = $3");
-    expect(update).toBeDefined();
-    expect(update!.params[2]).toBe("unsupported");
-    expect(update!.params[3]).toBe("telemetry_vehicle_skipped");
-    expect(update!.sql).toContain("attempt_count = attempt_count + 1");
-    expect(update!.sql).toContain("next_action_at = case when $3 in");
+    const result = replayEnrollmentState(
+      { status: "requested", last_error_code: null, attempt_count: 3, next_action_at: new Date(0) },
+      queries,
+      now,
+    );
+    expect(result.status).toBe("unsupported");
+    expect(result.last_error_code).toBe("telemetry_vehicle_skipped");
+    expect(result.attempt_count).toBe(4);
+    const expected = now + 365 * 24 * 60 * 60 * 1000;
+    expect(result.next_action_at.getTime()).toBeGreaterThanOrEqual(expected - 5_000);
+    expect(result.next_action_at.getTime()).toBeLessThanOrEqual(expected + 5_000);
   });
 
   it("regression pin: a transient/retryable error keeps the existing 5-minute retry and attempt_count bump", async () => {
@@ -164,13 +241,19 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
       .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
       .mockRejectedValueOnce(new Error("network down"));
 
-    await processTelemetry(baseRow({ status: "requested", applied_config_hash: null }), pool);
+    const now = Date.now();
+    await processTelemetry(baseRow({ status: "requested", applied_config_hash: null, attempt_count: 3 }), pool);
 
-    const update = findQuery(queries, "update public.onlyevs_telemetry_enrollments set status = $3");
-    expect(update).toBeDefined();
-    expect(update!.params[2]).toBe("requested");
-    expect(update!.sql).toContain("attempt_count = attempt_count + 1");
-    expect(update!.sql).toContain("next_action_at = case when $3 in");
+    const result = replayEnrollmentState(
+      { status: "requested", last_error_code: null, attempt_count: 3, next_action_at: new Date(0) },
+      queries,
+      now,
+    );
+    expect(result.status).toBe("requested");
+    expect(result.attempt_count).toBe(4);
+    const expected = now + 5 * 60 * 1000;
+    expect(result.next_action_at.getTime()).toBeGreaterThanOrEqual(expected - 5_000);
+    expect(result.next_action_at.getTime()).toBeLessThanOrEqual(expected + 5_000);
   });
 
   it("classification is centralized behind one predicate", () => {
