@@ -58,42 +58,70 @@ export interface TelemetryEnrollmentRow {
 export type TelemetryStripState =
   | { kind: "hidden" }
   | { kind: "setting-up"; ageLabel: string }
-  | { kind: "pending-pairing"; ageLabel: string }
+  | { kind: "pending-sync"; ageLabel: string }
+  | { kind: "needs-pairing"; ageLabel: string }
   | { kind: "error"; ageLabel: string }
   | { kind: "limit-reached" }
-  | { kind: "unsupported-firmware" };
+  | { kind: "unsupported-firmware" }
+  | { kind: "unsupported-hardware" };
 
 /**
  * The single shared discriminator both the status strip and the live-state
  * card key their copy and actions off of, so they can never disagree about
  * *why* a vehicle has no signal yet. Deliberately finer-grained than
  * `TelemetryEnrollmentStatus` alone: `status === 'error'` and
- * `status === 'unsupported'` each cover two causes with different owner
+ * `status === 'unsupported'` each cover multiple causes with different owner
  * implications (an operator-side deployment gap vs. an account/vehicle-
- * specific failure; a telemetry-slot conflict vs. old firmware), and lumping
- * them together is exactly how the deployment-config copy leaked onto
- * vehicle-specific errors before this type existed.
+ * specific failure; a telemetry-slot conflict vs. old firmware vs. genuinely
+ * unsupported hardware vs. an unpaired virtual key), and lumping them
+ * together is exactly how the deployment-config copy leaked onto
+ * vehicle-specific errors before this type existed, and exactly how a
+ * missing virtual key was misread as unsupported firmware.
+ *
+ * `last_error_code` is read first, ahead of `status`, for Tesla's four
+ * documented `skipped_vehicles` reasons (SHARED CONTRACT:
+ * `telemetry_missing_key` / `telemetry_unsupported_hardware` /
+ * `telemetry_unsupported_firmware` / `telemetry_max_configs`) so a
+ * self-healing missing-key case can never fall through to the permanent
+ * 365-day park regardless of which status column value the worker happens
+ * to attach it to.
  */
 export type TelemetryCause =
   | "no-enrollment"
   | "setting-up"
-  | "pending-pairing"
+  | "pending-sync"
+  | "needs-pairing"
   | "deployment-config-blocked"
   | "other-error"
   | "limit-reached"
-  | "unsupported-firmware";
+  | "unsupported-firmware"
+  | "unsupported-hardware";
 
 export function deriveTelemetryCause(enrollment: TelemetryEnrollmentRow | null | undefined): TelemetryCause {
   if (!enrollment) return "no-enrollment";
-  switch (enrollment.status) {
+  const { status, lastErrorCode } = enrollment;
+
+  // Tesla's four documented skip reasons take priority over the coarser
+  // status column -- see the SHARED CONTRACT note above.
+  if (lastErrorCode === "telemetry_missing_key") return "needs-pairing";
+  if (lastErrorCode === "telemetry_max_configs") return "limit-reached";
+  if (lastErrorCode === "telemetry_unsupported_hardware") return "unsupported-hardware";
+  if (lastErrorCode === "telemetry_unsupported_firmware") return "unsupported-firmware";
+
+  switch (status) {
     case "unsupported":
-      return enrollment.lastErrorCode === "tesla_telemetry_limit_reached" ? "limit-reached" : "unsupported-firmware";
+      // A parked row without one of the four specific codes above (e.g. an
+      // older row, or a future code this build doesn't know yet) -- still
+      // park-worthy, and firmware is the more common real-world cause, but
+      // this is a fallback, not a claim that we know it's firmware.
+      return "unsupported-firmware";
     case "error":
-      return enrollment.lastErrorCode === "telemetry_proxy_not_configured"
-        ? "deployment-config-blocked"
-        : "other-error";
+      return lastErrorCode === "telemetry_proxy_not_configured" ? "deployment-config-blocked" : "other-error";
     case "pending_sync":
-      return "pending-pairing";
+      // synced=false: the vehicle will adopt the accepted config the next
+      // time it wakes and phones home. Normal for a parked, sleeping car --
+      // not a request for owner action (D3a).
+      return "pending-sync";
     default:
       // requested / configuring / removal_requested (the last only appears
       // briefly while an inactive vehicle's enrollment is being torn down)
@@ -126,11 +154,15 @@ export function deriveTelemetryStripState(args: {
       return { kind: "limit-reached" };
     case "unsupported-firmware":
       return { kind: "unsupported-firmware" };
+    case "unsupported-hardware":
+      return { kind: "unsupported-hardware" };
     case "deployment-config-blocked":
     case "other-error":
       return { kind: "error", ageLabel };
-    case "pending-pairing":
-      return { kind: "pending-pairing", ageLabel };
+    case "needs-pairing":
+      return { kind: "needs-pairing", ageLabel };
+    case "pending-sync":
+      return { kind: "pending-sync", ageLabel };
     case "setting-up":
     case "no-enrollment":
     default:
@@ -192,10 +224,11 @@ export function liveStateEmptyCopy(enrollment: TelemetryEnrollmentRow | null | u
     };
   }
 
-  // setting-up / pending-pairing / limit-reached / unsupported-firmware: the
-  // strip above already explains the situation (and, where relevant, the
-  // action) in state-specific terms -- this card just points to it rather
-  // than repeating or re-promising anything.
+  // setting-up / pending-sync / needs-pairing / limit-reached /
+  // unsupported-firmware / unsupported-hardware: the strip above already
+  // explains the situation (and, where relevant, the action) in
+  // state-specific terms -- this card just points to it rather than
+  // repeating or re-promising anything.
   return {
     title,
     detail: "This vehicle hasn't streamed a signal yet -- see the notice above.",

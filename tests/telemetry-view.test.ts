@@ -67,9 +67,9 @@ describe("deriveTelemetryStripState", () => {
       .toEqual({ kind: "setting-up", ageLabel: "enrolled 1h ago" });
   });
 
-  it("renders pending-pairing for pending_sync", () => {
+  it("renders pending-sync (accepted, no owner action) for a plain pending_sync row", () => {
     expect(deriveTelemetryStripState({ enrollment: { ...base, status: "pending_sync" }, hasLiveSignal: false, nowMs: NOW }))
-      .toEqual({ kind: "pending-pairing", ageLabel: "enrolled 1h ago" });
+      .toEqual({ kind: "pending-sync", ageLabel: "enrolled 1h ago" });
   });
 
   it("renders error with age", () => {
@@ -79,7 +79,7 @@ describe("deriveTelemetryStripState", () => {
 
   it("distinguishes limit_reached from firmware-unsupported, both under status=unsupported", () => {
     expect(deriveTelemetryStripState({
-      enrollment: { ...base, status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached" },
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_max_configs" },
       hasLiveSignal: false,
       nowMs: NOW,
     })).toEqual({ kind: "limit-reached" });
@@ -89,6 +89,42 @@ describe("deriveTelemetryStripState", () => {
       hasLiveSignal: false,
       nowMs: NOW,
     })).toEqual({ kind: "unsupported-firmware" });
+  });
+
+  it("renders unsupported-hardware distinctly from unsupported-firmware when lastErrorCode says so", () => {
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "unsupported-hardware" });
+
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "unsupported-firmware" });
+  });
+
+  it("renders needs-pairing (self-healing, not an error) for telemetry_missing_key regardless of status", () => {
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "pending_sync", lastErrorCode: "telemetry_missing_key" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "needs-pairing", ageLabel: "enrolled 1h ago" });
+
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "error", lastErrorCode: "telemetry_missing_key" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "needs-pairing", ageLabel: "enrolled 1h ago" });
+  });
+
+  it("never routes a missing_key row to the 365-day unsupported park, even if status says unsupported", () => {
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_missing_key" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "needs-pairing", ageLabel: "enrolled 1h ago" });
   });
 });
 
@@ -116,9 +152,9 @@ describe("deriveTelemetryCause", () => {
     }
   });
 
-  it("pending-pairing for pending_sync", () => {
+  it("pending-sync for a plain pending_sync row -- the normal, self-resolving sleeping-car state", () => {
     expect(deriveTelemetryCause({ status: "pending_sync", lastErrorCode: null, createdAt: NOW })).toBe(
-      "pending-pairing",
+      "pending-sync",
     );
   });
 
@@ -135,16 +171,39 @@ describe("deriveTelemetryCause", () => {
     expect(deriveTelemetryCause({ status: "error", lastErrorCode: null, createdAt: NOW })).toBe("other-error");
   });
 
-  it("limit-reached for status unsupported + tesla_telemetry_limit_reached", () => {
+  it("limit-reached for the documented telemetry_max_configs skip reason, any status", () => {
     expect(
-      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached", createdAt: NOW }),
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW }),
     ).toBe("limit-reached");
   });
 
-  it("unsupported-firmware for status unsupported with any other reason", () => {
+  it("unsupported-firmware for the documented telemetry_unsupported_firmware skip reason", () => {
     expect(
-      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "unsupported_firmware", createdAt: NOW }),
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW }),
     ).toBe("unsupported-firmware");
+  });
+
+  it("unsupported-firmware as the fallback for status=unsupported with an unrecognized/absent reason", () => {
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "some_future_code", createdAt: NOW }),
+    ).toBe("unsupported-firmware");
+    expect(deriveTelemetryCause({ status: "unsupported", lastErrorCode: null, createdAt: NOW })).toBe(
+      "unsupported-firmware",
+    );
+  });
+
+  it("unsupported-hardware for the documented telemetry_unsupported_hardware skip reason -- genuinely permanent, distinct from firmware", () => {
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW }),
+    ).toBe("unsupported-hardware");
+  });
+
+  it("needs-pairing for the documented telemetry_missing_key skip reason, regardless of which status column value carries it -- self-healing, never the 365-day park", () => {
+    for (const status of ["pending_sync", "error", "unsupported", "requested", "configuring"] as const) {
+      expect(
+        deriveTelemetryCause({ status, lastErrorCode: "telemetry_missing_key", createdAt: NOW }),
+      ).toBe("needs-pairing");
+    }
   });
 });
 
@@ -172,8 +231,14 @@ describe("liveStateEmptyCopy", () => {
     expect(copy.showManageLink).toBe(false);
   });
 
-  it("pending-pairing: defers to the strip above, no action (the strip already offers the pairing action)", () => {
+  it("pending-sync: defers to the strip above, no action -- this is the normal sleeping-car state, not a problem", () => {
     const copy = liveStateEmptyCopy({ status: "pending_sync", lastErrorCode: null, createdAt: NOW });
+    expect(copy.title).toBe(NO_TELEMETRY_TITLE);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("needs-pairing: defers to the strip above, no action (the strip carries the pairing instructions)", () => {
+    const copy = liveStateEmptyCopy({ status: "pending_sync", lastErrorCode: "telemetry_missing_key", createdAt: NOW });
     expect(copy.title).toBe(NO_TELEMETRY_TITLE);
     expect(copy.showManageLink).toBe(false);
   });
@@ -203,13 +268,19 @@ describe("liveStateEmptyCopy", () => {
   });
 
   it("limit-reached: must NOT say capture starts automatically, defers to the strip's owner-actionable explanation, no action", () => {
-    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached", createdAt: NOW });
+    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW });
     expect(copy.detail).not.toMatch(/automatically/i);
     expect(copy.showManageLink).toBe(false);
   });
 
   it("unsupported-firmware: must NOT say capture starts automatically, defers to the strip's owner-actionable explanation, no action", () => {
-    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "unsupported_firmware", createdAt: NOW });
+    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("unsupported-hardware: must NOT say capture starts automatically, defers to the strip's owner-actionable explanation, no action", () => {
+    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW });
     expect(copy.detail).not.toMatch(/automatically/i);
     expect(copy.showManageLink).toBe(false);
   });
@@ -220,10 +291,12 @@ describe("liveStateEmptyCopy", () => {
       null,
       { status: "requested", lastErrorCode: null, createdAt: NOW },
       { status: "pending_sync", lastErrorCode: null, createdAt: NOW },
+      { status: "pending_sync", lastErrorCode: "telemetry_missing_key", createdAt: NOW },
       { status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW },
       { status: "error", lastErrorCode: null, createdAt: NOW },
-      { status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached", createdAt: NOW },
-      { status: "unsupported", lastErrorCode: "unsupported_firmware", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW },
     ];
     for (const enrollment of nonDeploymentEnrollments) {
       expect(liveStateEmptyCopy(enrollment).detail).not.toMatch(/deployment/i);
@@ -236,10 +309,12 @@ describe("liveStateEmptyCopy", () => {
       { status: "configuring", lastErrorCode: null, createdAt: NOW },
       { status: "removal_requested", lastErrorCode: null, createdAt: NOW },
       { status: "pending_sync", lastErrorCode: null, createdAt: NOW },
+      { status: "pending_sync", lastErrorCode: "telemetry_missing_key", createdAt: NOW },
       { status: "error", lastErrorCode: "telemetry_proxy_not_configured", createdAt: NOW },
       { status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW },
-      { status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached", createdAt: NOW },
-      { status: "unsupported", lastErrorCode: "unsupported_firmware", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW },
     ];
     for (const enrollment of nonAutomaticEnrollments) {
       expect(liveStateEmptyCopy(enrollment).detail).not.toMatch(/automatically/i);
