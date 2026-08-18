@@ -1339,11 +1339,15 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
         "delete from public.onlyevs_telemetry_enrollments where workspace_id = $1 and vehicle_id = $2",
         [row.workspace_id, row.vehicle_id],
       ).catch(() => undefined);
+      // finishTeslaDisconnect's own statement sets last_error_code = null in
+      // the same breath as status = 'disconnected', so the unconfirmed
+      // marker below MUST be written after it -- writing it first (or
+      // concurrently) means finishTeslaDisconnect immediately erases it.
+      await finishTeslaDisconnect(client, row.integration_id).catch(() => undefined);
       await client.query(
         "update public.onlyevs_integrations set last_error_code = 'telemetry_removal_unconfirmed' where id = $1",
         [row.integration_id],
       ).catch(() => undefined);
-      await finishTeslaDisconnect(client, row.integration_id).catch(() => undefined);
       return;
     }
     const reauth = Boolean((error as Error & { reauth?: boolean }).reauth);

@@ -149,6 +149,28 @@ describe("processTelemetry -- removal retry cap (T: worker lane)", () => {
     expect(queries.some((q) => q.sql.includes("attempt_count = attempt_count + 1"))).toBe(false);
   });
 
+  it("at the cap: the telemetry_removal_unconfirmed trail is not immediately wiped by finishTeslaDisconnect's own last_error_code = null", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      .mockRejectedValueOnce(new Error("network down"));
+
+    await processTelemetry(baseRow({ attempt_count: TELEMETRY_REMOVAL_MAX_ATTEMPTS - 1 }), pool);
+
+    const unconfirmedIndex = queries.findIndex((q) =>
+      q.sql.includes("update public.onlyevs_integrations") && q.sql.includes("telemetry_removal_unconfirmed"));
+    const disconnectedIndex = queries.findIndex((q) =>
+      q.sql.includes("update public.onlyevs_integrations") && q.sql.includes("status = 'disconnected'"));
+
+    expect(unconfirmedIndex).toBeGreaterThanOrEqual(0);
+    expect(disconnectedIndex).toBeGreaterThanOrEqual(0);
+    // finishTeslaDisconnect's own statement sets last_error_code = null in
+    // the same breath as status = 'disconnected' -- the unconfirmed marker
+    // must be written strictly after that statement, or it is immediately
+    // erased and the owner never sees that removal went unconfirmed.
+    expect(unconfirmedIndex).toBeGreaterThan(disconnectedIndex);
+  });
+
   it("never throws even when the Tesla command proxy is unreachable/unconfigured at the cap", async () => {
     const originalProxyUrl = process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL;
     process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = "";
