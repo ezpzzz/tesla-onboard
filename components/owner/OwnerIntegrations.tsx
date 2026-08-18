@@ -11,10 +11,13 @@ import { connectHref } from "@/lib/owner/use-owner-tesla-connect";
 import {
   disconnectOwnerIntegration,
   fetchOwnerIntegrations,
+  forceCompleteOwnerIntegrationDisconnect,
   type OwnerIntegration,
 } from "@/lib/owner/integration-repository";
 import { vehicleWorkspaceScope } from "@/lib/owner/vehicle-repository";
 import type { IntegrationProvider } from "@/lib/owner/access-types";
+import { deriveIntegrationRecovery } from "@/lib/owner/integration-recovery";
+import { INTEGRATION_TRANSITIONAL_POLL_MS } from "@/lib/owner/telemetry-policy";
 
 interface OwnerIntegrationsProps {
   capabilities: OwnerIntegrationCapabilities;
@@ -107,6 +110,19 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
     return () => { requestVersion.current += 1; };
   }, [load]);
 
+  // Stale-disconnect recovery: while any integration sits in a transitional
+  // status (currently just `disconnecting`), keep polling so the owner sees
+  // it resolve -- or turn stale -- without a manual refresh. Stops itself
+  // the moment nothing is transitional anymore.
+  useEffect(() => {
+    const anyTransitional = integrations.some(
+      (item) => deriveIntegrationRecovery(item, Date.now()).transitional,
+    );
+    if (!anyTransitional) return;
+    const interval = setInterval(() => { void load(); }, INTEGRATION_TRANSITIONAL_POLL_MS);
+    return () => clearInterval(interval);
+  }, [integrations, load]);
+
   useEffect(() => {
     setOauthNotice((current) => {
       if (!current || !scopeKey) return current;
@@ -165,8 +181,24 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
     }
   }
 
+  async function forceDisconnectTesla() {
+    if (!scope) return;
+    setBusy("tesla");
+    setMessage(null);
+    try {
+      await forceCompleteOwnerIntegrationDisconnect(scope, "tesla");
+      setMessage("Tesla was marked disconnected locally. Provider-side telemetry configuration removal was not confirmed.");
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The connection could not be force-disconnected.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const tesla = integrations.find((item) => item.provider === "tesla");
   const google = integrations.find((item) => item.provider === "google_calendar");
+  const teslaRecovery = tesla ? deriveIntegrationRecovery(tesla, Date.now()) : { transitional: false, stale: false };
   const visibleOauthNotice = oauthNotice && (
     oauthNotice.scopeKey === null || oauthNotice.scopeKey === scopeKey
   ) ? oauthNotice.message : null;
@@ -235,7 +267,14 @@ export function OwnerIntegrations({ capabilities }: OwnerIntegrationsProps) {
                 {busy === "tesla" ? "Disconnecting…" : "Disconnect"}
               </Button>
             )
-          : null}
+          : teslaRecovery.stale
+            ? (
+                <Button variant="ghost" onClick={() => void forceDisconnectTesla()} disabled={busy !== null}>
+                  {busy === "tesla" ? "Disconnecting…" : INTEGRATION_FORCE_DISCONNECT_LABEL}
+                </Button>
+              )
+            : null}
+        staleNotice={teslaRecovery.stale ? INTEGRATION_STALE_DISCONNECT_NOTE : null}
       />
 
       <IntegrationCard
@@ -294,6 +333,18 @@ export const TURO_EMAIL_SETUP_STEPS = [
   "Approve two verification emails",
   "Send a test",
 ] as const;
+
+/**
+ * Stale-disconnect recovery copy (components/owner/OwnerIntegrations.tsx) --
+ * shown on the Tesla card only once deriveIntegrationRecovery reports the
+ * row as stale (parked in `disconnecting` past
+ * INTEGRATION_DISCONNECT_STALE_MS with no worker claim). Named the real
+ * cause honestly rather than a generic "something went wrong".
+ */
+export const INTEGRATION_STALE_DISCONNECT_NOTE =
+  "Disconnect hasn't completed — the background processing service hasn't picked it up.";
+
+export const INTEGRATION_FORCE_DISCONNECT_LABEL = "Force disconnect";
 
 export const TURO_EMAIL_FORWARDING_NOTE =
   "Until you verify Cloudflare's forwarding address, Turo notices appear only as a review card in Inbox here. Once verified, Turo notices land in your personal inbox unchanged too, and EVhost still files a review card for each — approve or dismiss in Inbox.";
@@ -406,6 +457,7 @@ function IntegrationCard({
   detail,
   action,
   secondaryAction,
+  staleNotice,
 }: {
   title: string;
   eyebrow: string;
@@ -417,6 +469,7 @@ function IntegrationCard({
   detail: string;
   action: ReactNode;
   secondaryAction: ReactNode;
+  staleNotice?: string | null;
 }) {
   const connected = integration?.status === "connected";
   const syncLabel = lastSyncLabel(integration?.lastSyncAt ?? null);
@@ -464,6 +517,13 @@ function IntegrationCard({
             </div>
           </div>
         </div>
+
+        {staleNotice ? (
+          <div role="status" className="mt-4 flex items-start gap-2 rounded-md border border-warn/30 bg-warn/5 p-3 text-sm text-ink-soft">
+            <IconAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+            <span className="min-w-0 break-words">{staleNotice}</span>
+          </div>
+        ) : null}
 
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
           {action}

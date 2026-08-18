@@ -67,6 +67,27 @@ export const LOCATION_READ_TIMEOUT_MS = 4_000;
  * repeated Fleet API charges/wakes. */
 export const LOCATE_SETUP_COOLDOWN_MS = 60_000;
 
+/** An `onlyevs_integrations` row parked in `disconnecting` for longer than
+ * this is stale -- the async worker claim loop that's supposed to finish
+ * the teardown (private.claim_onlyevs_due_telemetry -> finishTeslaDisconnect)
+ * never picked it up, most likely because that infrastructure isn't
+ * deployed for this workspace. Past this threshold the owner UI offers
+ * force_complete_onlyevs_integration_disconnect as a manual recovery path
+ * instead of leaving the connection stuck with no controls
+ * (components/owner/OwnerIntegrations.tsx). */
+export const INTEGRATION_DISCONNECT_STALE_MS = 15 * 60_000;
+
+/** Re-fetch interval while any workspace integration sits in a transitional
+ * status (currently just `disconnecting`) so the owner sees it resolve, or
+ * turn stale, without a manual page refresh
+ * (components/owner/OwnerIntegrations.tsx). */
+export const INTEGRATION_TRANSITIONAL_POLL_MS = 30_000;
+
+/** Cap on how many times the worker's telemetry-removal claim loop retries
+ * detaching a Tesla telemetry enrollment before giving up and surfacing the
+ * failure instead of retrying forever. */
+export const TELEMETRY_REMOVAL_MAX_ATTEMPTS = 20;
+
 export interface TelemetryLocationEnvelope {
   vin: string;
   observedAt: number;

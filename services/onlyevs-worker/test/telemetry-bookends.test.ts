@@ -76,6 +76,20 @@ beforeEach(() => {
 describe("ingestTelemetry -- history append + split late-event policy (T2/T3)", () => {
   const NOW = Date.parse("2026-08-17T12:00:00Z");
 
+  // ingestTelemetry's freshness check (isWithinCurrentStatsFreshnessWindow)
+  // defaults to real Date.now() when no now-parameter is passed, so these
+  // fixtures -- anchored at the fixed NOW above -- would silently rot once
+  // real wall-clock time drifts more than 24h past it. Pin the system clock
+  // to NOW for this whole describe block so "within/outside the 24h window"
+  // stays deterministic regardless of when the suite actually runs.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   function baseUpdate(overrides: Partial<TelemetryUpdate> = {}): TelemetryUpdate {
     return { vin: "5YJ3E1EA7KF000001", observedAt: NOW, batteryPct: 55, odometerMi: 12_000, ...overrides };
   }

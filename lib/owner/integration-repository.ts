@@ -74,3 +74,28 @@ export async function disconnectOwnerIntegration(
     throw new Error(error.message);
   }
 }
+
+/**
+ * Manual recovery for an integration stuck in `disconnecting` because the
+ * async worker claim loop that finishes teardown never picked it up (see
+ * lib/owner/integration-recovery.ts). Deletes the stored credential and
+ * telemetry enrollments and marks the integration `disconnected` in one
+ * transaction, without confirming provider-side telemetry config removal --
+ * offered only once deriveIntegrationRecovery reports the row as stale.
+ */
+export async function forceCompleteOwnerIntegrationDisconnect(
+  scope: VehicleWorkspaceScope,
+  provider: IntegrationProvider,
+): Promise<void> {
+  const { error } = await createClient().rpc("force_complete_onlyevs_integration_disconnect", {
+    p_workspace_id: scope.workspaceId,
+    p_shop_slug: scope.shopSlug,
+    p_provider: provider,
+  });
+  if (error) {
+    if (error.message.includes("integration_not_disconnecting")) {
+      throw new Error("This connection is no longer stuck disconnecting. Refresh to see its current status.");
+    }
+    throw new Error(error.message);
+  }
+}
