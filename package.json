@@ -1,6 +1,6 @@
 {
   "name": "evhost-app",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "private": true,
   "description": "Adaptive onboarding for Turo Tesla rental guests",
   "scripts": {

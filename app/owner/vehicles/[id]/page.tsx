@@ -31,7 +31,7 @@ import { Badge, Button, Card } from "@/components/ui";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { VehicleInput } from "@/lib/owner/types";
 import { PageHeader } from "@/components/evhost-ui";
-import { TelemetryStatusStrip } from "@/components/owner/telemetry-status-strip";
+import { TelemetryStatusStrip, useTelemetryEnrollment } from "@/components/owner/telemetry-status-strip";
 import { TelemetryLiveStateCard } from "@/components/owner/telemetry-live-state-card";
 import { TelemetryActiveTripCard } from "@/components/owner/telemetry-active-trip-card";
 import { TelemetryHealthCharts } from "@/components/owner/telemetry-health-charts";
@@ -66,6 +66,15 @@ export default function VehicleDetailPage() {
     () => parseReturnPolicyPct(config.rental.returnChargeLevel),
     [config.rental.returnChargeLevel],
   );
+  // Computed early (not gated behind `ready`) so the enrollment fetch below
+  // can run unconditionally, before any early return -- hooks can't be
+  // called conditionally. vehicleWorkspaceScope tolerates an unresolved
+  // tenantSlug and returns null rather than throwing.
+  const scope = vehicleWorkspaceScope(tenantSlug);
+  // Single fetch shared by the status strip and the live-state card below,
+  // so the two panels are reading the exact same enrollment row and can
+  // never render contradicting claims about it.
+  const enrollment = useTelemetryEnrollment(scope, id);
   const ready = vehicleHydrated && dataHydrated;
   const vehicle = vehicles.find((v) => v.id === id) ?? null;
 
@@ -123,7 +132,6 @@ export default function VehicleDetailPage() {
   }
 
   const live = vehicleTelemetry[vehicle.id];
-  const scope = vehicleWorkspaceScope(tenantSlug);
   const nowMs = Date.now();
   const linkedTrips = trips.filter((t) => t.vehicleId === vehicle.id);
   const activeOrUpcomingTrips = linkedTrips.filter(
@@ -217,9 +225,9 @@ export default function VehicleDetailPage() {
         className="h-52 md:h-60"
       />
 
-      <TelemetryStatusStrip scope={scope} vehicleId={vehicle.id} hasLiveSignal={live?.observedAt != null} />
+      <TelemetryStatusStrip enrollment={enrollment} hasLiveSignal={live?.observedAt != null} />
 
-      <TelemetryLiveStateCard live={live} nowMs={nowMs} />
+      <TelemetryLiveStateCard live={live} nowMs={nowMs} enrollment={enrollment} />
 
       {activeTrip ? (
         <TelemetryActiveTripCard

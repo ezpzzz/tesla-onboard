@@ -49,7 +49,7 @@ export function createWorkspaceAlias(keyring: VersionedKeyring): {
   // sizing/threat-model comment there. Because both sides read sizing from
   // these shared constants and verify enforces the resulting lengths
   // exactly, changing either constant is a coordinated app+Worker deploy,
-  // not an independent one: see 20260816160000_onlyevs_email_alias_format's
+  // not an independent one: see 20260816160001_onlyevs_email_alias_format's
   // migration note for the required rollout order.
   const token = lowerBase32Prefix(randomBytes(EMAIL_ALIAS_TOKEN_BYTES), EMAIL_ALIAS_TOKEN_CHARS);
   const keyVersion = keyring.activeVersion;

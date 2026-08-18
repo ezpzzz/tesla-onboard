@@ -88,6 +88,90 @@ export const INTEGRATION_TRANSITIONAL_POLL_MS = 30_000;
  * failure instead of retrying forever. */
 export const TELEMETRY_REMOVAL_MAX_ATTEMPTS = 20;
 
+/** After a telemetry attempt fails purely because this *deployment's own*
+ * telemetry proxy config (e.g. ONLYEVS_TESLA_COMMAND_PROXY_URL) is unset or
+ * invalid -- not a property of the vehicle or its Tesla account -- retry on
+ * this short interval instead of the vehicle-specific permanent-failure
+ * park (services/onlyevs-worker/index.ts's processTelemetry catch block).
+ * Re-attempting costs zero provider API calls (the client throws before any
+ * Tesla request goes out) and self-heals the instant an operator finishes
+ * configuring the proxy, so an enrollment must not sit dead for anywhere
+ * near as long as a genuine per-vehicle failure. 15 minutes keeps the
+ * enrollment reasonably live without hammering the worker's claim loop
+ * while the deployment gap remains unfixed. */
+export const TELEMETRY_CONFIG_ERROR_RETRY_MS = 15 * 60 * 1_000;
+
+/** THE single source of truth for which `TeslaTelemetryError` codes count as
+ * a *deployment's own* configuration gap (never a property of the vehicle
+ * or its Tesla account) -- currently the signed configure() write's proxy
+ * base and the plain-REST status()/remove() calls' region base
+ * (`TeslaTelemetryClient.resolveBase`, lib/owner/tesla-telemetry-client.ts).
+ *
+ * Two independent consumers must agree on exactly this set or an enrollment
+ * silently gets stranded:
+ *   1. `isDeploymentConfigTelemetryError` (services/onlyevs-worker/index.ts)
+ *      derives from this constant -- never an inline string/array literal --
+ *      so the worker's "retry on TELEMETRY_CONFIG_ERROR_RETRY_MS, not the
+ *      365-day vehicle park" branch fires for exactly this set.
+ *   2. `private.claim_onlyevs_due_telemetry`'s deployment-config allowlist
+ *      (supabase/migrations/20260818210000_onlyevs_telemetry_config_error_reclaim.sql
+ *      and any later migration that CREATE OR REPLACEs it), plus the
+ *      matching partial index, must list exactly this same set of codes --
+ *      otherwise a row the worker marks `status = 'error'` with a short
+ *      retry is never re-evaluated by the ONE query that claims due rows,
+ *      making the "short retry" dead code (the exact defect this constant
+ *      exists to prevent from recurring). This is SQL, so it cannot import
+ *      the constant directly; instead
+ *      services/onlyevs-worker/test/telemetry-config-error-code-lockstep.test.ts
+ *      reads the migration SQL from disk and asserts its allowlist is
+ *      exactly this set. Any change here MUST be paired with a new
+ *      migration widening both the claim predicate and the partial index,
+ *      or that guard test fails. */
+export const TELEMETRY_DEPLOYMENT_CONFIG_ERROR_CODES = [
+  "telemetry_proxy_not_configured",
+  "telemetry_region_not_configured",
+] as const;
+
+/** Once an enrollment reaches 'active', the worker's status() poll backs
+ * off to this interval instead of the short one used for every other state
+ * -- tesla-api-alignment-20260818.md D1: the prior unconditional 5-minute
+ * poll cost 288 billable calls/day/vehicle against a $10 account billing
+ * limit, and Tesla's billing-and-limits doc states that exceeding that
+ * limit suspends the API AND removes Fleet Telemetry configurations, which
+ * "will not be restored" -- so a steady-state active poll that is too
+ * frequent can silently and permanently destroy the very enrollment it is
+ * checking on. Mirrors the identical active/inactive split
+ * services/onlyevs-worker/index.ts's processDomain already uses at
+ * next_check_at (12 hours chosen over that function's 365 days because an
+ * active telemetry enrollment, unlike a verified domain, can still regress
+ * -- e.g. the owner unpairs the virtual key -- and the report calls out 12
+ * hours as materially cheaper than the 5-minute cadence while still
+ * noticing that within a business day). Every other enrollment state keeps
+ * the pre-existing 5-minute cadence unchanged. */
+export const TELEMETRY_ACTIVE_POLL_INTERVAL_MS = 12 * 60 * 60 * 1_000;
+
+/** Retry backoff for a `skipped_vehicles` reason of `missing_key`
+ * (surfaced as `TeslaTelemetryError` code `telemetry_missing_key`) --
+ * tesla-api-alignment-20260818.md D2/SHARED CONTRACT: this means the owner
+ * simply has not paired the application's virtual key to the vehicle yet.
+ * It is fully self-healing the moment they do, so it must retry on an
+ * hours-scale interval and must NEVER be presented or stored as
+ * 'unsupported' with the vehicle-permanent 365-day park (contrast
+ * `telemetry_unsupported_hardware`, which keeps that park). Hours, not the
+ * short 5-minute cadence, because pairing is a manual step a guest/owner
+ * takes in the Tesla app on their own schedule -- polling every 5 minutes
+ * for that buys nothing but spend. */
+export const TELEMETRY_MISSING_KEY_RETRY_MS = 4 * 60 * 60 * 1_000;
+
+/** Retry backoff for a `skipped_vehicles` reason of `unsupported_firmware`
+ * (`TeslaTelemetryError` code `telemetry_unsupported_firmware`) --
+ * tesla-api-alignment-20260818.md D2: the vehicle needs a Tesla-pushed
+ * software update, which is genuinely out of the owner's and our control
+ * and can take weeks, but is NOT a permanent condition the way
+ * `telemetry_unsupported_hardware` is -- so this gets a long backoff, never
+ * the 365-day hardware park. */
+export const TELEMETRY_UNSUPPORTED_FIRMWARE_RETRY_MS = 14 * 24 * 60 * 60 * 1_000;
+
 export interface TelemetryLocationEnvelope {
   vin: string;
   observedAt: number;

@@ -13,7 +13,16 @@ test("owner route changes preserve shell geometry and avoid visible layout shift
 
   await page.goto("/owner");
   await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
-  await expect(page.getByText("Loading today’s handoffs…")).toHaveCount(0);
+  // Wait for the *actual* first-load skeleton (an aria-labeled, aria-hidden
+  // shimmer with no visible text) to clear before treating the page as
+  // settled. `getByText("Loading today’s handoffs…")` never matches this
+  // element — aria-label isn't text content, and that string (with a
+  // trailing ellipsis) never appears anywhere in the DOM — so it always
+  // resolved to 0 immediately and let CLS tracking + the refresh dispatch
+  // below start while the initial skeleton was still visible, racing normal
+  // first-load hydration timing rather than observing a real background
+  // refresh.
+  await expect(page.locator('[aria-label="Loading today’s handoffs"]')).toHaveCount(0);
   await page.evaluate(() => { (window as unknown as { __evhostCls: number }).__evhostCls = 0; });
 
   const refreshFlashed = await page.evaluate(async () => {

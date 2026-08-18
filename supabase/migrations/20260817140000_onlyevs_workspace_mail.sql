@@ -213,7 +213,7 @@ comment on column public.onlyevs_email_integrations.retention_window_days is
 
 -- =====================================================================
 -- job_type widen (drop+re-add pattern, matching
--- 20260816160000_onlyevs_email_alias_format.sql's precedent for
+-- 20260816160001_onlyevs_email_alias_format.sql's precedent for
 -- enum-style CHECK constraints). 'retention' already exists from
 -- 20260816003000 -- this adds 'index_backfill' (the reconciler's own
 -- pacing job type -- its actual claim path below reads

@@ -6,10 +6,12 @@ import {
   bucketChargingSessionsByDay,
   chargingBarsAriaLabel,
   deriveLocationRowView,
+  deriveTelemetryCause,
   deriveTelemetryStripState,
   enrolledAgeLabel,
   freshnessAgeLabel,
   liveFieldFreshness,
+  liveStateEmptyCopy,
   msToWholeDays,
   msToWholeMonths,
   type LocationEvidenceApiState,
@@ -65,9 +67,9 @@ describe("deriveTelemetryStripState", () => {
       .toEqual({ kind: "setting-up", ageLabel: "enrolled 1h ago" });
   });
 
-  it("renders pending-pairing for pending_sync", () => {
+  it("renders pending-sync (accepted, no owner action) for a plain pending_sync row", () => {
     expect(deriveTelemetryStripState({ enrollment: { ...base, status: "pending_sync" }, hasLiveSignal: false, nowMs: NOW }))
-      .toEqual({ kind: "pending-pairing", ageLabel: "enrolled 1h ago" });
+      .toEqual({ kind: "pending-sync", ageLabel: "enrolled 1h ago" });
   });
 
   it("renders error with age", () => {
@@ -77,7 +79,7 @@ describe("deriveTelemetryStripState", () => {
 
   it("distinguishes limit_reached from firmware-unsupported, both under status=unsupported", () => {
     expect(deriveTelemetryStripState({
-      enrollment: { ...base, status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached" },
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_max_configs" },
       hasLiveSignal: false,
       nowMs: NOW,
     })).toEqual({ kind: "limit-reached" });
@@ -87,6 +89,56 @@ describe("deriveTelemetryStripState", () => {
       hasLiveSignal: false,
       nowMs: NOW,
     })).toEqual({ kind: "unsupported-firmware" });
+  });
+
+  it("renders unsupported-hardware distinctly from unsupported-firmware when lastErrorCode says so", () => {
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "unsupported-hardware" });
+
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "unsupported-firmware" });
+  });
+
+  it("renders the honest generic error state (never unsupported-firmware/hardware) for the unrecognized telemetry_vehicle_skipped fallback, even under status=unsupported", () => {
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "error", lastErrorCode: "telemetry_vehicle_skipped" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "error", ageLabel: "enrolled 1h ago" });
+
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_vehicle_skipped" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "error", ageLabel: "enrolled 1h ago" });
+  });
+
+  it("renders needs-pairing (self-healing, not an error) for telemetry_missing_key regardless of status", () => {
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "pending_sync", lastErrorCode: "telemetry_missing_key" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "needs-pairing", ageLabel: "enrolled 1h ago" });
+
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "error", lastErrorCode: "telemetry_missing_key" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "needs-pairing", ageLabel: "enrolled 1h ago" });
+  });
+
+  it("never routes a missing_key row to the 365-day unsupported park, even if status says unsupported", () => {
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_missing_key" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "needs-pairing", ageLabel: "enrolled 1h ago" });
   });
 });
 
@@ -99,6 +151,213 @@ describe("liveFieldFreshness", () => {
   });
   it("is stale beyond the 24h current-stats window", () => {
     expect(liveFieldFreshness(NOW - 25 * HOUR, NOW)).toBe("stale");
+  });
+});
+
+describe("deriveTelemetryCause", () => {
+  it("no-enrollment for undefined (loading) and null (never enrolled)", () => {
+    expect(deriveTelemetryCause(undefined)).toBe("no-enrollment");
+    expect(deriveTelemetryCause(null)).toBe("no-enrollment");
+  });
+
+  it("setting-up for requested / configuring / removal_requested", () => {
+    for (const status of ["requested", "configuring", "removal_requested"] as const) {
+      expect(deriveTelemetryCause({ status, lastErrorCode: null, createdAt: NOW })).toBe("setting-up");
+    }
+  });
+
+  it("pending-sync for a plain pending_sync row -- the normal, self-resolving sleeping-car state", () => {
+    expect(deriveTelemetryCause({ status: "pending_sync", lastErrorCode: null, createdAt: NOW })).toBe(
+      "pending-sync",
+    );
+  });
+
+  it("deployment-config-blocked only for status error + telemetry_proxy_not_configured", () => {
+    expect(
+      deriveTelemetryCause({ status: "error", lastErrorCode: "telemetry_proxy_not_configured", createdAt: NOW }),
+    ).toBe("deployment-config-blocked");
+  });
+
+  it("other-error for status error with any other (or no) error code", () => {
+    expect(deriveTelemetryCause({ status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW })).toBe(
+      "other-error",
+    );
+    expect(deriveTelemetryCause({ status: "error", lastErrorCode: null, createdAt: NOW })).toBe("other-error");
+  });
+
+  it("limit-reached for the documented telemetry_max_configs skip reason, any status", () => {
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW }),
+    ).toBe("limit-reached");
+  });
+
+  it("unsupported-firmware for the documented telemetry_unsupported_firmware skip reason", () => {
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW }),
+    ).toBe("unsupported-firmware");
+  });
+
+  it("unsupported-firmware as the fallback for status=unsupported with an unrecognized/absent reason", () => {
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "some_future_code", createdAt: NOW }),
+    ).toBe("unsupported-firmware");
+    expect(deriveTelemetryCause({ status: "unsupported", lastErrorCode: null, createdAt: NOW })).toBe(
+      "unsupported-firmware",
+    );
+  });
+
+  it("unsupported-hardware for the documented telemetry_unsupported_hardware skip reason -- genuinely permanent, distinct from firmware", () => {
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW }),
+    ).toBe("unsupported-hardware");
+  });
+
+  it("other-error (never unsupported-firmware/hardware) for the generic telemetry_vehicle_skipped fallback -- a reason this build doesn't recognize is not evidence of a firmware or hardware cause, regardless of which status column value carries it", () => {
+    expect(
+      deriveTelemetryCause({ status: "error", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW }),
+    ).toBe("other-error");
+    // Defense in depth for a legacy/pre-fix row that still has status
+    // 'unsupported' from before the worker stopped writing that combination.
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW }),
+    ).toBe("other-error");
+  });
+
+  it("needs-pairing for the documented telemetry_missing_key skip reason, regardless of which status column value carries it -- self-healing, never the 365-day park", () => {
+    for (const status of ["pending_sync", "error", "unsupported", "requested", "configuring"] as const) {
+      expect(
+        deriveTelemetryCause({ status, lastErrorCode: "telemetry_missing_key", createdAt: NOW }),
+      ).toBe("needs-pairing");
+    }
+  });
+});
+
+describe("liveStateEmptyCopy", () => {
+  const NO_TELEMETRY_TITLE = "No telemetry yet";
+  const AUTOMATIC_DETAIL =
+    "This vehicle hasn't streamed a signal yet. Once Tesla telemetry is connected for it, live state and trip evidence start capturing automatically.";
+
+  it("stays byte-identical to the original automatic-capture copy when there is no enrollment row at all (undefined = still loading, null = no row), including its action", () => {
+    expect(liveStateEmptyCopy(undefined)).toEqual({
+      title: NO_TELEMETRY_TITLE,
+      detail: AUTOMATIC_DETAIL,
+      showManageLink: true,
+    });
+    expect(liveStateEmptyCopy(null)).toEqual({
+      title: NO_TELEMETRY_TITLE,
+      detail: AUTOMATIC_DETAIL,
+      showManageLink: true,
+    });
+  });
+
+  it("setting-up: defers to the strip above, no action (the strip itself offers none for this state)", () => {
+    const copy = liveStateEmptyCopy({ status: "requested", lastErrorCode: null, createdAt: NOW });
+    expect(copy.title).toBe(NO_TELEMETRY_TITLE);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("pending-sync: defers to the strip above, no action -- this is the normal sleeping-car state, not a problem", () => {
+    const copy = liveStateEmptyCopy({ status: "pending_sync", lastErrorCode: null, createdAt: NOW });
+    expect(copy.title).toBe(NO_TELEMETRY_TITLE);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("needs-pairing: defers to the strip above, no action (the strip carries the pairing instructions)", () => {
+    const copy = liveStateEmptyCopy({ status: "pending_sync", lastErrorCode: "telemetry_missing_key", createdAt: NOW });
+    expect(copy.title).toBe(NO_TELEMETRY_TITLE);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("deployment-config-blocked: defers to the notice above, no automatic-capture promise, no action", () => {
+    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: "telemetry_proxy_not_configured", createdAt: NOW });
+    expect(copy.title).toBe(NO_TELEMETRY_TITLE);
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.detail).toMatch(/configured/i);
+    expect(copy.showManageLink).toBe(false);
+    // Don't re-explain the whole error -- the strip above already does.
+    expect(copy.detail.length).toBeLessThan(AUTOMATIC_DETAIL.length + 60);
+  });
+
+  it("other-error: must NOT claim the deployment is unconfigured, defers to the setup-failed notice, no action (the strip carries the reconnect action)", () => {
+    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.detail).not.toMatch(/deployment/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("other-error with no error code at all behaves the same as any other error code", () => {
+    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: null, createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.detail).not.toMatch(/deployment/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("unrecognized skip reason (telemetry_vehicle_skipped): must NOT claim firmware or hardware are the cause, defers to the setup-failed notice, no action", () => {
+    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.detail).not.toMatch(/deployment/i);
+    expect(copy.detail).not.toMatch(/firmware/i);
+    expect(copy.detail).not.toMatch(/hardware/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("limit-reached: must NOT say capture starts automatically, defers to the strip's owner-actionable explanation, no action", () => {
+    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("unsupported-firmware: must NOT say capture starts automatically, defers to the strip's owner-actionable explanation, no action", () => {
+    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("unsupported-hardware: must NOT say capture starts automatically, defers to the strip's owner-actionable explanation, no action", () => {
+    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("no card copy claims a deployment-configuration cause unless lastErrorCode says so", () => {
+    const nonDeploymentEnrollments: (TelemetryEnrollmentRow | null | undefined)[] = [
+      undefined,
+      null,
+      { status: "requested", lastErrorCode: null, createdAt: NOW },
+      { status: "pending_sync", lastErrorCode: null, createdAt: NOW },
+      { status: "pending_sync", lastErrorCode: "telemetry_missing_key", createdAt: NOW },
+      { status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW },
+      { status: "error", lastErrorCode: null, createdAt: NOW },
+      { status: "error", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW },
+    ];
+    for (const enrollment of nonDeploymentEnrollments) {
+      expect(liveStateEmptyCopy(enrollment).detail).not.toMatch(/deployment/i);
+    }
+  });
+
+  it("no state's card copy contains the word 'automatically' unless it is genuinely automatic (only the no-enrollment case)", () => {
+    const nonAutomaticEnrollments: (TelemetryEnrollmentRow | null | undefined)[] = [
+      { status: "requested", lastErrorCode: null, createdAt: NOW },
+      { status: "configuring", lastErrorCode: null, createdAt: NOW },
+      { status: "removal_requested", lastErrorCode: null, createdAt: NOW },
+      { status: "pending_sync", lastErrorCode: null, createdAt: NOW },
+      { status: "pending_sync", lastErrorCode: "telemetry_missing_key", createdAt: NOW },
+      { status: "error", lastErrorCode: "telemetry_proxy_not_configured", createdAt: NOW },
+      { status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW },
+      { status: "error", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW },
+    ];
+    for (const enrollment of nonAutomaticEnrollments) {
+      expect(liveStateEmptyCopy(enrollment).detail).not.toMatch(/automatically/i);
+    }
+    // The only genuinely-automatic case: no enrollment row at all.
+    expect(liveStateEmptyCopy(undefined).detail).toMatch(/automatically/i);
+    expect(liveStateEmptyCopy(null).detail).toMatch(/automatically/i);
   });
 });
 

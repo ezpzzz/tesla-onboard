@@ -13,8 +13,11 @@
  * Real architecture (supersedes the earlier REST-polling plan this comment
  * used to describe):
  *
- *   - Tesla fleet vehicles (firmware ≥2023.20.6, virtual-key paired) push
- *     signals via mTLS to a self-hosted Fleet Telemetry collector, which
+ *   - Tesla fleet vehicles (firmware ≥2024.26 -- the floor for the
+ *     proxy-signed telemetry config path we use; 2023.20.6 was only ever the
+ *     retired legacy-CSR floor and undersells what a proxy-signed app
+ *     requires -- virtual-key paired) push signals via mTLS to a
+ *     self-hosted Fleet Telemetry collector, which
  *     writes onto Kafka (`onlyevs_V` / `onlyevs_connectivity`). There is no
  *     polling loop on this path at all — the vehicle pushes, the collector
  *     receives.

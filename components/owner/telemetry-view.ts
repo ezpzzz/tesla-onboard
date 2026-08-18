@@ -58,10 +58,88 @@ export interface TelemetryEnrollmentRow {
 export type TelemetryStripState =
   | { kind: "hidden" }
   | { kind: "setting-up"; ageLabel: string }
-  | { kind: "pending-pairing"; ageLabel: string }
+  | { kind: "pending-sync"; ageLabel: string }
+  | { kind: "needs-pairing"; ageLabel: string }
   | { kind: "error"; ageLabel: string }
   | { kind: "limit-reached" }
-  | { kind: "unsupported-firmware" };
+  | { kind: "unsupported-firmware" }
+  | { kind: "unsupported-hardware" };
+
+/**
+ * The single shared discriminator both the status strip and the live-state
+ * card key their copy and actions off of, so they can never disagree about
+ * *why* a vehicle has no signal yet. Deliberately finer-grained than
+ * `TelemetryEnrollmentStatus` alone: `status === 'error'` and
+ * `status === 'unsupported'` each cover multiple causes with different owner
+ * implications (an operator-side deployment gap vs. an account/vehicle-
+ * specific failure; a telemetry-slot conflict vs. old firmware vs. genuinely
+ * unsupported hardware vs. an unpaired virtual key), and lumping them
+ * together is exactly how the deployment-config copy leaked onto
+ * vehicle-specific errors before this type existed, and exactly how a
+ * missing virtual key was misread as unsupported firmware.
+ *
+ * `last_error_code` is read first, ahead of `status`, for Tesla's four
+ * documented `skipped_vehicles` reasons (SHARED CONTRACT:
+ * `telemetry_missing_key` / `telemetry_unsupported_hardware` /
+ * `telemetry_unsupported_firmware` / `telemetry_max_configs`) so a
+ * self-healing missing-key case can never fall through to the permanent
+ * 365-day park regardless of which status column value the worker happens
+ * to attach it to.
+ */
+export type TelemetryCause =
+  | "no-enrollment"
+  | "setting-up"
+  | "pending-sync"
+  | "needs-pairing"
+  | "deployment-config-blocked"
+  | "other-error"
+  | "limit-reached"
+  | "unsupported-firmware"
+  | "unsupported-hardware";
+
+export function deriveTelemetryCause(enrollment: TelemetryEnrollmentRow | null | undefined): TelemetryCause {
+  if (!enrollment) return "no-enrollment";
+  const { status, lastErrorCode } = enrollment;
+
+  // Tesla's four documented skip reasons take priority over the coarser
+  // status column -- see the SHARED CONTRACT note above.
+  if (lastErrorCode === "telemetry_missing_key") return "needs-pairing";
+  if (lastErrorCode === "telemetry_max_configs") return "limit-reached";
+  if (lastErrorCode === "telemetry_unsupported_hardware") return "unsupported-hardware";
+  if (lastErrorCode === "telemetry_unsupported_firmware") return "unsupported-firmware";
+  // tesla-telemetry-client.ts's generic fallback for a skip reason outside
+  // all four documented codes above (or a legacy bare-VIN entry with no
+  // reason at all). This is explicitly NOT firmware or hardware evidence --
+  // only the two lastErrorCode checks above may claim either -- so it must
+  // fail into the same honest, generic bucket as any other unrecognized
+  // error rather than guessing a cause. Checked ahead of the `switch(status)`
+  // fallback below so a legacy/pre-fix row that still carries status
+  // 'unsupported' from before the worker stopped writing that combination
+  // (services/onlyevs-worker/index.ts's isUnrecognizedSkipTelemetryError
+  // branch) renders the same honest way as the current status='error' shape.
+  if (lastErrorCode === "telemetry_vehicle_skipped") return "other-error";
+
+  switch (status) {
+    case "unsupported":
+      // A parked row without one of the six specific codes above (e.g. an
+      // older row, or a future code this build doesn't know yet) -- still
+      // park-worthy, and firmware is the more common real-world cause, but
+      // this is a fallback, not a claim that we know it's firmware.
+      return "unsupported-firmware";
+    case "error":
+      return lastErrorCode === "telemetry_proxy_not_configured" ? "deployment-config-blocked" : "other-error";
+    case "pending_sync":
+      // synced=false: the vehicle will adopt the accepted config the next
+      // time it wakes and phones home. Normal for a parked, sleeping car --
+      // not a request for owner action (D3a).
+      return "pending-sync";
+    default:
+      // requested / configuring / removal_requested (the last only appears
+      // briefly while an inactive vehicle's enrollment is being torn down)
+      // all read as the same "no action needed" narrative.
+      return "setting-up";
+  }
+}
 
 /**
  * Reads onlyevs_telemetry_enrollments.status in plain words (design review
@@ -80,21 +158,93 @@ export function deriveTelemetryStripState(args: {
   if (hasLiveSignal) return { kind: "hidden" };
   if (!enrollment) return { kind: "hidden" };
 
-  if (enrollment.status === "unsupported") {
-    return enrollment.lastErrorCode === "tesla_telemetry_limit_reached"
-      ? { kind: "limit-reached" }
-      : { kind: "unsupported-firmware" };
+  const cause = deriveTelemetryCause(enrollment);
+  const ageLabel = enrolledAgeLabel(enrollment.createdAt, nowMs);
+  switch (cause) {
+    case "limit-reached":
+      return { kind: "limit-reached" };
+    case "unsupported-firmware":
+      return { kind: "unsupported-firmware" };
+    case "unsupported-hardware":
+      return { kind: "unsupported-hardware" };
+    case "deployment-config-blocked":
+    case "other-error":
+      return { kind: "error", ageLabel };
+    case "needs-pairing":
+      return { kind: "needs-pairing", ageLabel };
+    case "pending-sync":
+      return { kind: "pending-sync", ageLabel };
+    case "setting-up":
+    case "no-enrollment":
+    default:
+      return { kind: "setting-up", ageLabel };
   }
-  if (enrollment.status === "error") {
-    return { kind: "error", ageLabel: enrolledAgeLabel(enrollment.createdAt, nowMs) };
+}
+
+/* ── Live-state empty-state copy ──────────────────────────────────────── */
+
+export interface LiveStateEmptyCopy {
+  title: string;
+  detail: string;
+  /** Whether the card should offer its own "Manage Tesla connection" action.
+   * True only when no other panel is on screen to offer (or withhold) one --
+   * i.e. the no-enrollment case, where the status strip above renders
+   * nothing at all. Every other cause has a status strip visible in the same
+   * viewport that already owns the explanation and any action; duplicating
+   * or contradicting it here is exactly defect 2/3. */
+  showManageLink: boolean;
+}
+
+const AUTOMATIC_CAPTURE_DETAIL =
+  "This vehicle hasn't streamed a signal yet. Once Tesla telemetry is connected for it, live state and trip evidence start capturing automatically.";
+
+/**
+ * Copy for TelemetryLiveStateCard's empty state ("no signal streamed for
+ * this vehicle yet"). Driven by the same `deriveTelemetryCause` discriminator
+ * the status strip uses, so the two panels can never disagree about *why*
+ * there's no signal yet: for every cause except `no-enrollment` the strip
+ * above already carries the explanation (and any action that can help), so
+ * this card defers to it -- no re-promising automatic recovery, no claiming
+ * a deployment-configuration cause that isn't the real one, and no dangling
+ * action the strip deliberately withheld. Only `no-enrollment` (no strip
+ * rendered at all for this vehicle) keeps the original automatic-capture
+ * copy and action, byte-identical to the pre-enrollment-awareness text.
+ */
+export function liveStateEmptyCopy(enrollment: TelemetryEnrollmentRow | null | undefined): LiveStateEmptyCopy {
+  const title = "No telemetry yet";
+  const cause = deriveTelemetryCause(enrollment);
+
+  if (cause === "no-enrollment") {
+    return { title, detail: AUTOMATIC_CAPTURE_DETAIL, showManageLink: true };
   }
-  if (enrollment.status === "pending_sync") {
-    return { kind: "pending-pairing", ageLabel: enrolledAgeLabel(enrollment.createdAt, nowMs) };
+
+  if (cause === "deployment-config-blocked") {
+    return {
+      title,
+      detail:
+        "This vehicle hasn't streamed a signal yet. Live state and trip evidence will start capturing once this deployment's telemetry service is configured -- see the notice above.",
+      showManageLink: false,
+    };
   }
-  // requested / configuring / removal_requested (the last only appears
-  // briefly while an inactive vehicle's enrollment is being torn down) all
-  // read as the same "no action needed" narrative.
-  return { kind: "setting-up", ageLabel: enrolledAgeLabel(enrollment.createdAt, nowMs) };
+
+  if (cause === "other-error") {
+    return {
+      title,
+      detail: "This vehicle hasn't streamed a signal yet -- see the setup-failed notice above.",
+      showManageLink: false,
+    };
+  }
+
+  // setting-up / pending-sync / needs-pairing / limit-reached /
+  // unsupported-firmware / unsupported-hardware: the strip above already
+  // explains the situation (and, where relevant, the action) in
+  // state-specific terms -- this card just points to it rather than
+  // repeating or re-promising anything.
+  return {
+    title,
+    detail: "This vehicle hasn't streamed a signal yet -- see the notice above.",
+    showManageLink: false,
+  };
 }
 
 /* ── Live-state per-field freshness ───────────────────────────────────── */
