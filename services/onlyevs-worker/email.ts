@@ -4,9 +4,10 @@ import type { Pool, PoolClient } from "pg";
 import PostalMime from "postal-mime";
 import type { Attachment as PostalMimeAttachment } from "postal-mime";
 import {
-  decodeEvmailEnvelope, decodeEvmailPlaintext, encodeEvmailEnvelope, evmailAad, lengthPrefixedBytes,
+  decodeEvmailEnvelope, decodeEvmailPlaintext, encodeEvmailEnvelope, evmailAad,
   type NormalizedEmailManifest,
 } from "@evhost/email-ingest-contract";
+import { buildAttachmentAad } from "@/lib/email/mail-attachment-aad";
 import { buildSnippet, extractEmailMessageText } from "@/lib/email/plaintext";
 import { approvedTuroTemplateFingerprints, parseTuroEmail } from "@/lib/email/turo-parser";
 import { credentialKeyringFromEnv, decryptCredential, encryptCredential } from "@/lib/owner/credential-envelope";
@@ -125,21 +126,6 @@ function encryptGcm(plaintext: Buffer, key: Buffer, aad: Uint8Array): { iv: Buff
   return { iv, ciphertextWithTag: Buffer.concat([ciphertext, cipher.getAuthTag()]) };
 }
 
-/**
- * AAD for one attachment's own encrypted R2 envelope (3A: "each attachment
- * written as its own encrypted R2 object ... keep AAD binding to the
- * attachment row identity"). Deliberately a distinct domain-separated shape
- * from evmailAad (message-level envelopes) -- an attachment envelope and its
- * parent message envelope must never decrypt with each other's AAD even if
- * some field values coincided.
- */
-function attachmentAad(input: { workspaceId: string; messageIndexId: string; attachmentId: string; r2ObjectKey: string }): Uint8Array {
-  return lengthPrefixedBytes([
-    "evhost-evmail-attachment-aad-v1",
-    input.workspaceId, input.messageIndexId, input.attachmentId, input.r2ObjectKey,
-  ]);
-}
-
 /** Same EVMAIL1 envelope shape/KEK keyring as message capture, encrypted
  * with node:crypto (this process, unlike services/email-ingest-worker, runs
  * in Node -- not a Workers runtime -- so this is encryptGcm's mirror of
@@ -223,7 +209,7 @@ async function storeEmailAttachment(
   // second object no row ever references.
   const attachmentId = deterministicAttachmentId(sha256);
   const r2ObjectKey = `onlyevs-email-attachments/${ctx.workspaceId}/${ctx.inboundEmailId}/${sha256}.evmail`;
-  const aad = attachmentAad({ workspaceId: ctx.workspaceId, messageIndexId: ctx.messageIndexId, attachmentId, r2ObjectKey });
+  const aad = buildAttachmentAad({ workspaceId: ctx.workspaceId, messageIndexId: ctx.messageIndexId, attachmentId, r2ObjectKey });
   await r2Put(r2ObjectKey, encryptEmailBytes(contentBytes, aad));
   await client.query(
     `insert into private.onlyevs_email_attachments
@@ -255,7 +241,10 @@ interface MessageIndexUpsertInput {
  * without duplicating a row. Attachments are extracted from the *same* raw
  * message every call; re-running this for a message that already has
  * attachment rows produces a second set of (harmlessly orphaned, since
- * `r2_object_key` embeds a fresh uuid each time) R2 objects rather than
+ * `r2_object_key` is sha256-deterministic over the attachment's own bytes --
+ * see deterministicAttachmentId/storeEmailAttachment above -- a byte-
+ * identical re-run reproduces the exact same key, so "second set" only
+ * happens when the content genuinely differs) R2 objects rather than
  * duplicate rows -- `on conflict (workspace_id, r2_object_key) do nothing`
  * guards the row, not the object. See T9's own idempotency note: the
  * reconciler's claim query only ever selects inbound rows that still lack an
@@ -481,7 +470,7 @@ function escapeHtml(value: string): string {
 // Exported (not otherwise part of the public module surface) solely so the
 // delivery-claim race fix has direct unit coverage -- see
 // services/onlyevs-worker/test/email-action-executor.test.ts.
-export async function sendOwnerAlertForAction(pool: Pool, action: EmailActionRow, workerId: string) {
+export async function sendOwnerAlertForAction(pool: Pool, action: EmailActionRow) {
   const client = await pool.connect();
   try {
     const already = await client.query<{ delivery_id: string | null }>(
@@ -636,7 +625,7 @@ async function processActionJob(pool: Pool, job: EmailJob, workerId: string) {
     current = next;
 
     if (next.state === "awaiting_owner_alert" && !next.delivery_id) {
-      await sendOwnerAlertForAction(pool, next, workerId);
+      await sendOwnerAlertForAction(pool, next);
     }
 
     const progressed = actionJobProgressed(last, { state: next.state, revision: next.revision });
@@ -707,7 +696,7 @@ async function releaseBackfillClaim(pool: Pool, id: string): Promise<void> {
   ).catch(() => undefined);
 }
 
-async function processIndexBackfillRow(pool: Pool, row: BackfillInboundRow, workerId: string): Promise<"indexed" | "skipped"> {
+async function processIndexBackfillRow(pool: Pool, row: BackfillInboundRow): Promise<"indexed" | "skipped"> {
   // A row can be claimed here with its raw envelope already gone (purged --
   // T4's purge core nulls r2_object_key precisely so a purge is never
   // silently defeated by a stale reference). Nothing left to index; this is
@@ -790,7 +779,7 @@ export async function sweepEmailIndexBackfill(pool: Pool, workerId: string): Pro
   let indexed = 0;
   let skipped = 0;
   for (const row of claimed.rows) {
-    const result = await processIndexBackfillRow(pool, row, workerId);
+    const result = await processIndexBackfillRow(pool, row);
     if (result === "indexed") indexed += 1; else skipped += 1;
   }
   console.log(`sweepEmailIndexBackfill: indexed ${indexed}, skipped ${skipped}`);
@@ -798,15 +787,22 @@ export async function sweepEmailIndexBackfill(pool: Pool, workerId: string): Pro
 
 // ---------------------------------------------------------------------------
 // T5 -- per-workspace retention sweep (5A). Hourly-guarded like
-// sweepRetention in index.ts. Deletes the search index/attachment copies and
-// the raw R2 envelope once an integration's configured
+// sweepRetention in index.ts. Once an integration's configured
 // retention_window_days has elapsed (private.list_onlyevs_email_
-// retention_due) -- and *only* those. It deliberately never touches
-// onlyevs_email_candidates.proposed_state (messageText/guestMessageText) or
-// writes to private.onlyevs_email_purge_audit -- scrubbing that
-// pre-existing plaintext copy and recording an audit trail is exclusively
-// purge's job (T4/T10), a deliberate manager-triggered action, not an
-// automatic time-based one (Premise 3).
+// retention_due), a due message is fully purged through the exact same
+// executeEmailPurge machinery (T4/T10, below) a manager-triggered purge
+// uses -- search index/attachment rows deleted, the raw R2 envelope +
+// attachment objects deleted, AND (fix-before-merge review finding: the
+// design Constraint that every purge/retention path must treat
+// onlyevs_email_candidates.proposed_state's messageText/guestMessageText as
+// body storage was being violated here) that same jsonb body-text scrub +
+// pii_scrubbed_at stamp + append-only audit row. A previous version of this
+// sweep only deleted the index/R2 copies and left the pre-existing
+// plaintext body forever in proposed_state -- retention silently did not
+// mean what its name promised. The audit row this now writes records
+// actor_type='system' (see EmailPurgeActor above) so a purge-triggered scrub
+// is distinguishable from a manager's explicit purge action, never a
+// fabricated user id.
 // ---------------------------------------------------------------------------
 
 const EMAIL_RETENTION_DUE_BATCH_SIZE = 200;
@@ -819,53 +815,33 @@ async function sweepEmailRetentionDue(pool: Pool): Promise<{ expired: number; r2
   let expired = 0;
   let r2Failures = 0;
   for (const row of due.rows) {
-    const client = await pool.connect();
     try {
-      const attachmentKeys = await client.query<{ r2_object_key: string }>(
-        `select a.r2_object_key
-           from private.onlyevs_email_attachments a
-           join private.onlyevs_email_message_index i
-             on i.workspace_id = a.workspace_id and i.id = a.message_index_id
-          where i.workspace_id = $1 and i.inbound_email_id = $2`,
-        [row.workspace_id, row.inbound_email_id],
-      );
-      const envelope = await client.query<{ r2_object_key: string | null }>(
-        `select r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2`,
-        [row.workspace_id, row.inbound_email_id],
-      );
-      const keys = attachmentKeys.rows.map((r) => r.r2_object_key);
-      const envelopeKey = envelope.rows[0]?.r2_object_key ?? null;
-      if (envelopeKey) keys.push(envelopeKey);
-      if (keys.length === 0) continue; // already cleaned up by a prior purge/sweep
-
-      // R2 deletes happen BEFORE any DB row is touched: if any key fails to
-      // delete, this row's DB state is left completely untouched (`continue`
-      // below, no partial cleanup) so the next hourly sweep retries the
-      // whole thing from a clean, well-defined starting point rather than
-      // orphaning an object this run can no longer find.
-      const report = await deleteR2ObjectsWithReport(keys);
-      if (report.failed.length > 0) {
-        r2Failures += report.failed.length;
-        console.error(`onlyevs-email-worker: retention sweep R2 delete failed inbound=${row.inbound_email_id} keys=${report.failed.map((f) => f.key).join(",")}`);
-        continue;
-      }
-
-      await client.query("begin");
-      await client.query(
-        `delete from private.onlyevs_email_message_index where workspace_id=$1 and inbound_email_id=$2`,
-        [row.workspace_id, row.inbound_email_id],
-      );
-      await client.query(
-        `update public.onlyevs_inbound_emails set r2_object_key=null where workspace_id=$1 and id=$2`,
-        [row.workspace_id, row.inbound_email_id],
-      );
-      await client.query("commit");
+      // executeEmailPurge's own DB transaction is atomic per message
+      // (commits scrub+audit together or rolls back entirely on any DB
+      // error -- see its own try/catch). An R2 delete failure after that
+      // commit is never a dead end: the same transaction enqueues a
+      // 'purge' outbox job keyed to the audit row it just wrote, and
+      // processPurgeJob (T10 dispatch trigger) retries deleting exactly
+      // those keys with the outbox's normal backoff/dead-letter policy --
+      // this is what "retryable" means here, in place of the pre-FIX-2
+      // sweep's "leave the DB row untouched and let the next hourly pass
+      // re-discover it" strategy, which is no longer available once the
+      // DB side of a purge (unlike a bare R2 delete) is not safely
+      // re-runnable from scratch.
+      const result = await executeEmailPurge(pool, {
+        workspaceId: row.workspace_id,
+        inboundEmailId: row.inbound_email_id,
+        actor: { type: "system" },
+        scope: "message",
+        reason: "retention_window_elapsed",
+      });
       expired += 1;
+      if (result.r2FailedKeys.length > 0) {
+        r2Failures += result.r2FailedKeys.length;
+        console.error(`onlyevs-email-worker: retention sweep R2 delete failed inbound=${row.inbound_email_id} keys=${result.r2FailedKeys.map((f) => f.key).join(",")} (queued for retry via outbox)`);
+      }
     } catch (error) {
-      await client.query("rollback").catch(() => undefined);
       console.error(`onlyevs-email-worker: retention sweep failed inbound=${row.inbound_email_id}: ${error instanceof Error ? error.message : error}`);
-    } finally {
-      client.release();
     }
   }
   return { expired, r2Failures };
@@ -907,17 +883,30 @@ export async function sweepEmailRetentionHourly(pool: Pool): Promise<void> {
 // private.onlyevs_email_purge_audit: select+insert) -- then deletes the
 // returned R2 object keys with per-object error capture, which no SQL
 // function can do on its own. The caller is responsible for having already
-// authorized `actorUserId` as a workspace manager (this function, like
+// authorized a manager `actor` as a workspace manager (this function, like
 // purge_onlyevs_email_message_core, performs no authorization check of its
 // own) and for resolving `scope`'s target inbound_email_id(s) -- reservation/
 // guest-scoped purges are a small loop over this per Premise 3's key rules,
-// same shape as the SQL RPCs' own lateral join.
+// same shape as the SQL RPCs' own lateral join. A `system` actor (T5's
+// retention sweep, sweepEmailRetentionDue below) needs no such
+// authorization -- it is never manager-triggered.
 // ---------------------------------------------------------------------------
+
+/**
+ * Who authorized this purge. A manager-triggered purge (the app's owner
+ * surface) always carries a real auth.users id -- the DB check constraint
+ * on private.onlyevs_email_purge_audit (20260817140000_onlyevs_workspace_
+ * mail.sql) enforces that actor_user_id is set exactly when actor_type is
+ * 'manager'. A 'system' actor (T5's retention sweep -- see
+ * sweepEmailRetentionDue below) never carries a user id: retention is a
+ * config-driven, time-based trigger, not something any person clicked.
+ */
+export type EmailPurgeActor = { type: "manager"; userId: string } | { type: "system" };
 
 export interface EmailPurgeRequest {
   workspaceId: string;
   inboundEmailId: string;
-  actorUserId: string;
+  actor: EmailPurgeActor;
   scope: "message" | "reservation" | "guest";
   reason?: string | null;
 }
@@ -995,11 +984,36 @@ export async function executeEmailPurge(pool: Pool, request: EmailPurgeRequest):
       [inboundRow.id],
     );
 
-    await client.query(
+    const auditInsert = await client.query<{ id: string }>(
       `insert into private.onlyevs_email_purge_audit
-         (workspace_id, scope, inbound_email_id, actor_user_id, reason, r2_object_keys)
-       values ($1,$2,$3,$4,$5,$6)`,
-      [request.workspaceId, request.scope, inboundRow.id, request.actorUserId, request.reason ?? null, r2ObjectKeys],
+         (workspace_id, scope, inbound_email_id, actor_user_id, actor_type, reason, r2_object_keys)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       returning id`,
+      [
+        request.workspaceId, request.scope, inboundRow.id,
+        request.actor.type === "manager" ? request.actor.userId : null,
+        request.actor.type,
+        request.reason ?? null, r2ObjectKeys,
+      ],
+    );
+    const auditId = auditInsert.rows[0]!.id;
+
+    // Same "enqueue the R2 cleanup in the same transaction as the audit
+    // row" wiring as private.purge_onlyevs_email_message_core's own comment
+    // explains: entity_id is the audit row's own id, so a failed inline R2
+    // delete below is never a dead end -- processPurgeJob (T10 dispatch
+    // trigger) picks up this exact job_type/entity_id pair, re-reads
+    // r2_object_keys off this same durable audit row, and retries with the
+    // outbox's normal exponential-backoff/dead-letter policy. This is what
+    // makes the R2 side of this purge retryable even though (unlike the old
+    // pre-FIX-2 retention sweep) the DB writes above are never rolled back
+    // on an R2 failure -- see sweepEmailRetentionDue's own comment for why
+    // that tradeoff is deliberate for the 'system' actor.
+    await client.query(
+      `insert into public.onlyevs_email_outbox (workspace_id, job_type, entity_id)
+       values ($1,'purge',$2)
+       on conflict (job_type, entity_id) do nothing`,
+      [request.workspaceId, auditId],
     );
 
     await client.query("commit");

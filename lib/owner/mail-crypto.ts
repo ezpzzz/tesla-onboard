@@ -2,18 +2,33 @@ import "server-only";
 
 import { createDecipheriv, createHash } from "node:crypto";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { decodeEvmailEnvelope, evmailAad } from "@evhost/email-ingest-contract";
+import { decodeEvmailEnvelope } from "@evhost/email-ingest-contract";
 
 /**
  * Shared EVMAIL envelope decrypt for the owner-app read path (T11), mirroring
- * services/onlyevs-worker/email.ts's loadAndDecrypt -- same envelope format,
- * same two-layer KEK-wrapped-DEK AES-256-GCM, same AAD builder
- * (evmailAad, @evhost/email-ingest-contract). Deliberately re-implemented
- * here rather than imported from the worker: services/onlyevs-worker is a
- * separate deployable with its own dependency surface, and this module runs
- * inside the Next server (`runtime = "nodejs"`) where "no new dependencies"
- * already permits @aws-sdk/client-s3 and @evhost/email-ingest-contract --
- * both are already root package.json dependencies, not worker-only.
+ * services/onlyevs-worker/email.ts's loadAndDecrypt/attachment decrypt --
+ * same envelope format, same two-layer KEK-wrapped-DEK AES-256-GCM.
+ * Deliberately re-implemented here rather than imported from the worker:
+ * services/onlyevs-worker is a separate deployable with its own dependency
+ * surface, and this module runs inside the Next server (`runtime =
+ * "nodejs"`) where "no new dependencies" already permits @aws-sdk/client-s3
+ * and @evhost/email-ingest-contract -- both are already root package.json
+ * dependencies, not worker-only.
+ *
+ * AAD is NOT built here (fix-before-merge review finding: a prior version
+ * hand-built one hardcoded shape -- the message-envelope evmailAad shape --
+ * for every call, including attachment decrypts, which actually need a
+ * different, domain-separated shape the write side
+ * (services/onlyevs-worker/email.ts) uses for its own encrypted attachment
+ * objects. Every attachment decrypt failed as a result. decryptEvmailObject
+ * below now takes fully-precomputed AAD bytes; callers select the correct
+ * builder for what they are decrypting -- evmailAad
+ * (@evhost/email-ingest-contract) for the message envelope,
+ * buildAttachmentAad (lib/email/mail-attachment-aad.ts, the SAME function
+ * the worker's write path imports) for an attachment. Routing both the
+ * worker's write path and every read call site here through that one
+ * shared builder is what makes this class of AAD drift structurally
+ * impossible going forward -- see that module's own doc comment.
  *
  * KEK posture matches lib/owner/location-evidence-server.ts: keys live only
  * in server-only env (EVHOST_EMAIL_KEK_KEYS), are parsed fresh per call
@@ -108,16 +123,21 @@ export async function fetchEncryptedObjectBytes(args: FetchEncryptedObjectArgs):
 
 export interface DecryptEvmailObjectArgs {
   encrypted: Uint8Array;
-  /** Coordinates the AAD exactly as services/onlyevs-worker/email.ts's
-   * evmailAad(...) call does for the raw message envelope. For an attachment
-   * object, objectKey is that attachment's OWN r2_object_key while the other
-   * three fields stay the parent message's -- the documented, assumed
-   * "EVMAIL-style envelope" contract (design doc Premise 5 / 3A) for how the
-   * worker's attachment extraction (T8/T9, a different lane) binds each
-   * attachment object to its parent message: same evmailAad() shape, only
-   * objectKey varies per object. If the worker lands a different per-
-   * attachment AAD shape, this is the one place that needs to change. */
-  aad: { inboundId: string; aliasHash: string; rawSha256: string; normalizedSha256: string; objectKey: string };
+  /**
+   * Precomputed AAD bytes for this exact ciphertext object. This module
+   * intentionally does not know or guess which shape to build -- the
+   * message envelope and each attachment envelope are two different
+   * domain-separated AAD layouts (see this file's header comment), and only
+   * the caller knows which one it is decrypting. Build it with:
+   *   - evmailAad({ inboundId, aliasHash, rawSha256, normalizedSha256,
+   *     objectKey }) from @evhost/email-ingest-contract, for the raw
+   *     message envelope.
+   *   - buildAttachmentAad({ workspaceId, messageIndexId, attachmentId,
+   *     r2ObjectKey }) from lib/email/mail-attachment-aad, for an
+   *     attachment object -- the exact same function
+   *     services/onlyevs-worker/email.ts's write path uses to encrypt it.
+   */
+  aad: Uint8Array;
   expectedKekVersion?: number | null;
 }
 
@@ -137,10 +157,9 @@ export function decryptEvmailObject(args: DecryptEvmailObjectArgs): Buffer {
   }
   const key = parseKeks(process.env.EVHOST_EMAIL_KEK_KEYS ?? "").get(envelope.kekVersion);
   if (!key) throw new MailDecryptError("email_kek_missing");
-  const aad = evmailAad(args.aad);
   try {
-    const dek = decryptGcm(envelope.wrappedDek, key, envelope.wrapIv, aad);
-    return decryptGcm(envelope.ciphertext, dek, envelope.contentIv, aad);
+    const dek = decryptGcm(envelope.wrappedDek, key, envelope.wrapIv, args.aad);
+    return decryptGcm(envelope.ciphertext, dek, envelope.contentIv, args.aad);
   } catch (error) {
     if (error instanceof MailDecryptError) throw error;
     throw new MailDecryptError("email_decrypt_failed");

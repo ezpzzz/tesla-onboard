@@ -123,7 +123,7 @@ describe("sendOwnerAlertForAction — delivery-claim race", () => {
     const client = makeClient(0);
     const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
 
-    await sendOwnerAlertForAction(pool, makeAction(), "worker-1");
+    await sendOwnerAlertForAction(pool, makeAction());
 
     expect(sendGridEmailAction).not.toHaveBeenCalled();
     expect(client.queries.some((q) => q.sql.trim().startsWith("delete from public.onlyevs_email_deliveries"))).toBe(true);
@@ -134,7 +134,7 @@ describe("sendOwnerAlertForAction — delivery-claim race", () => {
     const client = makeClient(1);
     const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
 
-    await sendOwnerAlertForAction(pool, makeAction(), "worker-1");
+    await sendOwnerAlertForAction(pool, makeAction());
 
     expect(sendGridEmailAction).toHaveBeenCalledTimes(1);
     expect(client.queries.some((q) => q.sql.trim().startsWith("delete from public.onlyevs_email_deliveries"))).toBe(false);

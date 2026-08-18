@@ -163,11 +163,24 @@ create table if not exists private.onlyevs_email_purge_audit (
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
   scope text not null check (scope in ('message', 'reservation', 'guest')),
   inbound_email_id uuid not null,
-  actor_user_id uuid not null references auth.users(id) on delete restrict,
+  -- actor_user_id is nullable: a manager-triggered purge always carries a
+  -- real auth.users id, but T5's retention sweep (services/onlyevs-worker/
+  -- email.ts's sweepEmailRetentionDue) is a config-driven, time-based
+  -- trigger nobody clicked -- there is no user to attribute it to, and
+  -- fabricating one (or reusing an unrelated workspace member's id) would
+  -- make this audit trail lie about who acted. actor_type distinguishes the
+  -- two, and the check constraint below is what keeps actor_user_id from
+  -- silently going null on a manager purge instead.
+  actor_user_id uuid references auth.users(id) on delete restrict,
+  actor_type text not null default 'manager' check (actor_type in ('manager', 'system')),
   reason text check (reason is null or char_length(reason) <= 500),
   r2_object_keys text[] not null default '{}',
   purged_at timestamptz not null default now(),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint onlyevs_email_purge_audit_actor_consistency check (
+    (actor_type = 'manager' and actor_user_id is not null)
+    or (actor_type = 'system' and actor_user_id is null)
+  )
 );
 
 create index if not exists onlyevs_email_purge_audit_workspace_idx

@@ -509,22 +509,36 @@ describe("sweepEmailIndexBackfill — T9 standing reconciler", () => {
 });
 
 // ===========================================================================
-// T5 -- per-workspace retention sweep.
+// T5 -- per-workspace retention sweep. Rewritten for FIX 2 (fix-before-merge
+// review finding): retention now reuses executeEmailPurge (T10) verbatim
+// per due message instead of a bespoke R2-then-DB implementation, so a due
+// message's proposed_state body text is actually scrubbed -- these tests
+// assert against executeEmailPurge's real query text (T10's own describe
+// block above pins its exact SQL shapes) rather than the old inline
+// queries, which no longer exist.
 // ===========================================================================
 
 describe("sweepEmailRetention — T5 retention executor", () => {
   const WORKSPACE_ID = "ws-1";
   const INBOUND_ID = "inbound-3";
 
-  it("deletes the index row and nulls the envelope key once every R2 object is deleted", async () => {
+  it("purges a due message via executeEmailPurge with a 'system' actor, deleting every R2 object and scrubbing the DB", async () => {
     const { client, calls } = makeFakeClient([
       {
-        match: "from private.onlyevs_email_attachments a\n           join private.onlyevs_email_message_index i",
+        match: "select id, r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2 for update",
+        handler: () => ({ rows: [{ id: INBOUND_ID, r2_object_key: "envelope-key-1" }] }),
+      },
+      {
+        match: "from private.onlyevs_email_attachments a\n         join private.onlyevs_email_message_index i",
         handler: () => ({ rows: [{ r2_object_key: "attach-key-1" }] }),
       },
       {
-        match: "select r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2",
-        handler: () => ({ rows: [{ r2_object_key: "envelope-key-1" }] }),
+        match: "select id, effective_trip_id from public.onlyevs_email_candidates where workspace_id=$1 and inbound_email_id=$2 for update",
+        handler: () => ({ rows: [] }),
+      },
+      {
+        match: "insert into private.onlyevs_email_purge_audit",
+        handler: () => ({ rows: [{ id: "audit-row-ret-1" }] }),
       },
     ]);
     const pool = {
@@ -539,20 +553,34 @@ describe("sweepEmailRetention — T5 retention executor", () => {
     expect(result).toEqual({ expired: 1, r2Failures: 0 });
     expect(s3State.deleteCalls.sort()).toEqual(["attach-key-1", "envelope-key-1"].sort());
     expect(calls.some((c) => c.sql.includes("delete from private.onlyevs_email_message_index"))).toBe(true);
-    expect(calls.some((c) => c.sql.includes("update public.onlyevs_inbound_emails set r2_object_key=null"))).toBe(true);
+    expect(calls.some((c) => c.sql.includes("update public.onlyevs_inbound_emails set r2_object_key = null where id = $1"))).toBe(true);
     expect(calls.some((c) => c.sql.includes("commit"))).toBe(true);
+
+    const auditInsert = calls.find((c) => c.sql.includes("insert into private.onlyevs_email_purge_audit"));
+    expect(auditInsert!.params[3]).toBeNull(); // actor_user_id
+    expect(auditInsert!.params[4]).toBe("system"); // actor_type
+    expect(auditInsert!.params[5]).toBe("retention_window_elapsed"); // reason
+    expect(calls.some((c) => c.sql.includes("insert into public.onlyevs_email_outbox"))).toBe(true);
   });
 
-  it("touches no DB row for a message whose R2 delete fails (retried whole by the next sweep)", async () => {
+  it("still commits the scrub when an R2 delete fails, but reports the failure so it counts toward r2Failures -- the outbox enqueue (same transaction) is what makes it retryable, not leaving the DB row untouched", async () => {
     s3State.deleteShouldFail.add("attach-key-1");
     const { client, calls } = makeFakeClient([
       {
-        match: "from private.onlyevs_email_attachments a\n           join private.onlyevs_email_message_index i",
+        match: "select id, r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2 for update",
+        handler: () => ({ rows: [{ id: INBOUND_ID, r2_object_key: "envelope-key-1" }] }),
+      },
+      {
+        match: "from private.onlyevs_email_attachments a\n         join private.onlyevs_email_message_index i",
         handler: () => ({ rows: [{ r2_object_key: "attach-key-1" }] }),
       },
       {
-        match: "select r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2",
-        handler: () => ({ rows: [{ r2_object_key: "envelope-key-1" }] }),
+        match: "select id, effective_trip_id from public.onlyevs_email_candidates where workspace_id=$1 and inbound_email_id=$2 for update",
+        handler: () => ({ rows: [] }),
+      },
+      {
+        match: "insert into private.onlyevs_email_purge_audit",
+        handler: () => ({ rows: [{ id: "audit-row-ret-2" }] }),
       },
     ]);
     const pool = {
@@ -564,16 +592,30 @@ describe("sweepEmailRetention — T5 retention executor", () => {
 
     const result = await sweepEmailRetention(pool);
 
-    expect(result.expired).toBe(0);
-    expect(result.r2Failures).toBeGreaterThan(0);
-    expect(calls.some((c) => c.sql.includes("delete from private.onlyevs_email_message_index"))).toBe(false);
-    expect(calls.some((c) => c.sql.includes("commit"))).toBe(false);
+    expect(result).toEqual({ expired: 1, r2Failures: 1 });
+    expect(calls.some((c) => c.sql.includes("commit"))).toBe(true);
+    expect(calls.some((c) => c.sql.includes("insert into public.onlyevs_email_outbox"))).toBe(true);
+    expect(console.error).toHaveBeenCalled();
   });
 
-  it("skips a row with nothing left to delete (already cleaned up by a prior purge/sweep)", async () => {
+  it("is a harmless no-op purge for a row with nothing left in R2 (already cleaned up by a prior purge/sweep)", async () => {
     const { client, calls } = makeFakeClient([
-      { match: "from private.onlyevs_email_attachments a\n           join private.onlyevs_email_message_index i", handler: () => ({ rows: [] }) },
-      { match: "select r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2", handler: () => ({ rows: [{ r2_object_key: null }] }) },
+      {
+        match: "select id, r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2 for update",
+        handler: () => ({ rows: [{ id: INBOUND_ID, r2_object_key: null }] }),
+      },
+      {
+        match: "from private.onlyevs_email_attachments a\n         join private.onlyevs_email_message_index i",
+        handler: () => ({ rows: [] }),
+      },
+      {
+        match: "select id, effective_trip_id from public.onlyevs_email_candidates where workspace_id=$1 and inbound_email_id=$2 for update",
+        handler: () => ({ rows: [] }),
+      },
+      {
+        match: "insert into private.onlyevs_email_purge_audit",
+        handler: () => ({ rows: [{ id: "audit-row-ret-3" }] }),
+      },
     ]);
     const pool = {
       connect: vi.fn(async () => client),
@@ -584,9 +626,9 @@ describe("sweepEmailRetention — T5 retention executor", () => {
 
     const result = await sweepEmailRetention(pool);
 
-    expect(result).toEqual({ expired: 0, r2Failures: 0 });
+    expect(result).toEqual({ expired: 1, r2Failures: 0 });
     expect(s3State.deleteCalls).toHaveLength(0);
-    expect(calls.some((c) => c.sql.includes("delete from") || c.sql.includes("update"))).toBe(false);
+    expect(calls.some((c) => c.sql.includes("commit"))).toBe(true);
   });
 });
 
@@ -598,7 +640,7 @@ describe("executeEmailPurge — T10 purge executor", () => {
   const WORKSPACE_ID = "ws-1";
   const INBOUND_ID = "inbound-4";
 
-  it("deletes every body copy (R2 objects, index row, proposed_state scrub, pii_scrubbed_at, audit row)", async () => {
+  it("deletes every body copy (R2 objects, index row, proposed_state scrub, pii_scrubbed_at, audit row) and enqueues the retry-safety purge outbox job", async () => {
     const { client, calls } = makeFakeClient([
       {
         match: "select id, r2_object_key from public.onlyevs_inbound_emails where workspace_id=$1 and id=$2 for update",
@@ -612,11 +654,16 @@ describe("executeEmailPurge — T10 purge executor", () => {
         match: "select id, effective_trip_id from public.onlyevs_email_candidates where workspace_id=$1 and inbound_email_id=$2 for update",
         handler: () => ({ rows: [{ id: "candidate-2", effective_trip_id: "trip-2" }] }),
       },
+      {
+        match: "insert into private.onlyevs_email_purge_audit",
+        handler: () => ({ rows: [{ id: "audit-row-2" }] }),
+      },
     ]);
     const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
 
     const result = await executeEmailPurge(pool, {
-      workspaceId: WORKSPACE_ID, inboundEmailId: INBOUND_ID, actorUserId: "user-1", scope: "message", reason: "guest requested deletion",
+      workspaceId: WORKSPACE_ID, inboundEmailId: INBOUND_ID,
+      actor: { type: "manager", userId: "user-1" }, scope: "message", reason: "guest requested deletion",
     });
 
     expect(result.r2ObjectKeys.sort()).toEqual(["attach-key-2", "envelope-key-2"].sort());
@@ -635,7 +682,17 @@ describe("executeEmailPurge — T10 purge executor", () => {
     expect(auditInsert!.params[0]).toBe(WORKSPACE_ID);
     expect(auditInsert!.params[1]).toBe("message");
     expect(auditInsert!.params[3]).toBe("user-1");
-    expect(auditInsert!.params[4]).toBe("guest requested deletion");
+    expect(auditInsert!.params[4]).toBe("manager");
+    expect(auditInsert!.params[5]).toBe("guest requested deletion");
+
+    // FIX 2: the audit row's id is enqueued as a 'purge' outbox job in the
+    // SAME transaction as the audit insert -- same wiring as
+    // private.purge_onlyevs_email_message_core's own SQL-side insert -- so a
+    // failed inline R2 delete below is always retried by processPurgeJob,
+    // not silently orphaned.
+    const outboxInsert = calls.find((c) => c.sql.includes("insert into public.onlyevs_email_outbox"));
+    expect(outboxInsert).toBeDefined();
+    expect(outboxInsert!.params).toEqual([WORKSPACE_ID, "audit-row-2"]);
 
     expect(calls.some((c) => c.sql.includes("commit"))).toBe(true);
   });
@@ -645,11 +702,12 @@ describe("executeEmailPurge — T10 purge executor", () => {
       { match: "select id, r2_object_key from public.onlyevs_inbound_emails", handler: () => ({ rows: [{ id: INBOUND_ID, r2_object_key: null }] }) },
       { match: "from private.onlyevs_email_attachments a\n         join private.onlyevs_email_message_index i", handler: () => ({ rows: [] }) },
       { match: "select id, effective_trip_id from public.onlyevs_email_candidates", handler: () => ({ rows: [] }) },
+      { match: "insert into private.onlyevs_email_purge_audit", handler: () => ({ rows: [{ id: "audit-row-2b" }] }) },
     ]);
     const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
 
     const result = await executeEmailPurge(pool, {
-      workspaceId: WORKSPACE_ID, inboundEmailId: INBOUND_ID, actorUserId: "user-1", scope: "message",
+      workspaceId: WORKSPACE_ID, inboundEmailId: INBOUND_ID, actor: { type: "manager", userId: "user-1" }, scope: "message",
     });
 
     expect(result.r2ObjectKeys).toHaveLength(0);
@@ -663,11 +721,12 @@ describe("executeEmailPurge — T10 purge executor", () => {
       { match: "select id, r2_object_key from public.onlyevs_inbound_emails", handler: () => ({ rows: [{ id: INBOUND_ID, r2_object_key: "envelope-key-3" }] }) },
       { match: "from private.onlyevs_email_attachments a\n         join private.onlyevs_email_message_index i", handler: () => ({ rows: [{ r2_object_key: "attach-key-3" }] }) },
       { match: "select id, effective_trip_id from public.onlyevs_email_candidates", handler: () => ({ rows: [] }) },
+      { match: "insert into private.onlyevs_email_purge_audit", handler: () => ({ rows: [{ id: "audit-row-3" }] }) },
     ]);
     const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
 
     const result = await executeEmailPurge(pool, {
-      workspaceId: WORKSPACE_ID, inboundEmailId: INBOUND_ID, actorUserId: "user-1", scope: "message",
+      workspaceId: WORKSPACE_ID, inboundEmailId: INBOUND_ID, actor: { type: "manager", userId: "user-1" }, scope: "message",
     });
 
     expect(result.r2DeletedKeys).toEqual(["envelope-key-3"]);
@@ -683,11 +742,30 @@ describe("executeEmailPurge — T10 purge executor", () => {
     const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
 
     await expect(executeEmailPurge(pool, {
-      workspaceId: WORKSPACE_ID, inboundEmailId: "missing", actorUserId: "user-1", scope: "message",
+      workspaceId: WORKSPACE_ID, inboundEmailId: "missing", actor: { type: "manager", userId: "user-1" }, scope: "message",
     })).rejects.toThrow("email_message_not_found");
 
     expect(calls.some((c) => c.sql.includes("rollback"))).toBe(true);
     expect(calls.some((c) => c.sql.includes("commit"))).toBe(false);
+  });
+
+  it("records a 'system' actor with no actor_user_id (T5 retention sweep's own caller shape)", async () => {
+    const { client, calls } = makeFakeClient([
+      { match: "select id, r2_object_key from public.onlyevs_inbound_emails", handler: () => ({ rows: [{ id: INBOUND_ID, r2_object_key: "envelope-key-sys" }] }) },
+      { match: "from private.onlyevs_email_attachments a\n         join private.onlyevs_email_message_index i", handler: () => ({ rows: [] }) },
+      { match: "select id, effective_trip_id from public.onlyevs_email_candidates", handler: () => ({ rows: [] }) },
+      { match: "insert into private.onlyevs_email_purge_audit", handler: () => ({ rows: [{ id: "audit-row-sys" }] }) },
+    ]);
+    const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+    await executeEmailPurge(pool, {
+      workspaceId: WORKSPACE_ID, inboundEmailId: INBOUND_ID, actor: { type: "system" }, scope: "message", reason: "retention_window_elapsed",
+    });
+
+    const auditInsert = calls.find((c) => c.sql.includes("insert into private.onlyevs_email_purge_audit"));
+    expect(auditInsert!.params[3]).toBeNull();
+    expect(auditInsert!.params[4]).toBe("system");
+    expect(auditInsert!.params[5]).toBe("retention_window_elapsed");
   });
 });
 

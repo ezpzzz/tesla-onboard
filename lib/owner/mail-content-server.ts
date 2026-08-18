@@ -1,8 +1,9 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { decodeEvmailPlaintext, type NormalizedEmailManifest } from "@evhost/email-ingest-contract";
+import { decodeEvmailPlaintext, evmailAad, type NormalizedEmailManifest } from "@evhost/email-ingest-contract";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildAttachmentAad } from "@/lib/email/mail-attachment-aad";
 import {
   decryptEvmailObject,
   fetchEncryptedObjectBytes,
@@ -21,8 +22,25 @@ import {
  * Per-message inline-image budget (design doc Premise 2 / T11): image/*
  * attachments that carry a content_id are embedded as `data:` URLs up to
  * this many total bytes (decrypted size); anything over budget, non-image,
- * or without a content_id stays manifest-only and is fetched on demand via
- * the same-origin, authed attachment route.
+ * or without a content_id stays manifest-only.
+ *
+ * Correction (fix-before-merge review finding): a prior version of this
+ * comment claimed an oversized/failed inline image "falls back to a
+ * same-origin fetch." That is not actually possible for the sandboxed
+ * renderer (components/owner/MailContentFrame.tsx): the message HTML is
+ * rendered inside a `sandbox=""` srcdoc iframe with an opaque origin and a
+ * CSP whose img-src is `data:` only (widened to `data: https:` when this
+ * message's remote-image loading is on -- components/owner/mail-render-
+ * prep.ts's buildMailCsp -- still never same-origin) -- an opaque-origin
+ * document cannot issue a same-origin fetch to anything, and img-src
+ * forbids it from loading the authed attachment route directly even if it
+ * could (that route is same-origin, not `data:`/`https:`). The
+ * honest behavior is: the manifest entry's `inlineState` tells the PARENT
+ * page (not the sandboxed iframe) whether that image was inlined, and the
+ * parent renders an explicit placeholder for anything that wasn't --
+ * fetching the real bytes on demand, if the guest chooses to, only ever
+ * happens through the parent's own authed GET to the attachment download
+ * route, never from inside the sandbox.
  */
 export const MAIL_INLINE_IMAGE_BUDGET_BYTES = 1_048_576;
 
@@ -41,6 +59,26 @@ export const MAIL_INLINE_IMAGE_BUDGET_BYTES = 1_048_576;
 const INLINE_IMAGE_CONTENT_TYPE_PATTERN =
   /^image\/(?:png|jpeg|gif|webp|bmp|svg\+xml|x-icon|vnd\.microsoft\.icon)$/i;
 
+/**
+ * Why a content_id-bearing image did or didn't end up in `inline` (fix-
+ * before-merge review finding): a prior version collapsed every non-success
+ * outcome -- ineligible, over budget, and a genuine decrypt/hash failure --
+ * into the same `inlined: false`, via a bare `catch {}` that swallowed the
+ * failure with no signal at all. That is both dishonest (a real decrypt
+ * error looks identical to "this was never going to be inlined") and a
+ * silent-degradation risk (nothing distinguishes an expected non-candidate
+ * from an unexpected crypto failure worth alerting on). No crypto detail
+ * (error codes, R2 key names, KEK versions) ever leaks into this field --
+ * it is exactly one of these three values.
+ *   - "inlined": embedded in `inline` as a verified, byte-matching data: URL.
+ *   - "too_large": doesn't fit the per-message inline budget, or isn't an
+ *     inline candidate at all (not an image, or no content_id) -- the
+ *     ordinary, expected case for most non-inline attachments.
+ *   - "error": WAS an eligible candidate (image, has a content_id, within
+ *     budget) but the fetch/decrypt/hash-verify failed unexpectedly.
+ */
+export type MailAttachmentInlineState = "inlined" | "too_large" | "error";
+
 export interface MailAttachmentManifestEntry {
   id: string;
   filename: string | null;
@@ -48,6 +86,7 @@ export interface MailAttachmentManifestEntry {
   sizeBytes: number;
   contentId: string | null;
   inlined: boolean;
+  inlineState: MailAttachmentInlineState;
 }
 
 export type MailContentState =
@@ -135,13 +174,13 @@ export async function fetchMailMessageContent(args: FetchMailMessageContentArgs)
     });
     const plaintext = decryptEvmailObject({
       encrypted,
-      aad: {
+      aad: evmailAad({
         inboundId: envelope.inbound_email_id,
         aliasHash: envelope.alias_hash,
         rawSha256: envelope.raw_sha256 ?? "",
         normalizedSha256: envelope.normalized_sha256 ?? "",
         objectKey: envelope.r2_object_key,
-      },
+      }),
       expectedKekVersion: envelope.kek_version,
     });
     const decoded = decodeEvmailPlaintext(plaintext);
@@ -168,7 +207,11 @@ export async function fetchMailMessageContent(args: FetchMailMessageContentArgs)
       attachment.content_type && INLINE_IMAGE_CONTENT_TYPE_PATTERN.test(attachment.content_type),
     );
     const eligible = isImage && Boolean(attachment.content_id) && attachment.size_bytes <= budgetRemaining;
-    let inlined = false;
+    // Default for every non-candidate (not an image, no content_id, or
+    // already over budget before even attempting a fetch): "too_large" --
+    // the ordinary, expected reason an attachment stays out of `inline`,
+    // never confused with a genuine crypto failure below.
+    let inlineState: MailAttachmentInlineState = "too_large";
     if (eligible) {
       try {
         const encryptedAttachment = await fetchEncryptedObjectBytes({
@@ -177,28 +220,42 @@ export async function fetchMailMessageContent(args: FetchMailMessageContentArgs)
         });
         const attachmentBytes = decryptEvmailObject({
           encrypted: encryptedAttachment,
-          aad: {
-            inboundId: envelope.inbound_email_id,
-            aliasHash: envelope.alias_hash,
-            rawSha256: envelope.raw_sha256 ?? "",
-            normalizedSha256: envelope.normalized_sha256 ?? "",
-            objectKey: attachment.r2_object_key,
-          },
+          // Attachment-shape AAD (buildAttachmentAad), NOT the message
+          // envelope's evmailAad shape used above -- this is exactly the
+          // fix-before-merge review finding: workspaceId/messageIndexId are
+          // the caller's own membership-checked context (args.workspaceId,
+          // args.messageId -- p_message_id is already private.onlyevs_
+          // email_message_index's own primary key, i.e. messageIndexId, per
+          // that RPC's join), attachmentId/r2ObjectKey come straight off
+          // this attachment's own RPC row.
+          aad: buildAttachmentAad({
+            workspaceId: args.workspaceId,
+            messageIndexId: args.messageId,
+            attachmentId: attachment.id,
+            r2ObjectKey: attachment.r2_object_key,
+          }),
         });
-        if (attachmentBytes.byteLength <= budgetRemaining) {
-          if (
-            !attachment.sha256
-            || createHash("sha256").update(attachmentBytes).digest("hex") === attachment.sha256
-          ) {
-            inline[attachment.content_id as string] =
-              `data:${attachment.content_type};base64,${attachmentBytes.toString("base64")}`;
-            budgetRemaining -= attachmentBytes.byteLength;
-            inlined = true;
-          }
+        if (attachmentBytes.byteLength > budgetRemaining) {
+          inlineState = "too_large";
+        } else if (attachment.sha256 && createHash("sha256").update(attachmentBytes).digest("hex") !== attachment.sha256) {
+          inlineState = "error";
+        } else {
+          inline[attachment.content_id as string] =
+            `data:${attachment.content_type};base64,${attachmentBytes.toString("base64")}`;
+          budgetRemaining -= attachmentBytes.byteLength;
+          inlineState = "inlined";
         }
-      } catch {
-        // Falls through to manifest-only -- the same-origin attachment route
-        // remains the honest fallback, never a broken inline reference.
+      } catch (error) {
+        // Honest per-attachment state (fix-before-merge review finding):
+        // this used to be a bare `catch {}` that swallowed every decrypt/
+        // fetch failure identically to "never eligible," so a genuine AAD
+        // mismatch or R2 error silently looked like an ordinary non-inline
+        // attachment. No crypto detail (MailDecryptError.code, R2 key
+        // names, KEK versions) leaves this function -- only the coarse
+        // too_large/error distinction below.
+        inlineState = error instanceof MailDecryptError && error.code === "email_envelope_too_large"
+          ? "too_large"
+          : "error";
       }
     }
     manifestEntries.push({
@@ -207,7 +264,8 @@ export async function fetchMailMessageContent(args: FetchMailMessageContentArgs)
       contentType: attachment.content_type,
       sizeBytes: attachment.size_bytes,
       contentId: attachment.content_id,
-      inlined,
+      inlined: inlineState === "inlined",
+      inlineState,
     });
   }
 

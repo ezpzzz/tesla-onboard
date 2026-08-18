@@ -1,5 +1,5 @@
 begin;
-select plan(69);
+select plan(72);
 
 -- =====================================================================
 -- Structural coverage: tables, functions, grants.
@@ -338,6 +338,35 @@ select is(
   (select count(*)::int from private.onlyevs_email_purge_audit where inbound_email_id = '97300000-0000-4000-8000-000000000001' and scope = 'message'),
   1,
   'a message-scoped purge audit row is written'
+);
+select is(
+  (select actor_type from private.onlyevs_email_purge_audit where inbound_email_id = '97300000-0000-4000-8000-000000000001' and scope = 'message'),
+  'manager',
+  'a manager-triggered purge audit row is stamped actor_type=manager, with a real actor_user_id'
+);
+
+-- fix-before-merge review finding (FIX 2): T5's retention sweep records a
+-- 'system' actor with no user to attribute it to -- actor_user_id must be
+-- nullable for that row shape, but never nullable for a manager row, and
+-- never non-null for a system row. onlyevs_email_purge_audit_actor_consistency
+-- is what enforces both directions of that split.
+select throws_ok(
+  $$insert into private.onlyevs_email_purge_audit
+      (workspace_id, scope, inbound_email_id, actor_user_id, actor_type, r2_object_keys)
+    values (
+      '97100000-0000-4000-8000-000000000001', 'message', '97300000-0000-4000-8000-000000000001',
+      '97000000-0000-4000-8000-000000000001', 'system', '{}'
+    )$$,
+  '23514', null, 'actor_type=system with a non-null actor_user_id violates the actor consistency check'
+);
+select throws_ok(
+  $$insert into private.onlyevs_email_purge_audit
+      (workspace_id, scope, inbound_email_id, actor_type, r2_object_keys)
+    values (
+      '97100000-0000-4000-8000-000000000001', 'message', '97300000-0000-4000-8000-000000000001',
+      'manager', '{}'
+    )$$,
+  '23514', null, 'actor_type=manager with a null actor_user_id violates the actor consistency check'
 );
 
 -- =====================================================================
