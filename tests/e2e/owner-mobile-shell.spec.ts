@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("mobile owner navigation exposes five stable tabs and keeps workspace actions in the avatar menu", async ({
+test("mobile owner navigation exposes six stable tabs and keeps workspace actions in the avatar menu", async ({
   isMobile,
   page,
 }) => {
@@ -10,7 +10,7 @@ test("mobile owner navigation exposes five stable tabs and keeps workspace actio
   const navigation = page.getByRole("navigation", { name: "Owner tabs" });
 
   await expect(navigation).toBeVisible();
-  await expect(navigation.getByRole("link")).toHaveCount(5);
+  await expect(navigation.getByRole("link")).toHaveCount(6);
   const activeTab = navigation.getByRole("link", { name: "Trips" });
   await expect(activeTab).toHaveAttribute("aria-current", "page");
   await expect(activeTab.locator(".bg-signal")).toHaveCount(0);

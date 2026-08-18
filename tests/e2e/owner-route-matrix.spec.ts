@@ -6,6 +6,7 @@ const ROUTES = [
   ["/owner/drivers", "Guests"],
   ["/owner/vehicles", "Vehicles"],
   ["/owner/inbox", "Inbox"],
+  ["/owner/mail", "Mail"],
   ["/owner/integrations", "Integrations"],
   ["/owner/settings", "Settings"],
   ["/owner/account", "Account"],
@@ -21,10 +22,19 @@ test("every owner destination uses the responsive shell without horizontal overf
   }
 
   if (isMobile) {
-    await expect(page.getByRole("navigation", { name: "Owner tabs" }).getByRole("link")).toHaveCount(5);
+    await expect(page.getByRole("navigation", { name: "Owner tabs" }).getByRole("link")).toHaveCount(6);
   } else {
     await expect(page.getByRole("navigation", { name: "Owner navigation" })).toBeVisible();
   }
+});
+
+test("Mail is reachable from the shell nav, not just by direct URL", async ({ isMobile, page }) => {
+  await page.goto("/owner");
+  const nav = page.getByRole("navigation", { name: isMobile ? "Owner tabs" : "Owner navigation" });
+  await expect(nav.getByRole("link", { name: "Mail" })).toBeVisible();
+  await nav.getByRole("link", { name: "Mail" }).click();
+  await expect(page).toHaveURL(/\/owner\/mail$/);
+  await expect(page.getByRole("heading", { name: "Mail", level: 1 })).toBeVisible();
 });
 
 test("integrations stays useful when background operations are disabled", async ({ page }) => {

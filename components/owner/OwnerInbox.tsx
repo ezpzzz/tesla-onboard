@@ -24,13 +24,19 @@ import {
 import {
   CandidateAvatar,
   CandidateChangeComparison,
+  CandidateFullEmailSection,
   CandidateMeta,
+  buildViewFullEmailHref,
   deriveConsequenceTitle,
+  fetchCandidateFullEmail,
   fetchEmailCandidateFacts,
   isoToLocalWallTimeInput,
   localWallTimeToIso,
+  type CandidateFullEmailEntry,
+  type CandidateFullEmailStatus,
   type EmailCandidateFacts,
 } from "./InboxCandidateCard";
+import { setMailRemoteImagesAllowed } from "@/lib/owner/mail-repository";
 import {
   deriveUrgentActionView,
   fetchLinkedEmailAction,
@@ -107,6 +113,14 @@ export function OwnerInbox() {
   const [appliedTripById, setAppliedTripById] = useState<Record<string, AppliedCandidateTrip | null>>({});
   const [correctingId, setCorrectingId] = useState<string | null>(null);
   const [correctionDraft, setCorrectionDraft] = useState<{ startsAt: string; endsAt: string }>({ startsAt: "", endsAt: "" });
+
+  // SC5: the candidate card's inline "Full email" expander -- lazily fetched
+  // and cached per candidate id, same lift-to-parent shape as facts/action
+  // above so the desktop inline card and the mobile dialog (both rendered
+  // for the same selected item) share one fetch instead of racing two.
+  const [fullEmailById, setFullEmailById] = useState<Record<string, CandidateFullEmailEntry | null>>({});
+  const [fullEmailStatus, setFullEmailStatus] = useState<Record<string, CandidateFullEmailStatus>>({});
+  const [expandedFullEmailId, setExpandedFullEmailId] = useState<string | null>(null);
 
   const load = useCallback(async (append = false) => {
     if (!scope) { setLoading(false); return; }
@@ -235,6 +249,27 @@ export function OwnerInbox() {
     void mutate("confirm", item, { corrections });
   }
 
+  function toggleFullEmail(item: OwnerInboxItem) {
+    const next = expandedFullEmailId === item.id ? null : item.id;
+    setExpandedFullEmailId(next);
+    if (next && scope && fullEmailStatus[item.id] !== "loading" && !(item.id in fullEmailById)) {
+      setFullEmailStatus((current) => ({ ...current, [item.id]: "loading" }));
+      fetchCandidateFullEmail(scope, item.id)
+        .then((entry) => {
+          setFullEmailById((current) => ({ ...current, [item.id]: entry }));
+          setFullEmailStatus((current) => ({ ...current, [item.id]: "loaded" }));
+        })
+        .catch(() => setFullEmailStatus((current) => ({ ...current, [item.id]: "error" })));
+    }
+  }
+
+  function persistFullEmailRemoteImages(item: OwnerInboxItem) {
+    if (!scope) return;
+    const entry = fullEmailById[item.id];
+    if (!entry) return;
+    setMailRemoteImagesAllowed(scope, entry.messageId, true).catch(() => undefined);
+  }
+
   return (
     <div className="space-y-5">
       {urgent.length ? (
@@ -291,6 +326,14 @@ export function OwnerInbox() {
               onBeginCorrection={(facts) => beginCorrection(item, facts)}
               onCorrectionDraftChange={setCorrectionDraft}
               onConfirmWithCorrections={(facts) => confirmWithCorrections(item, facts)}
+              fullEmail={{
+                expanded: expandedFullEmailId === item.id,
+                status: fullEmailStatus[item.id] ?? "idle",
+                entry: fullEmailById[item.id],
+                demoMode: !scope,
+                onToggle: () => toggleFullEmail(item),
+                onRemoteImagesAllowed: () => persistFullEmailRemoteImages(item),
+              }}
             />
           ))}
           {hasMore ? <Button variant="secondary" className="w-full" disabled={loading} onClick={() => void load(true)}>{loading ? "Loading…" : "Load older activity"}</Button> : null}
@@ -319,6 +362,14 @@ export function OwnerInbox() {
                 correctionDraft={correctionDraft}
                 onBeginCorrection={(facts) => beginCorrection(selected, facts)}
                 onCorrectionDraftChange={setCorrectionDraft}
+                fullEmail={{
+                  expanded: expandedFullEmailId === selected.id,
+                  status: fullEmailStatus[selected.id] ?? "idle",
+                  entry: fullEmailById[selected.id],
+                  demoMode: !scope,
+                  onToggle: () => toggleFullEmail(selected),
+                  onRemoteImagesAllowed: () => persistFullEmailRemoteImages(selected),
+                }}
               />
             </div>
             <div className="border-t border-line bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
@@ -338,6 +389,18 @@ export function OwnerInbox() {
   );
 }
 
+/** SC5's inline "Full email" expander -- bundled into one prop (rather than
+ * five separate ones) since it always travels together from OwnerInbox down
+ * through InboxCard/the mobile dialog to InboxDetail. */
+interface CandidateFullEmailProps {
+  expanded: boolean;
+  status: CandidateFullEmailStatus;
+  entry: CandidateFullEmailEntry | null | undefined;
+  demoMode: boolean;
+  onToggle: () => void;
+  onRemoteImagesAllowed: () => void;
+}
+
 interface EnrichmentProps {
   facts: EmailCandidateFacts | undefined;
   factsStatus: FetchStatus;
@@ -348,11 +411,12 @@ interface EnrichmentProps {
   correctionDraft: { startsAt: string; endsAt: string };
   onBeginCorrection: (facts: EmailCandidateFacts) => void;
   onCorrectionDraftChange: (draft: { startsAt: string; endsAt: string }) => void;
+  fullEmail: CandidateFullEmailProps;
 }
 
 function InboxCard({
   item, expanded, onOpen, onMutate, busy, facts, factsStatus, action, actionStatus, appliedTrip,
-  correcting, correctionDraft, onBeginCorrection, onCorrectionDraftChange, onConfirmWithCorrections,
+  correcting, correctionDraft, onBeginCorrection, onCorrectionDraftChange, onConfirmWithCorrections, fullEmail,
 }: {
   item: OwnerInboxItem;
   expanded: boolean;
@@ -408,6 +472,7 @@ function InboxCard({
             correctionDraft={correctionDraft}
             onBeginCorrection={onBeginCorrection}
             onCorrectionDraftChange={onCorrectionDraftChange}
+            fullEmail={fullEmail}
           />
           <div className="mt-5 flex flex-col gap-3">
             {action ? (() => {
@@ -431,7 +496,7 @@ function InboxCard({
   );
 }
 
-function InboxDetail({ item, facts, factsStatus, action, actionStatus, appliedTrip, correcting, correctionDraft, onBeginCorrection, onCorrectionDraftChange }: { item: OwnerInboxItem } & EnrichmentProps) {
+function InboxDetail({ item, facts, factsStatus, action, actionStatus, appliedTrip, correcting, correctionDraft, onBeginCorrection, onCorrectionDraftChange, fullEmail }: { item: OwnerInboxItem } & EnrichmentProps) {
   const now = useMinuteTicker(action?.state === "revocation_pending");
   const canCorrect = facts?.tripStartsAt && facts?.tripEndsAt && facts?.tripTimezone && CONFIRMABLE_EVENT_TYPES.has(item.eventType) && item.actionable;
   return (
@@ -443,6 +508,26 @@ function InboxDetail({ item, facts, factsStatus, action, actionStatus, appliedTr
           <p className="mt-1 text-sm text-muted">{item.title}</p>
         ) : null}
         <p className="mt-2 text-sm text-muted">{item.detail}</p>
+        {item.source === "turo_email" ? (
+          <>
+            <Link
+              href={buildViewFullEmailHref(item.id)}
+              className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-brand underline-offset-2 hover:underline"
+            >
+              View full email
+            </Link>
+            <div className="mt-2">
+              <CandidateFullEmailSection
+                expanded={fullEmail.expanded}
+                onToggle={fullEmail.onToggle}
+                demoMode={fullEmail.demoMode}
+                status={fullEmail.status}
+                entry={fullEmail.entry}
+                onRemoteImagesAllowed={fullEmail.onRemoteImagesAllowed}
+              />
+            </div>
+          </>
+        ) : null}
       </div>
       {item.state === "applied" ? (
         <div className="rounded-md border border-good/30 bg-good/[0.06] p-3 text-sm">

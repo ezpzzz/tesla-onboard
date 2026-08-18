@@ -1,7 +1,13 @@
-"use client";
-
 /**
  * Rendering + data-shaping for a single Turo-email inbox candidate.
+ *
+ * No "use client" directive here -- this file has no client-only APIs of its
+ * own (hooks, browser globals) and is only ever imported from
+ * OwnerInbox.tsx, which already carries "use client". A redundant directive
+ * on a non-entry file makes Next.js treat its exported function props
+ * (onToggle, onRemoteImagesAllowed below) as a client/server boundary,
+ * tripping the @next/next "use-client-server-action" warning (71007) for no
+ * behavioral reason.
  *
  * `onlyevs_email_candidates.proposed_state` / `.correction_facts` are opaque
  * jsonb columns produced by the parser (`lib/email/turo-parser.ts`, owned by
@@ -29,6 +35,10 @@
 import { createClient } from "@/lib/supabase/client";
 import type { VehicleWorkspaceScope } from "@/lib/owner/vehicle-repository";
 import type { OwnerInboxItem } from "@/lib/owner/email-inbox-repository";
+import { fetchMailMessagesForCandidate } from "@/lib/owner/mail-repository";
+import { fetchMailContent, type MailContentFetchState } from "@/lib/owner/mail-content-client";
+import { mailContentStateMessage } from "./mail-detail-view";
+import { MailContentFrame } from "./MailContentFrame";
 import { IconMail, IconMapPin, IconPhone } from "@/components/icons";
 import { cn } from "@/components/ui";
 
@@ -195,6 +205,171 @@ export function formatTripWindowLabel(
     timeZoneName: "short",
   });
   return { text: `${formatter.format(start)} – ${formatter.format(end)}`, unresolved: false, reason: null };
+}
+
+/**
+ * Href for the Inbox card's "View full email" link (T13, design doc
+ * alex-email-inbox-design-20260817-123909.md step 4) into /owner/mail's
+ * candidate-filtered view (components/owner/OwnerMailList.tsx's
+ * `?candidateId=` mode). A candidate id, not an indexed message id -- the
+ * mail surface resolves it server-side via
+ * list_onlyevs_email_messages_for_candidate
+ * (supabase/migrations/20260817170000_onlyevs_workspace_mail_crosslinks.sql)
+ * since the Inbox never learns which private.onlyevs_email_message_index
+ * row(s) a candidate maps to.
+ */
+export function buildViewFullEmailHref(candidateId: string): string {
+  return `/owner/mail?candidateId=${encodeURIComponent(candidateId)}`;
+}
+
+/* ── Inline "Full email" expander (SC5) ───────────────────────────────────
+ *
+ * Closes the gap where confirm/dismiss and the full email were never on
+ * screen together: an expandable section on the candidate card itself,
+ * reusing the exact same MailContentFrame render path "View full email"
+ * (above) navigates to -- zero new render paths, same sandbox+CSP+DOMParser
+ * strip. A candidate id is not a message id (list_onlyevs_email_messages_for_
+ * candidate resolves the mapping server-side, same as the /owner/mail
+ * candidate-filtered view); selectPrimaryCandidateMessageId picks the most
+ * recent of the (usually exactly one) messages linked to a candidate, since
+ * that RPC returns rows sorted `sent_at desc`.
+ */
+
+export interface CandidateFullEmailEntry {
+  messageId: string;
+  content: MailContentFetchState;
+}
+
+/** Pure -- unit-testable without a Supabase client. */
+export function selectPrimaryCandidateMessageId(messages: readonly { id: string }[]): string | null {
+  return messages[0]?.id ?? null;
+}
+
+/**
+ * Resolves a candidate's linked message (if any) and fetches its full
+ * decrypt-on-read content in one call, for the card's lazy first-expand
+ * fetch. Returns `null` when no captured message is linked to this
+ * candidate yet -- distinct from a message existing but its content being
+ * unavailable (`entry.content.kind !== "content"`), which the caller renders
+ * via mailContentStateMessage.
+ */
+export async function fetchCandidateFullEmail(
+  scope: VehicleWorkspaceScope,
+  candidateId: string,
+): Promise<CandidateFullEmailEntry | null> {
+  const messages = await fetchMailMessagesForCandidate(scope, candidateId);
+  const messageId = selectPrimaryCandidateMessageId(messages);
+  if (!messageId) return null;
+  const content = await fetchMailContent(scope.workspaceId, messageId);
+  return { messageId, content };
+}
+
+export type CandidateFullEmailStatus = "idle" | "loading" | "loaded" | "error";
+
+/** Human copy for every non-"content", non-"loading" fetch outcome -- pure,
+ * so the branching is unit-testable independent of the component below. */
+export function describeCandidateFullEmailUnavailable(
+  kind: Exclude<MailContentFetchState["kind"], "content" | "loading">,
+): string {
+  if (kind === "unauthorized") return "Your owner session expired — sign in again to view this message.";
+  return mailContentStateMessage(kind === "error" ? "decrypt_error" : kind);
+}
+
+/**
+ * The candidate card's "Full email" expander (SC5). Renders through the same
+ * MailContentFrame the /owner/mail detail page uses -- no second render
+ * path, same sandbox + CSP + DOMParser strip. `demoMode` mirrors every other
+ * mail surface's `scope`-gated honesty: no fetch ever fires, and expanding
+ * shows the same "not available in this environment yet" wording rather than
+ * a spinner that never resolves.
+ */
+export function CandidateFullEmailSection({
+  expanded,
+  onToggle,
+  demoMode,
+  status,
+  entry,
+  onRemoteImagesAllowed,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  demoMode: boolean;
+  status: CandidateFullEmailStatus;
+  entry: CandidateFullEmailEntry | null | undefined;
+  onRemoteImagesAllowed: () => void;
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="min-h-11 text-left text-sm font-medium text-brand underline-offset-2 hover:underline"
+      >
+        {expanded ? "Hide full email" : "Full email"}
+      </button>
+      {expanded ? (
+        <div className="mt-2">
+          <CandidateFullEmailBody
+            demoMode={demoMode}
+            status={status}
+            entry={entry}
+            onRemoteImagesAllowed={onRemoteImagesAllowed}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Split out from CandidateFullEmailSection so `entry.content` can be bound
+ * to a local `const` -- TypeScript's control-flow narrowing on a
+ * two-level property-access chain (`entry.content.kind`) does not reliably
+ * carry across sibling branches of a nested ternary the way narrowing on a
+ * local variable does, so the flatter early-return shape here is not just
+ * style, it is what keeps `content.kind` narrowed for
+ * describeCandidateFullEmailUnavailable's exhaustive parameter type.
+ */
+function CandidateFullEmailBody({
+  demoMode,
+  status,
+  entry,
+  onRemoteImagesAllowed,
+}: {
+  demoMode: boolean;
+  status: CandidateFullEmailStatus;
+  entry: CandidateFullEmailEntry | null | undefined;
+  onRemoteImagesAllowed: () => void;
+}) {
+  if (demoMode) {
+    return <p className="text-sm text-muted">Full email preview isn't available in this environment yet.</p>;
+  }
+  if (status === "loading" || status === "idle") {
+    return <p className="text-sm text-muted">Loading full email…</p>;
+  }
+  if (status === "error") {
+    return <p role="alert" className="text-sm text-danger">The full email couldn't be loaded.</p>;
+  }
+  if (entry === null) {
+    return <p className="text-sm text-muted">No captured email is linked to this update yet.</p>;
+  }
+  if (!entry) return null;
+  const { content } = entry;
+  if (content.kind === "loading") return null;
+  if (content.kind === "content") {
+    return (
+      <MailContentFrame
+        html={content.html}
+        text={content.text}
+        inline={content.inline}
+        attachments={content.attachments}
+        initialRemoteImagesAllowed={content.remoteImagesAllowed}
+        onRemoteImagesAllowed={onRemoteImagesAllowed}
+      />
+    );
+  }
+  return <p className="text-sm text-muted">{describeCandidateFullEmailUnavailable(content.kind)}</p>;
 }
 
 export function deriveConsequenceTitle(item: Pick<OwnerInboxItem, "eventType" | "title">, guestName: string | null): string {

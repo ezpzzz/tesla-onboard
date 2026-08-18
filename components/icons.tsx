@@ -270,6 +270,17 @@ export const IconMail = (p: P) => (
   </svg>
 );
 
+/** Distinct from IconMail (Inbox's triage-tray glyph) -- the extra top bar
+ * reads as a stack/archive silhouette even at small nav sizes, for the
+ * separate full-email-archive surface (/owner/mail). */
+export const IconMailArchive = (p: P) => (
+  <svg {...navBase(p)}>
+    <path d="M4 4h16" />
+    <rect x="3" y="7" width="18" height="13" rx="2" />
+    <path d="m3 9.5 9 6 9-6" />
+  </svg>
+);
+
 export const IconKey = (p: P) => (
   <svg {...navBase(p)}>
     <circle cx="8" cy="15" r="4" />

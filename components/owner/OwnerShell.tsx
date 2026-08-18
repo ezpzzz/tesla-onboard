@@ -9,6 +9,7 @@ import { cn } from "@/components/ui";
 import {
   IconDrivers,
   IconMail,
+  IconMailArchive,
   IconOverview,
   IconPlug,
   IconSettings,
@@ -25,6 +26,7 @@ const PRIMARY_NAV = [
   { href: "/owner/drivers", label: "Guests", icon: IconDrivers },
   { href: "/owner/vehicles", label: "Vehicles", icon: IconVehicle },
   { href: "/owner/inbox", label: "Inbox", icon: IconMail },
+  { href: "/owner/mail", label: "Mail", icon: IconMailArchive },
 ] as const;
 
 const WORKSPACE_NAV = [
@@ -132,7 +134,7 @@ export function OwnerShell({
         <main className="mx-auto w-full max-w-[1240px] px-4 pb-28 pt-7 sm:px-6 md:px-8 md:pb-10 md:pt-9">{children}</main>
 
         <nav aria-label="Owner tabs" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
-          <div className="grid grid-cols-5">
+          <div className="grid grid-cols-6">
             {PRIMARY_NAV.map((item) => {
               const active = isActive(pathname, item.href);
               const Icon = item.icon;

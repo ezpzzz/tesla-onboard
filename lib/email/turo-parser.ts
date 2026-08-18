@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import type { EmailCandidateEvent, NormalizedEmailManifest } from "@evhost/email-ingest-contract";
+import { MESSAGE_TEXT_MAX_CHARS, decodeHtmlEntities, extractEmailMessageText } from "./plaintext";
+
+export { MESSAGE_TEXT_MAX_CHARS };
 
 export interface ParsedTuroCandidate {
   eventType: EmailCandidateEvent;
@@ -85,17 +88,6 @@ function fingerprint(subject: string): string {
 // `h=` verdict in that spec confirms are NOT covered by either signature and
 // so are not cryptographically bound to the message.
 // ---------------------------------------------------------------------------
-
-function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#0?39;|&apos;/gi, "'")
-    .replace(/&#x2019;|&rsquo;/gi, "’")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">");
-}
 
 function stripTags(value: string): string {
   return decodeHtmlEntities(value.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
@@ -301,52 +293,19 @@ export function resolveLocalInstant(local: LocalDateTime, timeZone: string): Tri
 // replacement for it.
 // ---------------------------------------------------------------------------
 
-/** Hard cap on the combined subject+body text stored in proposedState.messageText,
- * matching the executor spec's "sane bound" -- generous enough for any real Turo
- * template while keeping a single jsonb value bounded regardless of what an inbound
- * message contains. */
-export const MESSAGE_TEXT_MAX_CHARS = 20_000;
-
 /**
- * Best-effort HTML → readable plain text: a simple tag-strip, not a full HTML
- * renderer. Block-level tags become line breaks first (so paragraphs/list items/table
- * rows don't run together into one unreadable line) before the remaining markup is
- * discarded and entities are decoded. Only used when the message has no `text` part
- * to fall back on.
- */
-function htmlToReadableText(html: string): string {
-  const withBreaks = html
-    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[\s\S]*?<\/style>/gi, "")
-    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "");
-  return decodeHtmlEntities(withBreaks)
-    .replace(/[ \t]+/g, " ")
-    .replace(/ *\n */g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-/**
- * Subject + plain-text body for every candidate. Prefers the message's own `text`
- * part (already plain text per the email-ingest contract); falls back to stripping
- * tags from `html` only when no text part was captured. Returns null when there's
- * nothing readable at all (no subject-less email exists, but text/html can both be
- * empty), matching every other optional proposedState field's "omit rather than
- * write an empty string" convention.
+ * Subject + plain-text body for every candidate. Delegates to the shared extractor
+ * in ./plaintext (lifted out so the same HTML→text logic backs the tsvector search
+ * index and list-view snippet too -- see plaintext.ts's header comment and the
+ * search-equals-card pin test in plaintext.test.ts). Prefers the message's own
+ * `text` part (already plain text per the email-ingest contract); falls back to
+ * stripping tags from `html` only when no text part was captured. Returns null when
+ * there's nothing readable at all (no subject-less email exists, but text/html can
+ * both be empty), matching every other optional proposedState field's "omit rather
+ * than write an empty string" convention.
  */
 function buildMessageText(email: NormalizedEmailManifest): string | null {
-  const body = email.text.trim().length > 0
-    ? email.text.trim()
-    : email.html
-      ? htmlToReadableText(email.html)
-      : "";
-  if (!body && !email.subject.trim()) return null;
-  const combined = `Subject: ${email.subject}\n\n${body}`.trim();
-  return combined.length > MESSAGE_TEXT_MAX_CHARS
-    ? `${combined.slice(0, MESSAGE_TEXT_MAX_CHARS)}…`
-    : combined;
+  return extractEmailMessageText(email);
 }
 
 /**

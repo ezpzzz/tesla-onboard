@@ -131,7 +131,7 @@ test("an authenticated owner can use every operational surface and detail route"
     expect(dimensions.scrollWidth, `${prefix} detail should not overflow`).toBeLessThanOrEqual(dimensions.width);
   }
 
-  if (isMobile) await expect(page.getByRole("navigation", { name: "Owner tabs" }).getByRole("link")).toHaveCount(5);
+  if (isMobile) await expect(page.getByRole("navigation", { name: "Owner tabs" }).getByRole("link")).toHaveCount(6);
   else await expect(page.getByRole("navigation", { name: "Owner navigation" })).toBeVisible();
   expect(browserErrors).toEqual([]);
 });
