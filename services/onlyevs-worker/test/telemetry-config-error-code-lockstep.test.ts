@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { TELEMETRY_DEPLOYMENT_CONFIG_ERROR_CODES } from "@/lib/owner/telemetry-policy";
 
@@ -37,28 +38,58 @@ function parseArrayLiteral(sqlSlice: string): string[] {
     });
 }
 
+const CLAIM_FUNCTION_DEF_RE = /create\s+(or\s+replace\s+)?function\s+private\.claim_onlyevs_due_telemetry/i;
+const CLAIM_ALLOWLIST_RE = /last_error_code\s*=\s*any\s*\(\s*array\s*\[([^\]]*)\]\s*\)/i;
+
 /** Finds the allowlist `private.claim_onlyevs_due_telemetry`'s claim
- * predicate actually applies, as of the last migration that defines it. */
-function latestClaimPredicateAllowlist(): { file: string; codes: string[] } {
-  const files = readdirSync(MIGRATIONS_DIR)
+ * predicate actually applies, as of the last migration that defines it.
+ * `dir` defaults to the real migrations directory; tests point it at a
+ * scratch fixture directory to exercise parser edge cases without ever
+ * touching a real file under supabase/migrations.
+ *
+ * Deliberately two passes, not one: first find the NEWEST migration that
+ * defines the function AT ALL (regardless of predicate shape) -- that
+ * migration is the one Postgres actually runs, so it is the only one this
+ * guard may trust. Only then try to parse its allowlist. A single-pass loop
+ * that only records a candidate when both "defines the function" and
+ * "matches our regex" hold would silently keep an OLDER migration as `last`
+ * the moment a newer one redefines the function in some other valid SQL
+ * shape (e.g. `last_error_code IN (...)`) -- passing this guard while
+ * actually checking a predicate the database no longer runs. Fail loudly
+ * instead. */
+function latestClaimPredicateAllowlist(dir: string = MIGRATIONS_DIR): { file: string; codes: string[] } {
+  const files = readdirSync(dir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
 
-  let last: { file: string; codes: string[] } | null = null;
+  let newestDefiningFile: string | null = null;
+  let newestDefiningSql = "";
   for (const file of files) {
-    const sql = readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
-    if (!/create\s+(or\s+replace\s+)?function\s+private\.claim_onlyevs_due_telemetry/i.test(sql)) continue;
-    const match = sql.match(/last_error_code\s*=\s*any\s*\(\s*array\s*\[([^\]]*)\]\s*\)/i);
-    if (!match) continue; // a migration touching this function without an allowlist clause at all -- not this shape
-    last = { file, codes: parseArrayLiteral(match[1]) };
+    const sql = readFileSync(path.join(dir, file), "utf8");
+    if (!CLAIM_FUNCTION_DEF_RE.test(sql)) continue;
+    newestDefiningFile = file;
+    newestDefiningSql = sql;
   }
-  if (!last) {
+
+  if (!newestDefiningFile) {
     throw new Error(
       "no migration defines private.claim_onlyevs_due_telemetry's deployment-config allowlist -- " +
         "expected at least supabase/migrations/20260818210000_onlyevs_telemetry_config_error_reclaim.sql",
     );
   }
-  return last;
+
+  const match = newestDefiningSql.match(CLAIM_ALLOWLIST_RE);
+  if (!match) {
+    throw new Error(
+      `${newestDefiningFile} is the newest migration defining private.claim_onlyevs_due_telemetry, but its ` +
+        `claim predicate does not match the "last_error_code = any(array[...])" shape this guard parses. The ` +
+        `predicate's SQL shape changed and this guard needs updating to match it -- refusing to silently fall ` +
+        `back to an older migration's (now-stale) allowlist, which would make this guard pass while checking ` +
+        `a predicate the database no longer runs.`,
+    );
+  }
+
+  return { file: newestDefiningFile, codes: parseArrayLiteral(match[1]) };
 }
 
 /** Finds the WHERE predicate of the partial index that mirrors the claim
@@ -137,5 +168,91 @@ describe("telemetry deployment-config error codes stay in lockstep (T: SQL-locks
         `missing code falls back to a sequential scan instead of using the ` +
         `intended index.`,
     ).toEqual({ missingFromIndex: [], extraInIndex: [], sourceFile: idx.file });
+  });
+});
+
+describe("the claim-predicate parser fails loudly instead of silently degrading (T: SQL-lockstep lane)", () => {
+  // Adversarial-review blind spot: the parser above only ever updated `last`
+  // when a migration BOTH (a) defined claim_onlyevs_due_telemetry AND (b)
+  // matched the exact `last_error_code = any(array[...])` shape. If a
+  // FUTURE migration redefines the function with a different but valid SQL
+  // predicate shape (e.g. `last_error_code IN (...)`), that migration fails
+  // (b), the loop's `continue` skips it, and `last` silently stays pinned
+  // to an OLDER migration's allowlist -- meaning this guard would keep
+  // passing while asserting against a predicate the database no longer
+  // runs. These fixtures live entirely under a scratch tmp directory, never
+  // under supabase/migrations, and no database is involved.
+  function writeFixture(dir: string, name: string, sql: string) {
+    writeFileSync(path.join(dir, name), sql, "utf8");
+  }
+
+  const OLDER_PARSEABLE_SQL = `
+create or replace function private.claim_onlyevs_due_telemetry(
+  p_worker_id text,
+  p_limit integer default 25
+)
+returns setof public.onlyevs_telemetry_enrollments
+language plpgsql
+as $$
+begin
+  return query
+  select *
+  from public.onlyevs_telemetry_enrollments
+  where status = 'error'
+    and last_error_code = any (array['telemetry_proxy_not_configured'])
+    and next_action_at <= now();
+end;
+$$;
+`;
+
+  // Same function, newer migration, valid Postgres, but a predicate SHAPE
+  // this parser's regex does not recognize.
+  const NEWER_IN_SHAPE_SQL = `
+create or replace function private.claim_onlyevs_due_telemetry(
+  p_worker_id text,
+  p_limit integer default 25
+)
+returns setof public.onlyevs_telemetry_enrollments
+language plpgsql
+as $$
+begin
+  return query
+  select *
+  from public.onlyevs_telemetry_enrollments
+  where status = 'error'
+    and last_error_code in ('telemetry_proxy_not_configured', 'telemetry_region_not_configured')
+    and next_action_at <= now();
+end;
+$$;
+`;
+
+  it("throws naming the newest migration when its predicate shape can't be parsed, instead of silently reusing an older migration's allowlist", () => {
+    const fixtureDir = mkdtempSync(path.join(tmpdir(), "telemetry-lockstep-fixture-"));
+    try {
+      // Filenames sort so the IN-shape migration is the newer one -- the
+      // one that is supposed to win.
+      writeFixture(fixtureDir, "20260101000000_older_any_array.sql", OLDER_PARSEABLE_SQL);
+      writeFixture(fixtureDir, "20260102000000_newer_in_shape.sql", NEWER_IN_SHAPE_SQL);
+
+      expect(() => latestClaimPredicateAllowlist(fixtureDir)).toThrow(
+        /20260102000000_newer_in_shape\.sql[\s\S]*shape changed[\s\S]*needs updating/i,
+      );
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  it("still parses cleanly when the newest migration's predicate matches the expected shape", () => {
+    const fixtureDir = mkdtempSync(path.join(tmpdir(), "telemetry-lockstep-fixture-ok-"));
+    try {
+      writeFixture(fixtureDir, "20260101000000_older_any_array.sql", OLDER_PARSEABLE_SQL);
+
+      const result = latestClaimPredicateAllowlist(fixtureDir);
+
+      expect(result.file).toBe("20260101000000_older_any_array.sql");
+      expect(result.codes).toEqual(["telemetry_proxy_not_configured"]);
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
   });
 });
