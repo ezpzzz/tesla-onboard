@@ -1348,6 +1348,28 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
         "update public.onlyevs_integrations set last_error_code = 'telemetry_removal_unconfirmed' where id = $1",
         [row.integration_id],
       ).catch(() => undefined);
+      // Distinguish this cap-driven local completion from both a confirmed
+      // provider-side removal (the 'telemetry_remove' success event above)
+      // and the manual force_complete_onlyevs_integration_disconnect RPC
+      // ('force_complete_disconnect') in the audit log -- same terminal
+      // result ('completed_local_only'), different action, so an owner or
+      // support engineer reading the audit trail can tell which path got
+      // an integration unstuck.
+      await client.query(
+        `insert into public.onlyevs_integration_audit_events
+        (workspace_id, actor_type, entity_type, entity_id, action, result, details)
+        values ($1, 'worker', 'integration', $2, 'removal_retry_cap_disconnect', 'completed_local_only', $3)`,
+        [
+          row.workspace_id,
+          row.integration_id,
+          JSON.stringify({
+            attemptsExhausted: true,
+            maxAttempts: TELEMETRY_REMOVAL_MAX_ATTEMPTS,
+            providerRemovalConfirmed: false,
+            note: "provider-side fleet-telemetry config removal was not confirmed after exhausting retry attempts",
+          }),
+        ],
+      ).catch(() => undefined);
       return;
     }
     const reauth = Boolean((error as Error & { reauth?: boolean }).reauth);

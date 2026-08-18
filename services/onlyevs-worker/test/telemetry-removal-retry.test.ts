@@ -149,6 +149,36 @@ describe("processTelemetry -- removal retry cap (T: worker lane)", () => {
     expect(queries.some((q) => q.sql.includes("attempt_count = attempt_count + 1"))).toBe(false);
   });
 
+  it("at/above the cap: writes a distinct audit event for the cap-driven local completion", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      .mockRejectedValueOnce(new Error("network down"));
+
+    await processTelemetry(baseRow({ attempt_count: TELEMETRY_REMOVAL_MAX_ATTEMPTS - 1 }), pool);
+
+    const audit = findQuery(queries, "insert into public.onlyevs_integration_audit_events");
+    expect(audit).toBeDefined();
+    expect(audit!.sql).toContain("'removal_retry_cap_disconnect'");
+    expect(audit!.sql).toContain("'completed_local_only'");
+    expect(audit!.sql).not.toContain("force_complete_disconnect");
+
+    const details = JSON.parse(audit!.params.find((p) => typeof p === "string" && p.startsWith("{")) as string);
+    expect(details.attemptsExhausted).toBe(true);
+    expect(details.note ?? details.providerRemovalConfirmed).toBeDefined();
+  });
+
+  it("below cap: never writes the cap-driven audit event", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      .mockRejectedValueOnce(new Error("network down"));
+
+    await processTelemetry(baseRow({ attempt_count: TELEMETRY_REMOVAL_MAX_ATTEMPTS - 2 }), pool);
+
+    expect(queries.some((q) => q.sql.includes("insert into public.onlyevs_integration_audit_events"))).toBe(false);
+  });
+
   it("at the cap: the telemetry_removal_unconfirmed trail is not immediately wiped by finishTeslaDisconnect's own last_error_code = null", async () => {
     const { pool, queries } = makeFakePool(baseHandler());
     fetchMock
