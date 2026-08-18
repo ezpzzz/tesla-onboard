@@ -197,6 +197,21 @@ export function formatTripWindowLabel(
   return { text: `${formatter.format(start)} – ${formatter.format(end)}`, unresolved: false, reason: null };
 }
 
+/**
+ * Href for the Inbox card's "View full email" link (T13, design doc
+ * alex-email-inbox-design-20260817-123909.md step 4) into /owner/mail's
+ * candidate-filtered view (components/owner/OwnerMailList.tsx's
+ * `?candidateId=` mode). A candidate id, not an indexed message id -- the
+ * mail surface resolves it server-side via
+ * list_onlyevs_email_messages_for_candidate
+ * (supabase/migrations/20260817170000_onlyevs_workspace_mail_crosslinks.sql)
+ * since the Inbox never learns which private.onlyevs_email_message_index
+ * row(s) a candidate maps to.
+ */
+export function buildViewFullEmailHref(candidateId: string): string {
+  return `/owner/mail?candidateId=${encodeURIComponent(candidateId)}`;
+}
+
 export function deriveConsequenceTitle(item: Pick<OwnerInboxItem, "eventType" | "title">, guestName: string | null): string {
   const who = guestName ?? "A guest";
   switch (item.eventType) {

@@ -25,6 +25,7 @@ import {
   CandidateAvatar,
   CandidateChangeComparison,
   CandidateMeta,
+  buildViewFullEmailHref,
   deriveConsequenceTitle,
   fetchEmailCandidateFacts,
   isoToLocalWallTimeInput,
@@ -443,6 +444,14 @@ function InboxDetail({ item, facts, factsStatus, action, actionStatus, appliedTr
           <p className="mt-1 text-sm text-muted">{item.title}</p>
         ) : null}
         <p className="mt-2 text-sm text-muted">{item.detail}</p>
+        {item.source === "turo_email" ? (
+          <Link
+            href={buildViewFullEmailHref(item.id)}
+            className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-brand underline-offset-2 hover:underline"
+          >
+            View full email
+          </Link>
+        ) : null}
       </div>
       {item.state === "applied" ? (
         <div className="rounded-md border border-good/30 bg-good/[0.06] p-3 text-sm">

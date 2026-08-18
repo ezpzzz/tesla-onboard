@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildViewFullEmailHref,
   deriveConsequenceTitle,
   formatPhoneDisplay,
   formatTripWindowLabel,
@@ -9,6 +10,13 @@ import {
   parseEmailCandidateFacts,
   selectDisplayMessage,
 } from "@/components/owner/InboxCandidateCard";
+
+describe("buildViewFullEmailHref", () => {
+  it("links into /owner/mail's candidate-filtered view, URL-encoded", () => {
+    expect(buildViewFullEmailHref("cand-1")).toBe("/owner/mail?candidateId=cand-1");
+    expect(buildViewFullEmailHref("cand/with space")).toBe("/owner/mail?candidateId=cand%2Fwith%20space");
+  });
+});
 
 describe("parseEmailCandidateFacts", () => {
   it("reads the documented key contract from proposed_state/correction_facts", () => {

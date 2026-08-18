@@ -248,6 +248,12 @@ export default function TripDetailPage() {
         <div className="mt-3 text-sm text-ink-soft">
           {formatDateRange(trip.startAt, trip.endAt)}
         </div>
+        <Link
+          href={`/owner/mail?tripId=${encodeURIComponent(trip.id)}`}
+          className="mt-3 inline-flex min-h-11 items-center text-sm font-medium text-brand underline-offset-2 hover:underline"
+        >
+          View this booking&rsquo;s messages
+        </Link>
         <dl className="mt-4 grid gap-3 border-t border-line pt-4 text-sm sm:grid-cols-2">
           <div><dt className="text-xs text-muted">Pickup location</dt><dd className="mt-1 font-medium text-ink">{trip.pickupLocation ?? "Use tenant pickup instructions"}</dd></div>
           <div><dt className="text-xs text-muted">Return location</dt><dd className="mt-1 font-medium text-ink">{trip.returnLocation ?? trip.pickupLocation ?? "Use tenant return instructions"}</dd></div>
