@@ -171,6 +171,26 @@ export async function fetchMailMessageTrust(
   };
 }
 
+/**
+ * Persists the per-message-per-workspace remote-image opt-in (design doc
+ * Open Question 1: "Default: persisted per message per workspace"). The
+ * caller (MailContentFrame's onRemoteImagesAllowed) treats this as
+ * best-effort -- a failed persist never reverts or blocks the in-session
+ * render, it just means the opt-in resets on the next visit.
+ */
+export async function setMailRemoteImagesAllowed(
+  scope: VehicleWorkspaceScope,
+  messageId: string,
+  allowed: boolean,
+): Promise<void> {
+  const { error } = await client().rpc("set_onlyevs_email_remote_images_allowed", {
+    p_workspace_id: scope.workspaceId,
+    p_message_id: messageId,
+    p_allowed: allowed,
+  });
+  if (error) throw new Error(error.message);
+}
+
 export async function recordMailRead(scope: VehicleWorkspaceScope, messageId: string): Promise<void> {
   const { error } = await client().rpc("record_onlyevs_email_read", {
     p_workspace_id: scope.workspaceId,

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0 — 2026-08-17
+
+- Add Workspace Mail: a full-content, per-workspace Turo email inbox (`/owner/mail`) so a manager reads, searches, and shares the team's captured Turo mail from inside the app instead of Gmail. Full HTML renders inside a `sandbox=""` iframe (no `allow-scripts`, ever) behind a strict inner CSP, with a client-side `DOMParser` strip pass as a genuine second layer -- zero script execution and zero third-party egress by default; `cid:` images arrive inlined as `data:` payloads from the decrypt-on-read response, oversized ones fall back to a same-origin authed attachment route, and remote images load only on an explicit per-message opt-in.
+- Extract and store attachments as their own encrypted R2 objects (at parse for new mail, and via a standing reconciler for already-captured mail), with an authed, streamed, `Cache-Control: no-store` download route.
+- Add first-class deletion: message-, reservation-, and guest-scoped purge actions remove every body copy in one action -- the R2 envelope and attachment objects, the search-index row, and the pre-existing plaintext copy already living in `onlyevs_email_candidates.proposed_state` -- each with an audit row, and `Cache-Control: no-store` on every read route so a cached response can't survive a purge. Retention is config-driven per workspace (default: keep forever) rather than a blanket bucket TTL.
+- Add per-user read receipts (audit-visible to workspace managers) and raw-header trust chips (DKIM/SPF/DMARC pass, Turo-domain alignment) on each message.
+- Cross-link candidate cards and trip pages to their full email ("View full email"), and vice versa.
+- Ships entirely dark: no MX/R2/worker/flag mutation, all `ONLYEVS_EMAIL_*` flags stay default-false, and every surface renders an honest empty state with zero real mail.
+
+### For contributors
+
+- No new dependencies in owner-app code; `postal-mime` in `services/onlyevs-worker` is a service-tier exception (parses attachment parts only, already the sibling email-ingest worker's own dependency).
+- Migrations `20260817140000_onlyevs_workspace_mail.sql`, `20260817160000_onlyevs_workspace_mail_read_rpcs.sql`, `20260817170000_onlyevs_workspace_mail_crosslinks.sql`, and `20260817190000_onlyevs_workspace_mail_remote_images.sql` are additive and ship dark alongside the rest of the email-ingest ladder.
+- Pre-landing review fixes: the DB-side purge RPCs now enqueue a `purge` outbox job in the same transaction as their audit row, and the worker's purge executor actually deletes the R2 objects the manager was told were deleted (previously wired but never dispatched); reservation-/guest-scoped purge target resolution no longer depends on a message already having a search-index row, closing a window where a message captured moments before a deletion request could be silently skipped; the cid-image renderer allowlists attachment `content_type` before splicing it into a `data:` URL, and the DOMParser strip pass now also covers `xlink:href`/`background`/`poster`; attachment R2 object keys are now derived from content hash rather than a fresh random id per call, so a crash-retry can't orphan a duplicate encrypted object; and the per-message remote-image opt-in is now actually persisted per message per workspace, matching the design's stated default, instead of resetting on every navigation.
+- Added a pgTAP case exercising reservation-scoped purge against a captured-but-not-yet-indexed message, and new migration-security text-level checks for the remote-images RPCs.
+
 ## 0.9.0 — 2026-08-17
 
 - Rebuild the vehicle details page around a live evidence ledger: a live-state card with per-field freshness, a cold-start setup status strip, an active-trip card with a location-evidence row, and a 13-month history ledger (lifetime tiles, a kWh-only Energy tile, desktop table / mobile two-line tap-through rows, aria-labeled bucketed health charts) -- every degraded or cold-start state now renders distinctly instead of a blank screen or a generic spinner.

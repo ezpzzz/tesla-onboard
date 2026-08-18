@@ -13,7 +13,7 @@ import { credentialKeyringFromEnv, decryptCredential, encryptCredential } from "
 import { createEncryptedTripLink } from "@/lib/owner/trip-link-secret-core";
 import { sendGridConfigFromEnv, sendGridEmailAction, SendGridDeliveryError } from "@/lib/owner/sendgrid-core";
 
-type EmailJobType = "parse" | "action" | "delivery" | "retention" | "reconcile" | "canary" | "index_backfill";
+type EmailJobType = "parse" | "action" | "delivery" | "retention" | "reconcile" | "canary" | "index_backfill" | "purge";
 interface EmailJob { id: string; workspace_id: string; entity_id: string; attempt_count: number; job_type: EmailJobType }
 interface InboundContext {
   id: string; workspace_id: string; integration_id: string; accepted_alias_revision: string;
@@ -193,15 +193,36 @@ async function parseRawAttachments(rawMessage: Buffer): Promise<PostalMimeAttach
   }
 }
 
+/**
+ * Deterministic uuid-shaped id derived from a sha256 hex digest (first 32
+ * hex chars, reformatted 8-4-4-4-12). Used so a retried
+ * storeEmailAttachment call for byte-identical content produces the exact
+ * same attachment id and r2 object key as the first attempt -- see that
+ * function's comment for why this is required for the `on conflict` guard
+ * (and the AAD it feeds) to actually mean anything on retry.
+ */
+function deterministicAttachmentId(sha256: string): string {
+  const hex = sha256.slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
 async function storeEmailAttachment(
   client: PoolClient,
   attachment: PostalMimeAttachment,
   ctx: { workspaceId: string; messageIndexId: string; inboundEmailId: string },
 ): Promise<void> {
-  const attachmentId = randomUUID();
-  const r2ObjectKey = `onlyevs-email-attachments/${ctx.workspaceId}/${ctx.inboundEmailId}/${attachmentId}.evmail`;
   const contentBytes = toBuffer(attachment.content);
   const sha256 = createHash("sha256").update(contentBytes).digest("hex");
+  // Both the id and the r2 object key are derived from the content hash
+  // (rather than a fresh randomUUID) so a crash-retry of this same message
+  // reproduces the exact same key -- the `on conflict (workspace_id,
+  // r2_object_key) do nothing` guard below can then actually fire (it never
+  // could when the key embedded a fresh random id every call), and the R2
+  // PUT on retry overwrites the same object with freshly-encrypted but
+  // byte-identical plaintext under the same AAD, rather than orphaning a
+  // second object no row ever references.
+  const attachmentId = deterministicAttachmentId(sha256);
+  const r2ObjectKey = `onlyevs-email-attachments/${ctx.workspaceId}/${ctx.inboundEmailId}/${sha256}.evmail`;
   const aad = attachmentAad({ workspaceId: ctx.workspaceId, messageIndexId: ctx.messageIndexId, attachmentId, r2ObjectKey });
   await r2Put(r2ObjectKey, encryptEmailBytes(contentBytes, aad));
   await client.query(
@@ -998,12 +1019,59 @@ export async function executeEmailPurge(pool: Pool, request: EmailPurgeRequest):
   return { r2ObjectKeys, r2DeletedKeys: deleteReport.deleted, r2FailedKeys: deleteReport.failed };
 }
 
+// T10 dispatch trigger (fix-before-merge review finding): the DB-side purge
+// RPCs (purge_onlyevs_email_message/reservation/guest) already do every
+// purge write and enqueue exactly one 'purge' outbox row per message purged
+// -- entity_id is that message's private.onlyevs_email_purge_audit row id
+// (see the core function in 20260817140000_onlyevs_workspace_mail.sql).
+// This job's only remaining job is deleting the R2 bytes the SQL side
+// could never reach; it deliberately does NOT re-run any of
+// executeEmailPurge's DB writes (those already happened, transactionally,
+// inside the RPC that enqueued this job) -- executeEmailPurge stays a
+// separate, self-contained purge path for the worker's own direct-connection
+// context (its own doc comment above explains why the RPCs aren't callable
+// from here), not something this job composes with.
+export async function processPurgeJob(pool: Pool, job: EmailJob): Promise<void> {
+  const client = await pool.connect();
+  try {
+    const audit = await client.query<{ r2_object_keys: string[] }>(
+      `select r2_object_keys from private.onlyevs_email_purge_audit where id=$1 and workspace_id=$2`,
+      [job.entity_id, job.workspace_id],
+    );
+    const keys = audit.rows[0]?.r2_object_keys ?? [];
+    if (keys.length > 0) {
+      const report = await deleteR2ObjectsWithReport(keys);
+      if (report.failed.length > 0) {
+        throw new Error(`purge_r2_delete_failed:${report.failed.length}`);
+      }
+    }
+    await client.query(
+      `update public.onlyevs_email_outbox set state='completed',claimed_by=null,claim_expires_at=null where id=$1`,
+      [job.id],
+    );
+  } catch (error) {
+    // Same retry/backoff/dead-letter shape as processParseJob's catch below
+    // -- the R2 objects are untouched by a failed attempt (deleteR2Objects
+    // WithReport only reports failures, it never partially mutates DB
+    // state), so retrying is always safe and the next attempt just re-reads
+    // the same durable key list off the audit row.
+    await client.query(
+      `update public.onlyevs_email_outbox set state=case when attempt_count>=8 then 'dead_letter' else 'failed_retryable' end,due_at=now()+least(interval '1 hour',interval '30 seconds'*power(2,greatest(attempt_count-1,0))),last_error_code=$2,claimed_by=null,claim_expires_at=null where id=$1`,
+      [job.id, error instanceof Error ? error.message.slice(0, 120) : "email_purge_failed"],
+    ).catch(() => undefined);
+  } finally {
+    client.release();
+  }
+}
+
 async function dispatchEmailJob(pool: Pool, job: EmailJob, workerId: string): Promise<void> {
   switch (job.job_type) {
     case "parse":
       return processParseJob(pool, job, workerId);
     case "action":
       return processActionJob(pool, job, workerId);
+    case "purge":
+      return processPurgeJob(pool, job);
     case "index_backfill":
       // Outbox rows of this job_type are only ever a scheduling knob (see
       // the migration's own comment on claim_onlyevs_due_email_index_

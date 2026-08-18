@@ -28,9 +28,10 @@ function stripUrlAttribute(element: Element, attrName: string): void {
 
 /**
  * Removes script/iframe/object/embed/form/meta-refresh nodes, every `on*`
- * event-handler attribute, `javascript:` URLs on href/src/action/formaction,
- * and external stylesheet `<link rel="stylesheet">` tags; then serializes
- * the sanitized document body back to a string.
+ * event-handler attribute, `javascript:` URLs on
+ * href/src/action/formaction/xlink:href/background/poster, and external
+ * stylesheet `<link rel="stylesheet">` tags; then serializes the sanitized
+ * document body back to a string.
  */
 export function stripUntrustedHtml(html: string): string {
   const parser = new DOMParser();
@@ -57,6 +58,9 @@ export function stripUntrustedHtml(html: string): string {
     stripUrlAttribute(element, "src");
     stripUrlAttribute(element, "action");
     stripUrlAttribute(element, "formaction");
+    stripUrlAttribute(element, "xlink:href");
+    stripUrlAttribute(element, "background");
+    stripUrlAttribute(element, "poster");
   }
 
   return doc.body.innerHTML;

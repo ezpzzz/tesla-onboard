@@ -101,6 +101,7 @@ describe("GET /api/owner/mail/[id]/content", () => {
       text: "hi",
       attachments: [{ id: "a1", filename: "receipt.pdf", contentType: "application/pdf", sizeBytes: 1200, contentId: null, inlined: false }],
       inline: { "logo@evhost": "data:image/png;base64,AAAA" },
+      remoteImagesAllowed: true,
     });
     const response = await GET(request(), context);
     expect(response.status).toBe(200);
@@ -114,6 +115,7 @@ describe("GET /api/owner/mail/[id]/content", () => {
       text: "hi",
       attachments: [{ id: "a1", filename: "receipt.pdf", contentType: "application/pdf", sizeBytes: 1200, contentId: null, inlined: false }],
       inline: { "logo@evhost": "data:image/png;base64,AAAA" },
+      remoteImagesAllowed: true,
     });
     expect(fetchMailMessageContent).toHaveBeenCalledWith({
       supabase: expect.anything(),

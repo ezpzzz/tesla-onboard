@@ -71,6 +71,7 @@ export async function GET(
         text: content.text,
         attachments: content.attachments,
         inline: content.inline,
+        remoteImagesAllowed: content.remoteImagesAllowed,
       });
   }
 }

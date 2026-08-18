@@ -202,13 +202,18 @@ comment on column public.onlyevs_email_integrations.retention_window_days is
 -- job_type widen (drop+re-add pattern, matching
 -- 20260816160000_onlyevs_email_alias_format.sql's precedent for
 -- enum-style CHECK constraints). 'retention' already exists from
--- 20260816003000 -- this only adds 'index_backfill', the reconciler's own
--- pacing job type (its actual claim path below reads
+-- 20260816003000 -- this adds 'index_backfill' (the reconciler's own
+-- pacing job type -- its actual claim path below reads
 -- public.onlyevs_inbound_emails directly, not the outbox row itself; an
 -- 'index_backfill' outbox entry is a scheduling knob the worker can enqueue
 -- to pace/trigger a sweep, claimed generically by the existing
 -- private.claim_onlyevs_due_email -- that function has never filtered by
--- job_type).
+-- job_type) and 'purge' (T10's actual dispatch trigger -- see
+-- purge_onlyevs_email_message_core below, which enqueues one of these in
+-- the same transaction as its audit row, and services/onlyevs-worker/
+-- email.ts's processPurgeJob, which is what actually deletes the R2 object
+-- keys that row's audit entry recorded; entity_id is the purge_audit row's
+-- own id, giving the worker a stable, idempotent-to-retry key).
 -- =====================================================================
 
 alter table public.onlyevs_email_outbox
@@ -216,7 +221,7 @@ alter table public.onlyevs_email_outbox
 
 alter table public.onlyevs_email_outbox
   add constraint onlyevs_email_outbox_job_type_check
-  check (job_type in ('parse', 'action', 'delivery', 'retention', 'reconcile', 'canary', 'index_backfill'));
+  check (job_type in ('parse', 'action', 'delivery', 'retention', 'reconcile', 'canary', 'index_backfill', 'purge'));
 
 -- =====================================================================
 -- Reconciler claim query (2A). Mirrors private.claim_onlyevs_due_email at
@@ -391,6 +396,7 @@ declare
   v_candidate public.onlyevs_email_candidates;
   v_attachment_keys text[];
   v_all_keys text[];
+  v_audit_id uuid;
 begin
   select * into v_inbound from public.onlyevs_inbound_emails e
     where e.workspace_id = p_workspace_id and e.id = p_inbound_email_id
@@ -434,7 +440,21 @@ begin
     workspace_id, scope, inbound_email_id, actor_user_id, reason, r2_object_keys
   ) values (
     p_workspace_id, p_scope, v_inbound.id, p_actor_user_id, p_reason, v_all_keys
-  );
+  ) returning id into v_audit_id;
+
+  -- The R2 bytes for v_all_keys are not deleted by this function -- Postgres
+  -- has no S3 client. Enqueueing this job in the SAME transaction as the
+  -- audit row (rather than leaving it to the caller) is what actually wires
+  -- T10's executor to a real trigger: entity_id is the audit row's own id,
+  -- so services/onlyevs-worker/email.ts's processPurgeJob can read
+  -- r2_object_keys straight back off private.onlyevs_email_purge_audit
+  -- (append-only, already durable) with no separate payload channel, and
+  -- `on conflict (job_type, entity_id) do nothing` makes a second call for
+  -- the same already-purged message (v_all_keys = '{}') a harmless no-op
+  -- enqueue rather than an error.
+  insert into public.onlyevs_email_outbox (workspace_id, job_type, entity_id)
+  values (p_workspace_id, 'purge', v_audit_id)
+  on conflict (job_type, entity_id) do nothing;
 
   return query select unnest(v_all_keys);
 end;
@@ -469,14 +489,18 @@ revoke all on function public.purge_onlyevs_email_message(uuid, uuid, text) from
 grant execute on function public.purge_onlyevs_email_message(uuid, uuid, text) to authenticated;
 
 -- Reservation-scoped purge: every message whose candidate carries this
--- reservation_id (Premise 3's second key rule). Scoped to messages that
--- still carry a live index row -- a candidate row survives its own message
--- being purged (Premise 3: "candidate row retained"), so without this guard
--- a second reservation/guest purge covering the same reservation would
--- re-run the core against an already-purged message (harmless to its state,
--- since every step there is already idempotent, but it would return an
--- empty r2_object_key set and write a second, misleading empty audit row
--- for a message that has nothing left to purge).
+-- reservation_id (Premise 3's second key rule). Targets are resolved
+-- directly off onlyevs_email_candidates, which always exists once a message
+-- is captured -- NOT off private.onlyevs_email_message_index, which can
+-- lag capture (still awaiting the T9 reconciler's pass, or mid the parse+
+-- index dual-write window). Gating target resolution on "has an index row"
+-- was indistinguishable from "not yet indexed" and silently dropped
+-- in-flight messages from the purge with no error/partial-count signal.
+-- "Already purged" is instead read off onlyevs_inbound_emails.r2_object_key
+-- -- purge_onlyevs_email_message_core nulls it unconditionally (line ~435
+-- above) as its own, index-row-independent signal that nothing is left to
+-- purge for that message, so a second reservation/guest purge covering the
+-- same reservation correctly skips it without depending on indexing state.
 create or replace function public.purge_onlyevs_email_reservation(
   p_workspace_id uuid,
   p_reservation_id text,
@@ -497,11 +521,10 @@ begin
   from (
     select distinct c.inbound_email_id
     from public.onlyevs_email_candidates c
+    join public.onlyevs_inbound_emails e
+      on e.workspace_id = c.workspace_id and e.id = c.inbound_email_id
     where c.workspace_id = p_workspace_id and c.reservation_id = p_reservation_id
-      and exists (
-        select 1 from private.onlyevs_email_message_index i
-        where i.workspace_id = p_workspace_id and i.inbound_email_id = c.inbound_email_id
-      )
+      and e.r2_object_key is not null
   ) targets
   cross join lateral private.purge_onlyevs_email_message_core(
     p_workspace_id, targets.inbound_email_id, (select auth.uid()), 'reservation', p_reason
@@ -561,21 +584,25 @@ begin
     where i.workspace_id = p_workspace_id
       and (i.guest_id = p_guest_id or i.trip_id in (select id from guest_trips))
     union
-    -- Same "still has a live index row" guard as purge_onlyevs_email_reservation
-    -- above -- a candidate row outlives its own message being purged, so
-    -- without this a repeat guest purge covering an already-purged message
-    -- would re-run the core for no purge left to do.
+    -- Same fix as purge_onlyevs_email_reservation above: targets resolve
+    -- directly off onlyevs_email_candidates (always present once captured),
+    -- not off private.onlyevs_email_message_index (which can lag capture --
+    -- awaiting T9's reconciler pass, or mid the parse+index dual-write
+    -- window -- and would otherwise be silently indistinguishable from an
+    -- already-purged message). "Already purged" is instead read off
+    -- onlyevs_inbound_emails.r2_object_key, which purge_onlyevs_email_
+    -- message_core nulls unconditionally regardless of whether an index row
+    -- ever existed.
     select distinct c.inbound_email_id
     from public.onlyevs_email_candidates c
+    join public.onlyevs_inbound_emails e
+      on e.workspace_id = c.workspace_id and e.id = c.inbound_email_id
     where c.workspace_id = p_workspace_id
       and (
         c.effective_trip_id in (select id from guest_trips)
         or (c.reservation_id is not null and c.reservation_id in (select reservation_id from guest_reservations))
       )
-      and exists (
-        select 1 from private.onlyevs_email_message_index i
-        where i.workspace_id = p_workspace_id and i.inbound_email_id = c.inbound_email_id
-      )
+      and e.r2_object_key is not null
   )
   select k.r2_object_key
   from targets

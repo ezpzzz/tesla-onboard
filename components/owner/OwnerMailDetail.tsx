@@ -26,6 +26,7 @@ import {
   fetchMailReadReceipts,
   purgeMail,
   recordMailRead,
+  setMailRemoteImagesAllowed,
 } from "@/lib/owner/mail-repository";
 import { fetchMailContent, mailAttachmentDownloadUrl, type MailContentFetchState } from "@/lib/owner/mail-content-client";
 import {
@@ -160,7 +161,22 @@ export function OwnerMailDetail({ messageId }: { messageId: string }) {
       {content.kind === "loading" ? (
         <Card className="p-6 text-center text-sm text-muted">Loading content…</Card>
       ) : content.kind === "content" ? (
-        <MailContentFrame html={content.html} text={content.text} inline={content.inline} />
+        <MailContentFrame
+          // Forces a fresh mount per message: this component doesn't
+          // unmount on a message-to-message navigation (content stays at
+          // the previous message's value until the new fetch resolves), so
+          // without a key the persisted-opt-in initial state below would
+          // otherwise leak from one message into the next.
+          key={messageId}
+          html={content.html}
+          text={content.text}
+          inline={content.inline}
+          initialRemoteImagesAllowed={content.remoteImagesAllowed}
+          onRemoteImagesAllowed={() => {
+            if (!scope) return;
+            setMailRemoteImagesAllowed(scope, messageId, true).catch(() => undefined);
+          }}
+        />
       ) : content.kind === "unauthorized" ? (
         <StatePanel tone="danger" title="Your owner session expired." detail="Sign in again to view this message." />
       ) : (

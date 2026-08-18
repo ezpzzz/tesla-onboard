@@ -1,5 +1,5 @@
 begin;
-select plan(67);
+select plan(69);
 
 -- =====================================================================
 -- Structural coverage: tables, functions, grants.
@@ -341,18 +341,30 @@ select is(
 );
 
 -- =====================================================================
--- Purge: reservation-scoped. RES-A1 has two candidates (already-purged
--- message 1, and message 2 below) -- purging by reservation must reach the
--- still-live one even though the first was already purged individually.
+-- Purge: reservation-scoped. RES-A1 has three live-target candidates by
+-- this point: already-purged message 1 (must be correctly skipped), message
+-- 2 (indexed), and message 4 below -- captured (has a candidate row) but
+-- deliberately never given a seed_index row, modeling the exact race the
+-- fix-before-merge review flagged: a message captured in the same window a
+-- deletion request lands, still awaiting the T9 reconciler's indexing pass.
+-- Before the fix, target resolution required an index row to exist, so this
+-- message was silently indistinguishable from "already purged" and dropped
+-- from the purge with no error/partial-count signal -- this asserts it is
+-- now reached.
 -- =====================================================================
+
+select pg_temp.seed_inbound('97300000-0000-4000-8000-000000000004', '97100000-0000-4000-8000-000000000001', '97200000-0000-4000-8000-000000000001', 'msg-4-captured-not-yet-indexed@turo.com');
+select pg_temp.seed_candidate('97400000-0000-4000-8000-000000000004', '97100000-0000-4000-8000-000000000001', '97200000-0000-4000-8000-000000000001', '97300000-0000-4000-8000-000000000004', 'RES-A1', 'guest_message',
+  jsonb_build_object('subject', 'RES-A1 message captured mid-index-race', 'messageText', 'captured but not yet indexed', 'guestMessageText', 'captured but not yet indexed'),
+  now() - interval '1 hour');
 
 select set_config('request.jwt.claim.sub', '97000000-0000-4000-8000-000000000001', true);
 set local role authenticated;
 
 select is(
   (select count(*)::int from public.purge_onlyevs_email_reservation('97100000-0000-4000-8000-000000000001', 'RES-A1', 'pgtap reservation purge')),
-  1,
-  'reservation-scoped purge purges exactly the one still-live message sharing that reservation'
+  2,
+  'reservation-scoped purge reaches both the indexed message and the captured-but-not-yet-indexed one sharing that reservation'
 );
 
 reset role;
@@ -363,9 +375,19 @@ select is(
   'the second RES-A1 message''s index row is gone after the reservation-scoped purge'
 );
 select is(
+  (select r2_object_key from public.onlyevs_inbound_emails where id = '97300000-0000-4000-8000-000000000004'),
+  null,
+  'the never-indexed RES-A1 message''s raw envelope is nulled too -- it was not silently skipped'
+);
+select is(
+  (select proposed_state ? 'messageText' from public.onlyevs_email_candidates where id = '97400000-0000-4000-8000-000000000004'),
+  false,
+  'the never-indexed RES-A1 message''s proposed_state.messageText is scrubbed'
+);
+select is(
   (select count(*)::int from private.onlyevs_email_purge_audit where scope = 'reservation'),
-  1,
-  'a reservation-scoped purge audit row is written'
+  2,
+  'a reservation-scoped purge audit row is written per message purged, including the never-indexed one'
 );
 
 -- =====================================================================

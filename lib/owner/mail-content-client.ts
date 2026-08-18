@@ -37,6 +37,7 @@ export type MailContentFetchState =
       text: string;
       attachments: MailAttachmentManifestEntry[];
       inline: Record<string, string>;
+      remoteImagesAllowed: boolean;
     };
 
 interface ContentRouteBody {
@@ -48,6 +49,7 @@ interface ContentRouteBody {
   text?: string;
   attachments?: MailAttachmentManifestEntry[];
   inline?: Record<string, string>;
+  remoteImagesAllowed?: boolean;
 }
 
 export async function fetchMailContent(workspaceId: string, messageId: string): Promise<MailContentFetchState> {
@@ -78,6 +80,7 @@ export async function fetchMailContent(workspaceId: string, messageId: string): 
         text: body.text ?? "",
         attachments: body.attachments ?? [],
         inline: body.inline ?? {},
+        remoteImagesAllowed: body.remoteImagesAllowed ?? false,
       };
     case "not_found":
       return { kind: "not_found" };

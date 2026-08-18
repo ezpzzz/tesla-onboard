@@ -74,7 +74,7 @@ vi.mock("@aws-sdk/client-s3", () => {
 });
 
 const {
-  processParseJob, sweepEmailIndexBackfill, sweepEmailRetention, executeEmailPurge,
+  processParseJob, sweepEmailIndexBackfill, sweepEmailRetention, executeEmailPurge, processPurgeJob,
 } = await import("@/services/onlyevs-worker/email");
 
 const KEK_VERSION = 1;
@@ -688,5 +688,83 @@ describe("executeEmailPurge — T10 purge executor", () => {
 
     expect(calls.some((c) => c.sql.includes("rollback"))).toBe(true);
     expect(calls.some((c) => c.sql.includes("commit"))).toBe(false);
+  });
+});
+
+// ===========================================================================
+// T10 dispatch trigger (fix-before-merge review finding) -- processPurgeJob
+// is what a 'purge' outbox job (enqueued by purge_onlyevs_email_message_core
+// in the same transaction as its audit row, 20260817140000_onlyevs_
+// workspace_mail.sql) actually runs. Before this fix, T10's executor
+// (executeEmailPurge, tested above) was fully correct but never dispatched
+// -- the manager-facing purge action told the UI every R2 object was
+// deleted while the bytes lived forever. This covers the actual trigger.
+// ===========================================================================
+
+describe("processPurgeJob — T10 dispatch trigger", () => {
+  const WORKSPACE_ID = "ws-1";
+  const AUDIT_ID = "audit-1";
+  const job = { id: "job-purge-1", workspace_id: WORKSPACE_ID, entity_id: AUDIT_ID, attempt_count: 0, job_type: "purge" as const };
+
+  it("reads the audit row's r2_object_keys, deletes them, and marks the job completed", async () => {
+    const { client, calls } = makeFakeClient([
+      {
+        match: "select r2_object_keys from private.onlyevs_email_purge_audit where id=$1 and workspace_id=$2",
+        handler: () => ({ rows: [{ r2_object_keys: ["envelope-key-9", "attach-key-9"] }] }),
+      },
+    ]);
+    const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+    await processPurgeJob(pool, job);
+
+    expect(s3State.deleteCalls.sort()).toEqual(["attach-key-9", "envelope-key-9"].sort());
+    const completedUpdate = calls.find((c) => c.sql.includes("state='completed'"));
+    expect(completedUpdate).toBeDefined();
+    expect(completedUpdate!.params).toEqual([job.id]);
+  });
+
+  it("is a harmless no-op completion when the audit row's key list is already empty (already-purged message)", async () => {
+    const { client, calls } = makeFakeClient([
+      {
+        match: "select r2_object_keys from private.onlyevs_email_purge_audit",
+        handler: () => ({ rows: [{ r2_object_keys: [] }] }),
+      },
+    ]);
+    const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+    await processPurgeJob(pool, job);
+
+    expect(s3State.deleteCalls).toHaveLength(0);
+    expect(calls.some((c) => c.sql.includes("state='completed'"))).toBe(true);
+  });
+
+  it("marks the job failed_retryable (never completed) when an R2 delete fails, leaving it to retry", async () => {
+    s3State.deleteShouldFail.add("attach-key-fail");
+    const { client, calls } = makeFakeClient([
+      {
+        match: "select r2_object_keys from private.onlyevs_email_purge_audit",
+        handler: () => ({ rows: [{ r2_object_keys: ["attach-key-fail"] }] }),
+      },
+    ]);
+    const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+    await processPurgeJob(pool, job);
+
+    expect(calls.some((c) => c.sql.includes("state='completed'"))).toBe(false);
+    const retryUpdate = calls.find((c) => c.sql.includes("failed_retryable"));
+    expect(retryUpdate).toBeDefined();
+    expect(retryUpdate!.params[0]).toBe(job.id);
+  });
+
+  it("completes harmlessly (never throws) when the audit row is missing -- treated as nothing left to delete, not an error", async () => {
+    const { client, calls } = makeFakeClient([
+      { match: "select r2_object_keys from private.onlyevs_email_purge_audit", handler: () => ({ rows: [] }) },
+    ]);
+    const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+    await expect(processPurgeJob(pool, job)).resolves.toBeUndefined();
+
+    expect(s3State.deleteCalls).toHaveLength(0);
+    expect(calls.some((c) => c.sql.includes("state='completed'"))).toBe(true);
   });
 });

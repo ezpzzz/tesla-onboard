@@ -26,6 +26,21 @@ import {
  */
 export const MAIL_INLINE_IMAGE_BUDGET_BYTES = 1_048_576;
 
+/**
+ * Strict allowlist for the `content_type` value we are willing to splice into
+ * a `data:` URL for cid inlining. `content_type` is attacker-controlled
+ * (postal-mime's raw, unsanitized MIME header, stored verbatim) -- without
+ * this allowlist a header value containing `"` or `>` could break out of the
+ * `src="cid:token"` attribute once `rewriteCidReferences` string-replaces the
+ * token, injecting markup the DOMParser strip pass (which runs *before* cid
+ * rewriting) never saw. Anything not matching this exact shape is treated as
+ * ineligible for inlining and falls back to the same-origin attachment
+ * route, which serves it with its own `Content-Type` response header (a safe
+ * context; no attribute-injection surface).
+ */
+const INLINE_IMAGE_CONTENT_TYPE_PATTERN =
+  /^image\/(?:png|jpeg|gif|webp|bmp|svg\+xml|x-icon|vnd\.microsoft\.icon)$/i;
+
 export interface MailAttachmentManifestEntry {
   id: string;
   filename: string | null;
@@ -49,6 +64,7 @@ export type MailContentState =
       text: string;
       attachments: MailAttachmentManifestEntry[];
       inline: Record<string, string>;
+      remoteImagesAllowed: boolean;
     };
 
 interface EnvelopeRpcRow {
@@ -62,6 +78,7 @@ interface EnvelopeRpcRow {
   raw_sha256: string | null;
   normalized_sha256: string | null;
   alias_hash: string;
+  remote_images_allowed: boolean | null;
 }
 
 interface AttachmentRpcRow {
@@ -147,7 +164,9 @@ export async function fetchMailMessageContent(args: FetchMailMessageContentArgs)
   const manifestEntries: MailAttachmentManifestEntry[] = [];
 
   for (const attachment of attachments) {
-    const isImage = Boolean(attachment.content_type?.startsWith("image/"));
+    const isImage = Boolean(
+      attachment.content_type && INLINE_IMAGE_CONTENT_TYPE_PATTERN.test(attachment.content_type),
+    );
     const eligible = isImage && Boolean(attachment.content_id) && attachment.size_bytes <= budgetRemaining;
     let inlined = false;
     if (eligible) {
@@ -201,5 +220,6 @@ export async function fetchMailMessageContent(args: FetchMailMessageContentArgs)
     text: manifest.text,
     attachments: manifestEntries,
     inline,
+    remoteImagesAllowed: envelope.remote_images_allowed === true,
   };
 }

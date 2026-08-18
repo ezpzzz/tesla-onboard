@@ -38,12 +38,28 @@ export interface MailContentFrameProps {
   /** Keyed by contentId -- exactly T11's `inline` response field. */
   inline: Record<string, string>;
   className?: string;
+  /** The persisted per-message-per-workspace opt-in (design doc Open
+   * Question 1) as of the last content fetch -- initializes the toggle so a
+   * message someone already opted in stays opted in on a later visit,
+   * rather than resetting every navigation. */
+  initialRemoteImagesAllowed?: boolean;
+  /** Fired once, the first time this render turns the opt-in on, so the
+   * caller can persist it (setMailRemoteImagesAllowed) -- best-effort; a
+   * failed persist never blocks or reverts the in-session render. */
+  onRemoteImagesAllowed?: () => void;
 }
 
 type ViewTab = "html" | "text";
 
-export function MailContentFrame({ html, text, inline, className }: MailContentFrameProps) {
-  const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(false);
+export function MailContentFrame({
+  html,
+  text,
+  inline,
+  className,
+  initialRemoteImagesAllowed = false,
+  onRemoteImagesAllowed,
+}: MailContentFrameProps) {
+  const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(initialRemoteImagesAllowed);
   const [tab, setTab] = useState<ViewTab>(html ? "html" : "text");
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -96,7 +112,10 @@ export function MailContentFrame({ html, text, inline, className }: MailContentF
               type="button"
               variant="secondary"
               className="ml-auto min-h-8 px-3 py-1.5 text-[12px]"
-              onClick={() => setRemoteImagesAllowed(true)}
+              onClick={() => {
+                setRemoteImagesAllowed(true);
+                onRemoteImagesAllowed?.();
+              }}
             >
               Load remote images
             </Button>
