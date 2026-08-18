@@ -6,6 +6,7 @@ import {
   bucketChargingSessionsByDay,
   chargingBarsAriaLabel,
   deriveLocationRowView,
+  deriveTelemetryCause,
   deriveTelemetryStripState,
   enrolledAgeLabel,
   freshnessAgeLabel,
@@ -103,33 +104,149 @@ describe("liveFieldFreshness", () => {
   });
 });
 
+describe("deriveTelemetryCause", () => {
+  it("no-enrollment for undefined (loading) and null (never enrolled)", () => {
+    expect(deriveTelemetryCause(undefined)).toBe("no-enrollment");
+    expect(deriveTelemetryCause(null)).toBe("no-enrollment");
+  });
+
+  it("setting-up for requested / configuring / removal_requested", () => {
+    for (const status of ["requested", "configuring", "removal_requested"] as const) {
+      expect(deriveTelemetryCause({ status, lastErrorCode: null, createdAt: NOW })).toBe("setting-up");
+    }
+  });
+
+  it("pending-pairing for pending_sync", () => {
+    expect(deriveTelemetryCause({ status: "pending_sync", lastErrorCode: null, createdAt: NOW })).toBe(
+      "pending-pairing",
+    );
+  });
+
+  it("deployment-config-blocked only for status error + telemetry_proxy_not_configured", () => {
+    expect(
+      deriveTelemetryCause({ status: "error", lastErrorCode: "telemetry_proxy_not_configured", createdAt: NOW }),
+    ).toBe("deployment-config-blocked");
+  });
+
+  it("other-error for status error with any other (or no) error code", () => {
+    expect(deriveTelemetryCause({ status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW })).toBe(
+      "other-error",
+    );
+    expect(deriveTelemetryCause({ status: "error", lastErrorCode: null, createdAt: NOW })).toBe("other-error");
+  });
+
+  it("limit-reached for status unsupported + tesla_telemetry_limit_reached", () => {
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached", createdAt: NOW }),
+    ).toBe("limit-reached");
+  });
+
+  it("unsupported-firmware for status unsupported with any other reason", () => {
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "unsupported_firmware", createdAt: NOW }),
+    ).toBe("unsupported-firmware");
+  });
+});
+
 describe("liveStateEmptyCopy", () => {
   const NO_TELEMETRY_TITLE = "No telemetry yet";
   const AUTOMATIC_DETAIL =
     "This vehicle hasn't streamed a signal yet. Once Tesla telemetry is connected for it, live state and trip evidence start capturing automatically.";
 
-  it("stays byte-identical to the original automatic-capture copy when there is no enrollment row at all (undefined = still loading, null = no row)", () => {
-    expect(liveStateEmptyCopy(undefined)).toEqual({ title: NO_TELEMETRY_TITLE, detail: AUTOMATIC_DETAIL });
-    expect(liveStateEmptyCopy(null)).toEqual({ title: NO_TELEMETRY_TITLE, detail: AUTOMATIC_DETAIL });
+  it("stays byte-identical to the original automatic-capture copy when there is no enrollment row at all (undefined = still loading, null = no row), including its action", () => {
+    expect(liveStateEmptyCopy(undefined)).toEqual({
+      title: NO_TELEMETRY_TITLE,
+      detail: AUTOMATIC_DETAIL,
+      showManageLink: true,
+    });
+    expect(liveStateEmptyCopy(null)).toEqual({
+      title: NO_TELEMETRY_TITLE,
+      detail: AUTOMATIC_DETAIL,
+      showManageLink: true,
+    });
   });
 
-  it("keeps the automatic-capture copy for a non-error enrollment status (e.g. still setting up)", () => {
+  it("setting-up: defers to the strip above, no action (the strip itself offers none for this state)", () => {
     const copy = liveStateEmptyCopy({ status: "requested", lastErrorCode: null, createdAt: NOW });
-    expect(copy).toEqual({ title: NO_TELEMETRY_TITLE, detail: AUTOMATIC_DETAIL });
+    expect(copy.title).toBe(NO_TELEMETRY_TITLE);
+    expect(copy.showManageLink).toBe(false);
   });
 
-  it("defers to the status strip above instead of promising automatic capture when the deployment's proxy was never configured", () => {
+  it("pending-pairing: defers to the strip above, no action (the strip already offers the pairing action)", () => {
+    const copy = liveStateEmptyCopy({ status: "pending_sync", lastErrorCode: null, createdAt: NOW });
+    expect(copy.title).toBe(NO_TELEMETRY_TITLE);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("deployment-config-blocked: defers to the notice above, no automatic-capture promise, no action", () => {
     const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: "telemetry_proxy_not_configured", createdAt: NOW });
     expect(copy.title).toBe(NO_TELEMETRY_TITLE);
     expect(copy.detail).not.toMatch(/automatically/i);
     expect(copy.detail).toMatch(/configured/i);
+    expect(copy.showManageLink).toBe(false);
     // Don't re-explain the whole error -- the strip above already does.
     expect(copy.detail.length).toBeLessThan(AUTOMATIC_DETAIL.length + 60);
   });
 
-  it("also defers for any other errored enrollment -- the card can't promise something it doesn't know will happen", () => {
-    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: "some_other_code", createdAt: NOW });
+  it("other-error: must NOT claim the deployment is unconfigured, defers to the setup-failed notice, no action (the strip carries the reconnect action)", () => {
+    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW });
     expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.detail).not.toMatch(/deployment/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("other-error with no error code at all behaves the same as any other error code", () => {
+    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: null, createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.detail).not.toMatch(/deployment/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("limit-reached: must NOT say capture starts automatically, defers to the strip's owner-actionable explanation, no action", () => {
+    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("unsupported-firmware: must NOT say capture starts automatically, defers to the strip's owner-actionable explanation, no action", () => {
+    const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "unsupported_firmware", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
+  it("no card copy claims a deployment-configuration cause unless lastErrorCode says so", () => {
+    const nonDeploymentEnrollments: (TelemetryEnrollmentRow | null | undefined)[] = [
+      undefined,
+      null,
+      { status: "requested", lastErrorCode: null, createdAt: NOW },
+      { status: "pending_sync", lastErrorCode: null, createdAt: NOW },
+      { status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW },
+      { status: "error", lastErrorCode: null, createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "unsupported_firmware", createdAt: NOW },
+    ];
+    for (const enrollment of nonDeploymentEnrollments) {
+      expect(liveStateEmptyCopy(enrollment).detail).not.toMatch(/deployment/i);
+    }
+  });
+
+  it("no state's card copy contains the word 'automatically' unless it is genuinely automatic (only the no-enrollment case)", () => {
+    const nonAutomaticEnrollments: (TelemetryEnrollmentRow | null | undefined)[] = [
+      { status: "requested", lastErrorCode: null, createdAt: NOW },
+      { status: "configuring", lastErrorCode: null, createdAt: NOW },
+      { status: "removal_requested", lastErrorCode: null, createdAt: NOW },
+      { status: "pending_sync", lastErrorCode: null, createdAt: NOW },
+      { status: "error", lastErrorCode: "telemetry_proxy_not_configured", createdAt: NOW },
+      { status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "tesla_telemetry_limit_reached", createdAt: NOW },
+      { status: "unsupported", lastErrorCode: "unsupported_firmware", createdAt: NOW },
+    ];
+    for (const enrollment of nonAutomaticEnrollments) {
+      expect(liveStateEmptyCopy(enrollment).detail).not.toMatch(/automatically/i);
+    }
+    // The only genuinely-automatic case: no enrollment row at all.
+    expect(liveStateEmptyCopy(undefined).detail).toMatch(/automatically/i);
+    expect(liveStateEmptyCopy(null).detail).toMatch(/automatically/i);
   });
 });
 

@@ -55,9 +55,11 @@ export function TelemetryLiveStateCard({
         title={copy.title}
         detail={copy.detail}
         action={
-          <Link href="/owner/integrations" className="text-sm font-medium text-brand hover:underline">
-            Manage Tesla connection
-          </Link>
+          copy.showManageLink ? (
+            <Link href="/owner/integrations" className="text-sm font-medium text-brand hover:underline">
+              Manage Tesla connection
+            </Link>
+          ) : undefined
         }
       />
     );
