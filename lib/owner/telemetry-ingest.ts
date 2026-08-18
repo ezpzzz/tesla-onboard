@@ -1,4 +1,9 @@
-import { LOCATION_INTERVAL_SECONDS, LOCATION_MINIMUM_DELTA_METERS, validCoordinates } from "./telemetry-policy";
+import {
+  HISTORY_LATE_EVENT_BACKFILL_MS,
+  LOCATION_INTERVAL_SECONDS,
+  LOCATION_MINIMUM_DELTA_METERS,
+  validCoordinates,
+} from "./telemetry-policy";
 
 export interface TelemetryUpdate {
   vin: string;
@@ -19,7 +24,31 @@ export interface TelemetryConnectivityUpdate {
 
 type UnknownRecord = Record<string, unknown>;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000;
-const MAX_EVENT_AGE_MS = 24 * 60 * 60 * 1_000;
+
+/**
+ * Split late-event policy (outside-voice Issue 7, decided 7A). The parser's
+ * own reject bound is HISTORY_LATE_EVENT_BACKFILL_MS (telemetry-policy.ts,
+ * 7 days) -- wide enough that a collector/Kafka outage can be backfilled
+ * into onlyevs_vehicle_stats_history once it recovers. That table is
+ * append-only and idempotent on source_message_id, so accepting a late
+ * event there is safe.
+ *
+ * onlyevs_vehicle_stats_current (the live card) is monotonic and must never
+ * regress: it additionally requires isWithinCurrentStatsFreshnessWindow
+ * below (24h) before the worker's ingestion point writes to it. An event
+ * older than 24h but within the 7-day parser bound still lands in history,
+ * just not on the live card.
+ */
+const CURRENT_STATS_MAX_EVENT_AGE_MS = 24 * 60 * 60 * 1_000;
+
+/** True when `observedAtMs` is recent enough to still update the live
+ * onlyevs_vehicle_stats_current card (T3, split late-event policy). History
+ * has its own, much wider acceptance window -- see
+ * HISTORY_LATE_EVENT_BACKFILL_MS -- enforced by the parser's reject bound
+ * below, not by this helper. */
+export function isWithinCurrentStatsFreshnessWindow(observedAtMs: number, nowMs: number = Date.now()): boolean {
+  return observedAtMs >= nowMs - CURRENT_STATS_MAX_EVENT_AGE_MS;
+}
 
 function record(value: unknown): UnknownRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
@@ -77,7 +106,7 @@ export function parseTelemetryPayload(input: unknown): TelemetryUpdate | null {
     !/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)
     || timestamp === null
     || timestamp > now + MAX_CLOCK_SKEW_MS
-    || timestamp < now - MAX_EVENT_AGE_MS
+    || timestamp < now - HISTORY_LATE_EVENT_BACKFILL_MS
     || !Array.isArray(root.data)
   ) return null;
   const update: TelemetryUpdate = { vin, observedAt: timestamp };
@@ -120,7 +149,7 @@ export function parseConnectivityPayload(input: unknown): TelemetryConnectivityU
   if (
     !/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)
     || timestamp > now + MAX_CLOCK_SKEW_MS
-    || timestamp < now - MAX_EVENT_AGE_MS
+    || timestamp < now - CURRENT_STATS_MAX_EVENT_AGE_MS
   ) return null;
   if (!["connected", "disconnected"].includes(rawStatus)) return null;
   return { vin, connectivity: rawStatus as "connected" | "disconnected", observedAt: timestamp };

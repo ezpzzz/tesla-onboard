@@ -89,11 +89,19 @@ export function TripAccessCompletion() {
         This grants the verified Tesla account temporary DRIVER access, including vehicle location and remote commands. It does not grant owner privileges.
       </p>
       <p className="mt-2 text-xs leading-relaxed text-muted">
-        During the approved trip window, evhost.app may receive low-frequency vehicle location from Tesla for handoff, safety, and return support. Coordinates are encrypted, visible only to authorized workspace staff, and deleted after 30 days.
+        For the duration of this trip, evhost.app records vehicle telemetry from Tesla — battery
+        level, estimated range, odometer, charge state, and lock state — to confirm handoff
+        condition and validate mileage and charge at return, consistent with Turo policy.
+      </p>
+      <p className="mt-2 text-xs leading-relaxed text-muted">
+        During the approved trip window only, evhost.app may also receive low-frequency vehicle
+        location from Tesla for handoff, safety, and return support. Location is never recorded
+        outside an active, consented trip. Coordinates are encrypted, visible only to authorized
+        workspace staff, and deleted after 30 days.
       </p>
       <label className="mt-3 flex items-start gap-3 text-sm leading-relaxed text-ink-soft">
         <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1 h-4 w-4 accent-brand" />
-        <span>I consent to evhost.app creating and later revoking this trip-bound Tesla driver invitation, and to the trip-window location processing described above.</span>
+        <span>I consent to evhost.app creating and later revoking this trip-bound Tesla driver invitation, and to the trip-window vehicle telemetry and location processing described above.</span>
       </label>
       {error ? <p role="alert" className="mt-3 text-sm text-danger">{error}</p> : null}
       <Button className="mt-4" variant="brand" disabled={!consent || busy} onClick={() => void scheduleAccess()}>

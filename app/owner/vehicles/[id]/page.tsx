@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * Vehicle detail: edit form (saves in place, no navigation), lifetime stats,
- * linked trips, and a reversible remove control. Vehicle CRUD state comes
- * from useVehicleState() directly (same instance renders + mutates, so
- * removing/restoring reflects immediately); trip/charging data for the
- * stat tiles and linked-trips list comes from useOwnerData(). Follows the
+ * Vehicle detail: telemetry setup strip → live state → active trip → trip
+ * evidence ledger (lifetime tiles as its summary row) → health charts →
+ * consent/retention footer (Phase 5 of the Vehicle Telemetry & Trip
+ * Evidence Ledger design) → the vehicle edit form and a reversible remove
+ * control. Vehicle CRUD state comes from useVehicleState() directly (same
+ * instance renders + mutates, so removing/restoring reflects immediately);
+ * trip/charging/live-telemetry data comes from useOwnerData(). Follows the
  * useParams()/not-found/SSR-hydration-guard pattern from
  * app/owner/drivers/[id]/page.tsx.
  */
@@ -19,22 +21,25 @@ import {
 import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { useTenantConfig } from "@/components/TenantConfigProvider";
 import {
-  formatMiles,
-  formatPct,
-  formatUsd,
   parseReturnPolicyPct,
-  vehicleStats,
 } from "@/lib/owner/derive";
+import { vehicleWorkspaceScope } from "@/lib/owner/vehicle-repository";
+import { HISTORY_RETENTION_MS, LOCATION_RETENTION_MS } from "@/lib/owner/telemetry-policy";
 import { VehicleForm } from "@/components/owner/vehicle-form";
-import { EmptyState, formatDate, StatTile, TripStatusBadge } from "@/components/owner/owner-ui";
+import { EmptyState } from "@/components/owner/owner-ui";
 import { Badge, Button, Card } from "@/components/ui";
-import { IconChevronRight } from "@/components/icons";
 import { VehicleArtwork } from "@/components/vehicle/VehicleArtwork";
 import type { VehicleInput } from "@/lib/owner/types";
 import { PageHeader } from "@/components/evhost-ui";
+import { TelemetryStatusStrip } from "@/components/owner/telemetry-status-strip";
+import { TelemetryLiveStateCard } from "@/components/owner/telemetry-live-state-card";
+import { TelemetryActiveTripCard } from "@/components/owner/telemetry-active-trip-card";
+import { TelemetryHealthCharts } from "@/components/owner/telemetry-health-charts";
+import { LedgerSection } from "@/components/owner/ledger-section";
+import { msToWholeDays, msToWholeMonths } from "@/components/owner/telemetry-view";
 
 export default function VehicleDetailPage() {
-  const { config } = useTenantConfig();
+  const { config, tenantSlug } = useTenantConfig();
   const params = useParams<{ id: string }>();
   const id = params.id;
   const {
@@ -45,7 +50,7 @@ export default function VehicleDetailPage() {
     archiveVehicle,
     unarchiveVehicle,
   } = useVehicleState();
-  const { trips, chargingSessions, vehicleTelemetry, hydrated: dataHydrated } = useOwnerData();
+  const { drivers, trips, chargingSessions, vehicleTelemetry, hydrated: dataHydrated } = useOwnerData();
   const [saved, setSaved] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
@@ -117,12 +122,15 @@ export default function VehicleDetailPage() {
     );
   }
 
-  const stats = vehicleStats(vehicle.id, trips, chargingSessions);
   const live = vehicleTelemetry[vehicle.id];
+  const scope = vehicleWorkspaceScope(tenantSlug);
+  const nowMs = Date.now();
   const linkedTrips = trips.filter((t) => t.vehicleId === vehicle.id);
   const activeOrUpcomingTrips = linkedTrips.filter(
     (t) => t.status === "upcoming" || t.status === "active",
   );
+  const activeTrip = linkedTrips.find((t) => t.status === "active") ?? null;
+  const activeDriver = activeTrip ? drivers.find((d) => d.id === activeTrip.driverId) ?? null : null;
 
   const removable = activeOrUpcomingTrips.length === 0;
 
@@ -209,39 +217,39 @@ export default function VehicleDetailPage() {
         className="h-52 md:h-60"
       />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatTile label="Trips" value={stats.tripCount} />
-        <StatTile label="Miles rented" value={formatMiles(stats.milesRented)} />
-        <StatTile label="Energy cost" value={formatUsd(stats.energyCostUsd)} />
-        <StatTile
-          label="Avg return charge"
-          value={stats.avgReturnChargePct === null ? "—" : formatPct(stats.avgReturnChargePct)}
-        />
-      </div>
+      <TelemetryStatusStrip scope={scope} vehicleId={vehicle.id} hasLiveSignal={live?.observedAt != null} />
 
-      {live ? (
-        <Card className="p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">Tesla vehicle stats</div>
-            <Badge tone={live.connectivity === "connected" ? "good" : "neutral"}>{live.connectivity}</Badge>
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatTile label="Battery" value={live.batteryPct === null ? "—" : `${Math.round(live.batteryPct)}%`} />
-            <StatTile label="Estimated range" value={live.estimatedRangeMi === null ? "—" : `${Math.round(live.estimatedRangeMi)} mi`} />
-            <StatTile label="Odometer" value={live.odometerMi === null ? "—" : `${Math.round(live.odometerMi).toLocaleString()} mi`} />
-            <StatTile label="Security" value={live.locked === null ? "—" : live.locked ? "Locked" : "Unlocked"} />
-          </div>
-          <p className="mt-3 text-xs text-muted">
-            {live.observedAt ? `Latest signal ${new Date(live.observedAt).toLocaleString()}.` : "Waiting for the first vehicle signal."}
-            {live.chargingState ? ` ${live.chargingState.replace(/^DetailedChargeState/, "Charge: ")}.` : ""}
-          </p>
-          {Object.values(live.fieldObservedAt).some((value) => value !== null) ? (
-            <p className="mt-1 text-xs text-muted">
-              Each value retains its own Tesla observation time; a newer lock or connectivity signal never refreshes older battery, range, or odometer data.
-            </p>
-          ) : null}
-        </Card>
+      <TelemetryLiveStateCard live={live} nowMs={nowMs} />
+
+      {activeTrip ? (
+        <TelemetryActiveTripCard
+          trip={activeTrip}
+          driver={activeDriver}
+          vehicle={vehicle}
+          live={live}
+          scope={scope}
+          policyPct={policyPct}
+          nowMs={nowMs}
+        />
       ) : null}
+
+      <LedgerSection
+        vehicle={vehicle}
+        trips={trips}
+        drivers={drivers}
+        chargingSessions={chargingSessions}
+        policyPct={policyPct}
+      />
+
+      <TelemetryHealthCharts scope={scope} vehicleId={vehicle.id} chargingSessions={chargingSessions} />
+
+      <p className="max-w-[68ch] text-xs leading-relaxed text-muted">
+        Guests are shown this disclosure during onboarding before any telemetry streams. Live
+        vehicle history is retained for {msToWholeMonths(HISTORY_RETENTION_MS)} months. Location
+        evidence, where enabled for this workspace, is retained for only{" "}
+        {msToWholeDays(LOCATION_RETENTION_MS)} days and is visible only during an active,
+        guest-consented trip window — never as a route history.
+      </p>
 
       <Card className="p-4">
         <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">
@@ -250,6 +258,7 @@ export default function VehicleDetailPage() {
         <div className="mt-3">
           <VehicleForm
             mode="edit"
+            vehicleId={vehicle.id}
             initialValues={initialValues}
             globalPolicyPct={policyPct}
             onSubmit={handleSubmit}
@@ -259,32 +268,6 @@ export default function VehicleDetailPage() {
             {saved ? "Vehicle saved." : ""}
           </p>
         </div>
-      </Card>
-
-      <Card className="p-4">
-        <div className="text-[13px] font-semibold uppercase tracking-wide text-muted">
-          Linked trips
-        </div>
-        {linkedTrips.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">No trips linked to this vehicle yet.</p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {linkedTrips.map((trip) => (
-              <li key={trip.id}>
-                <Link
-                  href={`/owner/trips/${trip.id}`}
-                  className="flex min-h-[44px] items-center gap-3 rounded-md border border-line bg-white px-3.5 py-2.5 transition-colors hover:bg-surface"
-                >
-                  <TripStatusBadge status={trip.status} />
-                  <span className="min-w-0 flex-1 text-[14px] font-medium text-ink">
-                    {formatDate(trip.startAt)} – {formatDate(trip.endAt)}
-                  </span>
-                  <IconChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted" />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
       </Card>
 
       <Card className="p-4">

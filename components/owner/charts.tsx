@@ -90,6 +90,77 @@ export function MiniBarChart({
   );
 }
 
+/* ── MiniLineChart ─────────────────────────────────────────────────────── */
+
+/** Single-series time line (e.g. battery % over the last 7 days, Phase 5
+ * health charts). Same restraint as MiniBarChart: tokens-only color, a
+ * direct start/end value label instead of axis ticks or a legend, no
+ * gradients/shadows/animation. Callers own the aria-label sentence. */
+export function MiniLineChart({
+  points,
+  ariaLabel,
+  yMin = 0,
+  yMax = 100,
+  formatValue,
+}: {
+  points: { atMs: number; value: number }[];
+  ariaLabel: string;
+  yMin?: number;
+  yMax?: number;
+  formatValue?: (n: number) => string;
+}) {
+  const fmt = formatValue ?? ((n: number) => `${Math.round(n)}%`);
+  const width = 280;
+  const height = 90;
+  const padTop = 10;
+  const padBottom = 20;
+  const plotH = height - padTop - padBottom;
+
+  if (points.length === 0) {
+    return (
+      <svg role="img" aria-label={ariaLabel} viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }}>
+        <text x={0} y={height / 2} className="fill-muted text-[11px]">
+          No data yet
+        </text>
+      </svg>
+    );
+  }
+
+  const minAt = points[0].atMs;
+  const maxAt = points[points.length - 1].atMs;
+  const spanMs = Math.max(1, maxAt - minAt);
+  const x = (atMs: number) => ((atMs - minAt) / spanMs) * width;
+  const y = (value: number) => {
+    const clamped = Math.max(yMin, Math.min(yMax, value));
+    return padTop + (1 - (clamped - yMin) / (yMax - yMin)) * plotH;
+  };
+
+  const path = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${x(p.atMs).toFixed(1)} ${y(p.value).toFixed(1)}`)
+    .join(" ");
+  const last = points[points.length - 1];
+  const first = points[0];
+
+  return (
+    <svg
+      role="img"
+      aria-label={ariaLabel}
+      viewBox={`0 0 ${width} ${height}`}
+      className="w-full"
+      style={{ height }}
+    >
+      <path d={path} fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="stroke-brand" />
+      <circle cx={x(last.atMs)} cy={y(last.value)} r={3} className="fill-brand" />
+      <text x={0} y={height - 4} className="fill-muted text-[10px]">
+        {fmt(first.value)}
+      </text>
+      <text x={width} y={height - 4} textAnchor="end" className="fill-ink text-[10px] font-semibold">
+        {fmt(last.value)}
+      </text>
+    </svg>
+  );
+}
+
 /* ── BatteryReturnGauge ────────────────────────────────────────────────── */
 
 export function BatteryReturnGauge({

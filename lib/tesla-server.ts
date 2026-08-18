@@ -39,6 +39,7 @@ import {
   teslaPaintOptionCode,
   type RawTeslaVehicleConfig,
 } from "./tesla-vehicle-config";
+import { LOCATION_READ_TIMEOUT_MS } from "./owner/telemetry-policy";
 
 export const AUTHORIZE_URL = "https://auth.tesla.com/oauth2/v3/authorize";
 export const TOKEN_URL =
@@ -52,6 +53,10 @@ export const OWNER_PERSISTENT_SCOPES = [
   "vehicle_device_data",
   "vehicle_cmds",
   "vehicle_location",
+  // Phase 3 (9B) charging-history invoice sync: an existing owner Tesla
+  // integration must re-consent to pick this up — offline_access alone does
+  // not retroactively widen a previously granted refresh token's scopes.
+  "vehicle_charging_cmds",
 ] as const;
 
 const teslaIdTokenKeys = createRemoteJWKSet(new URL(TESLA_ID_TOKEN_JWKS));
@@ -454,6 +459,56 @@ async function fetchVehicleConfig(
       console.warn(`[tesla] vehicle_config read threw for ${vehicle.vin}`);
     }
     return vehicle;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export interface VehicleLocationReading {
+  latitude: number;
+  longitude: number;
+}
+
+/**
+ * One-shot, owner-initiated `vehicle_data?endpoints=location_data` read
+ * (Phase 4 home-area sub-task, design-review 8A: the vehicle-form "Use car's
+ * current location" button). Deliberately the ONLY place in this module that
+ * reads live coordinates outside the telemetry stream — callers must fill a
+ * form field with the result and must never persist it to a location table.
+ * May wake a sleeping vehicle (billable); the caller's copy says so.
+ */
+export async function fetchVehicleLocationReading(
+  base: string,
+  accessToken: string,
+  vin: string,
+): Promise<VehicleLocationReading | null> {
+  if (!vin) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LOCATION_READ_TIMEOUT_MS);
+  try {
+    const url = new URL(`/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data`, base);
+    url.searchParams.set("endpoints", "location_data");
+    const res = await fetch(url, {
+      headers: authHeaders(accessToken),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      console.warn(`[tesla] location_data unavailable (${res.status}) for ${vin}`);
+      return null;
+    }
+    const data = (await res.json()) as {
+      response?: { drive_state?: { latitude?: number; longitude?: number } };
+    };
+    const latitude = data?.response?.drive_state?.latitude;
+    const longitude = data?.response?.drive_state?.longitude;
+    if (typeof latitude !== "number" || typeof longitude !== "number") return null;
+    return { latitude, longitude };
+  } catch (error) {
+    if (error instanceof Error && error.name !== "AbortError") {
+      console.warn(`[tesla] location_data read threw for ${vin}`);
+    }
+    return null;
   } finally {
     clearTimeout(timeout);
   }

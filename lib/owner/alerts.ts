@@ -6,14 +6,10 @@
  */
 
 import { CHECKLIST } from "@/lib/content";
-import {
-  driverStatus,
-  formatUsd,
-  resolveVehiclePolicyPct,
-  sessionsForTrip,
-  tripEnergy,
-} from "./derive";
-import type { ChargingSession, Driver, OwnerAlert, Trip, Vehicle } from "./types";
+import { driverStatus, resolveVehiclePolicyPct } from "./derive";
+import { totalDcFastKwh } from "./charge-sessions";
+import { SUPERCHARGING_UNRECOVERED_KWH_THRESHOLD } from "./telemetry-policy";
+import type { ChargingSession, DerivedChargeSession, Driver, OwnerAlert, Trip, Vehicle } from "./types";
 import type { OwnerState } from "./owner-state";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -27,13 +23,21 @@ function driverName(drivers: Driver[], driverId: string | null): string {
 export function deriveAlerts(args: {
   drivers: Driver[];
   trips: Trip[];
+  /** Legacy per-trip sessions — retained on the signature for backward
+   * compatibility but no longer read by this function (see
+   * `chargeSessions` below, which replaced its one use). */
   chargingSessions: ChargingSession[];
   vehicles: Vehicle[];
   ownerState: OwnerState;
   policyPct: number;
   now: number;
+  /** Phase 3 derived charge sessions (lib/owner/charge-sessions.ts),
+   * keying the re-keyed supercharging-unrecovered alert below. Absent or
+   * empty never false-fires the alert — it's an honest "nothing known yet"
+   * state, not a claim that no DC-fast charging happened. */
+  chargeSessions?: DerivedChargeSession[];
 }): OwnerAlert[] {
-  const { drivers, trips, chargingSessions, vehicles, ownerState, policyPct, now } = args;
+  const { drivers, trips, vehicles, ownerState, policyPct, now, chargeSessions = [] } = args;
   const alerts: OwnerAlert[] = [];
 
   // guest-not-started (danger): upcoming trip within 48h, progress null/pct 0
@@ -118,18 +122,30 @@ export function deriveAlerts(args: {
     });
   }
 
-  // supercharging-unrecovered (warn): completed trip ended within last 14 days, supercharger cost > 0
+  // supercharging-unrecovered (warn), re-keyed to kWh (design/eng Issue 7A):
+  // completed trip ended within last 14 days, DC-fast charging sessions
+  // total >= SUPERCHARGING_UNRECOVERED_KWH_THRESHOLD kWh. The dollar version
+  // returns only once a trusted cost source ships fleet-wide.
+  //
+  // NOTE: the plan also calls for gating this on the return checklist's
+  // "recovery item" being unchecked, but TripChecklistState
+  // (lib/owner/owner-state.ts) has no such field yet and that file is
+  // outside this lane's ownership — see the implementation report. Until
+  // that field exists, this alert fires on the kWh threshold alone rather
+  // than silently repurposing an unrelated existing checklist field.
   for (const trip of trips) {
     if (trip.status !== "completed") continue;
     if (now - trip.endAt > 14 * DAY_MS || now - trip.endAt < 0) continue;
-    const sessions = sessionsForTrip(chargingSessions, trip.id);
-    const { superchargerCostUsd } = tripEnergy(sessions);
-    if (superchargerCostUsd <= 0) continue;
+    const tripDcFastSessions = chargeSessions.filter(
+      (session) => session.tripId === trip.id && session.kind === "dc_fast",
+    );
+    const dcFastKwh = totalDcFastKwh(tripDcFastSessions);
+    if (dcFastKwh < SUPERCHARGING_UNRECOVERED_KWH_THRESHOLD) continue;
     alerts.push({
       id: `supercharging-unrecovered:${trip.id}`,
       kind: "supercharging-unrecovered",
       severity: "warn",
-      message: `${trip.id} (${driverName(drivers, trip.driverId)}) has ${formatUsd(superchargerCostUsd)} in Supercharging to pass through.`,
+      message: `${trip.id} (${driverName(drivers, trip.driverId)}) added ${dcFastKwh.toFixed(1)} kWh of Supercharging to pass through.`,
       href: `/owner/trips/${trip.id}`,
       driverId: trip.driverId ?? undefined,
       tripId: trip.id,

@@ -156,6 +156,82 @@ export interface OwnerDataSource {
   getSnapshot(): Promise<OwnerSnapshot>;
 }
 
+// --- Phase 7: durable guest identity -------------------------------------
+
+/** Mirrors a row from public.onlyevs_guests. Replaces per-trip synthesized
+ * driver ids on /owner/drivers once linking is wired up; Driver above is
+ * untouched (additive). */
+export interface Guest {
+  id: string;
+  displayName: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** The drivers-list/detail view model: identity first, then trip history,
+ * then rollups (design review Issue 1, 1A — disputes reference trips, not
+ * averages). `possibleDuplicate` is a hint, never a claim of completeness —
+ * set only per the Phase 3 key-stability validation outcome. */
+export interface GuestTripSummary {
+  guest: Guest;
+  tripIds: string[];
+  firstSeenAt: number | null;
+  lastSeenAt: number | null;
+  possibleDuplicate: boolean;
+}
+
+// --- Phase 3: charging cost attribution -----------------------------------
+
+export type ChargeSessionKind = "ac_home" | "dc_fast";
+
+/** Every dollar amount on a charge session must carry one of these. Never
+ * a guessed price: an AC/home session with no configured $/kWh rate renders
+ * kWh-only (costUsd/costProvenance both null), it never falls back to a
+ * different provenance silently. */
+export type ChargeSessionCostProvenance = "invoice" | "rate" | "manual";
+
+/** Derived from DetailedChargeState transitions in vehicle_stats_history —
+ * distinct from the legacy `ChargingSession` above, which this replaces once
+ * derivation ships (kept additive; not removing ChargingSession here). A
+ * session is `gapAffected` when its window crossed a stream gap
+ * >= CHARGE_SESSION_GAP_MS (lib/owner/telemetry-policy.ts) rather than being
+ * silently merged or split. */
+export interface DerivedChargeSession {
+  id: string;
+  /** null = an unreconciled Tesla invoice outside any trip window; attaches
+   * to the vehicle only, never fabricated onto a trip. */
+  tripId: string | null;
+  vehicleId: string;
+  kind: ChargeSessionKind;
+  startedAt: number;
+  endedAt: number;
+  kWhAdded: number;
+  gapAffected: boolean;
+  costUsd: number | null;
+  costProvenance: ChargeSessionCostProvenance | null;
+}
+
+// --- Phase 6: immutable trip evidence packet ------------------------------
+//
+// No static payload type lives here. `onlyevs_trip_evidence_packets.payload`
+// is a worker-composed, versioned jsonb blob (services/onlyevs-worker/
+// index.ts's composeTripEvidencePacket) whose shape can legitimately differ
+// across a trip's own packet versions — a correction is a new row, never a
+// mutation of an earlier one (see that function's doc comment) — and across
+// packets composed before/after a payload field was added. An interface
+// here claiming to "mirror the row" would silently drift from what the
+// worker actually writes (it already had, twice, before this comment was
+// written) with nothing to catch it.
+//
+// components/owner/packet-evidence-card.tsx's ParsedEvidencePacket +
+// parseEvidencePacketPayload is the single source of truth for what a
+// packet looks like once read: every field is parsed defensively from
+// `unknown` and degrades independently to null/false rather than trusting a
+// static shape a jsonb column can drift from underneath it. NEVER add a
+// coordinate/lat-lng field anywhere in that parsing path — the packet is
+// deliberately safe to render anywhere owner-side (Inbox card, reminder
+// email); out-of-area is an occurrence count only, by design (Phase 6).
+
 // Re-exported so consumers of lib/owner/* don't need a second import from
 // lib/tesla just for the experience-level union used on Driver progress.
 export type { ExperienceLevel };

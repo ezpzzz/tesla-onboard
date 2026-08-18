@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useOwnerTenant } from "./OwnerTenantProvider";
 import { CalendarReviewQueue } from "./CalendarReviewQueue";
+import { PacketEvidenceQueue } from "./packet-evidence-card";
 import { useOwnerData } from "@/lib/owner/use-owner-data";
 import { vehicleWorkspaceScope, type VehicleWorkspaceScope } from "@/lib/owner/vehicle-repository";
 import {
@@ -250,6 +251,7 @@ export function OwnerInbox() {
         </section>
       ) : null}
       <CalendarReviewQueue vehicles={vehicles} confirmationEnabled={ONLYEVS_OPERATIONS_ENABLED} />
+      <PacketEvidenceQueue />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-semibold">Activity</h2>
         <Segmented
