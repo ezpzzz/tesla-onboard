@@ -129,8 +129,18 @@ const CONTEXT_ROW = {
   vin: "5YJ3E1EA7KF000001",
   shop_slug: "shop-1",
   granted_scopes: [] as string[],
+  region_base_url: "https://fleet-api.prd.na.vn.cloud.tesla.com",
   refresh_token_ciphertext: REFRESH_TOKEN_CIPHERTEXT,
 };
+
+// The pre-configure fleet_status() key probe (D2/D3) always runs before the
+// FIRST configure() for a VIN and always consumes one fetch call against
+// the region base -- every test below that reaches configure() must queue
+// this response first, or a later mock meant for configure() gets consumed
+// by the probe instead.
+function keyProbeResponse(totalNumberOfKeys = 1) {
+  return jsonResponse(200, { response: { vehicle_info: { [CONTEXT_ROW.vin]: { total_number_of_keys: totalNumberOfKeys } } } });
+}
 
 function baseHandler(overrides: Partial<Record<string, () => { rows: unknown[] } | undefined>> = {}) {
   return (sql: string) => {
@@ -168,9 +178,11 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
     const originalProxyUrl = process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL;
     process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = "";
     const { pool, queries } = makeFakePool(baseHandler());
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }),
-    );
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      // The pre-configure key probe (D2/D3) goes through the region base,
+      // which has nothing to do with the missing proxy under test here.
+      .mockResolvedValueOnce(keyProbeResponse());
 
     const now = Date.now();
     await processTelemetry(baseRow({ attempt_count: 3 }), pool);
@@ -195,9 +207,9 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
     const originalProxyUrl = process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL;
     process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = "";
     const { pool, queries } = makeFakePool(baseHandler());
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }),
-    );
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      .mockResolvedValueOnce(keyProbeResponse());
 
     const now = Date.now();
     await processTelemetry(baseRow({ attempt_count: 3 }), pool);
@@ -215,6 +227,7 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
     const { pool, queries } = makeFakePool(baseHandler());
     fetchMock
       .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      .mockResolvedValueOnce(keyProbeResponse())
       .mockResolvedValueOnce(
         jsonResponse(200, { response: { skipped_vehicles: [CONTEXT_ROW.vin] } }),
       );
@@ -258,6 +271,9 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
 
   it("classification is centralized behind one predicate", () => {
     expect(isDeploymentConfigTelemetryError(new TeslaTelemetryError("telemetry_proxy_not_configured", 0, false, null))).toBe(true);
+    // D4: after status()/remove() moved off the proxy onto region_base_url,
+    // a missing/invalid region base is the same class of deployment gap.
+    expect(isDeploymentConfigTelemetryError(new TeslaTelemetryError("telemetry_region_not_configured", 0, false, null))).toBe(true);
     expect(isDeploymentConfigTelemetryError(new TeslaTelemetryError("telemetry_vehicle_skipped", 422, false, null))).toBe(false);
     expect(isDeploymentConfigTelemetryError(new TeslaTelemetryError("tesla_telemetry_limit_reached", 409, true, null))).toBe(false);
     expect(isDeploymentConfigTelemetryError(new Error("plain error"))).toBe(false);

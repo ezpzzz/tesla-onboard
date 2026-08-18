@@ -62,6 +62,7 @@ const CONTEXT_ROW = {
   vin: "5YJ3E1EA7KF000001",
   shop_slug: "shop-1",
   granted_scopes: [] as string[],
+  region_base_url: "https://fleet-api.prd.na.vn.cloud.tesla.com",
   refresh_token_ciphertext: REFRESH_TOKEN_CIPHERTEXT,
 };
 
@@ -201,10 +202,13 @@ describe("processTelemetry -- removal retry cap (T: worker lane)", () => {
     expect(unconfirmedIndex).toBeGreaterThan(disconnectedIndex);
   });
 
-  it("never throws even when the Tesla command proxy is unreachable/unconfigured at the cap", async () => {
+  it("never throws even when remove() fails outright at the cap (D4: the proxy is no longer even on remove()'s path -- this now exercises a bare fetch failure instead)", async () => {
     const originalProxyUrl = process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL;
     process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = "";
     const { pool, queries } = makeFakePool(baseHandler());
+    // Only the token exchange is mocked -- remove()'s own fetch (now against
+    // region_base_url, not the proxy) has nothing queued and fails, proving
+    // the cap-driven completion path still can't throw regardless of cause.
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }));
 
     await expect(
@@ -213,5 +217,24 @@ describe("processTelemetry -- removal retry cap (T: worker lane)", () => {
 
     expect(findQuery(queries, "delete from public.onlyevs_telemetry_enrollments")).toBeDefined();
     process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = originalProxyUrl;
+  });
+
+  it("D4: remove() at the cap succeeds outright with NO proxy configured at all, since it never uses one", async () => {
+    const originalProxyUrl = process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL;
+    process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = "";
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse(200, {}, { "x-txid": "tx-remove" }));
+
+    await processTelemetry(baseRow({ attempt_count: 0 }), pool);
+    process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = originalProxyUrl;
+
+    // Confirmed-with-Tesla success path (not the cap-driven fallback):
+    // remove() actually succeeded, so the audit event says so.
+    const audit = findQuery(queries, "'telemetry_remove'");
+    expect(audit).toBeDefined();
+    expect(audit!.sql).toContain("'success'");
+    expect(findQuery(queries, "delete from public.onlyevs_telemetry_enrollments")).toBeDefined();
   });
 });

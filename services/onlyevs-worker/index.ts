@@ -22,8 +22,11 @@ import {
   haversineMiles,
   HISTORY_RETENTION_MS,
   LOCATION_RETENTION_MS,
+  TELEMETRY_ACTIVE_POLL_INTERVAL_MS,
   TELEMETRY_CONFIG_ERROR_RETRY_MS,
+  TELEMETRY_MISSING_KEY_RETRY_MS,
   TELEMETRY_REMOVAL_MAX_ATTEMPTS,
+  TELEMETRY_UNSUPPORTED_FIRMWARE_RETRY_MS,
   validCoordinates,
 } from "@/lib/owner/telemetry-policy";
 import { resolveVehiclePolicyPct } from "@/lib/owner/derive";
@@ -147,6 +150,7 @@ interface TelemetryContext extends TeslaCredentialContext {
   vehicle_id: string;
   vin: string;
   granted_scopes: string[];
+  region_base_url: string;
 }
 
 interface CalendarContext extends TeslaCredentialContext {
@@ -1215,7 +1219,7 @@ async function processGrant(grant: GrantRow) {
 async function telemetryContext(client: PoolClient, row: TelemetryRow): Promise<TelemetryContext | null> {
   const result = await client.query<TelemetryContext>(`
     select e.workspace_id, e.vehicle_id, e.integration_id, v.vin,
-           i.shop_slug, i.granted_scopes, c.refresh_token_ciphertext
+           i.shop_slug, i.granted_scopes, i.region_base_url, c.refresh_token_ciphertext
     from public.onlyevs_telemetry_enrollments e
     join public.onlyevs_vehicles v
       on v.workspace_id = e.workspace_id and v.id = e.vehicle_id
@@ -1258,16 +1262,46 @@ async function finishTeslaDisconnect(client: PoolClient, integrationId: string) 
 }
 
 /** True for a telemetry failure caused purely by this deployment's own
- * unset/invalid telemetry-proxy config -- never a property of the vehicle
- * (TeslaTelemetryClient's constructor, lib/owner/tesla-telemetry-client.ts).
- * Single predicate so processTelemetry's catch block has one place to
- * decide "deployment gap, not a vehicle failure" instead of an inline
- * string compare duplicated across the status/next_action_at/attempt_count
- * decisions below. See TELEMETRY_CONFIG_ERROR_RETRY_MS's comment
- * (lib/owner/telemetry-policy.ts) for why this class gets its own short
- * retry instead of the vehicle-specific 365-day park. */
+ * unset/invalid telemetry-proxy or region-base-url config -- never a
+ * property of the vehicle (TeslaTelemetryClient's constructor/resolveBase,
+ * lib/owner/tesla-telemetry-client.ts). Single predicate so processTelemetry's
+ * catch block has one place to decide "deployment gap, not a vehicle
+ * failure" instead of an inline string compare duplicated across the
+ * status/next_action_at/attempt_count decisions below. See
+ * TELEMETRY_CONFIG_ERROR_RETRY_MS's comment (lib/owner/telemetry-policy.ts)
+ * for why this class gets its own short retry instead of the
+ * vehicle-specific 365-day park. `telemetry_region_not_configured` joined
+ * this predicate with D4 (tesla-api-alignment-20260818.md): before that fix,
+ * a missing `ONLYEVS_TESLA_COMMAND_PROXY_URL` was the only way remove()
+ * could fail on a deployment-config gap; after D4, remove()/status() route
+ * through `onlyevs_integrations.region_base_url` instead, so a missing/
+ * invalid value there is now that same class of gap for those two calls. */
 export function isDeploymentConfigTelemetryError(error: unknown): boolean {
-  return error instanceof TeslaTelemetryError && error.code === "telemetry_proxy_not_configured";
+  return error instanceof TeslaTelemetryError
+    && (error.code === "telemetry_proxy_not_configured" || error.code === "telemetry_region_not_configured");
+}
+
+/** `skipped_vehicles` reason `missing_key` -- self-healing the instant the
+ * owner pairs the virtual key. Must never be presented or stored as
+ * 'unsupported' with the vehicle-permanent 365-day park (SHARED CONTRACT,
+ * tesla-api-alignment-20260818.md D2). */
+export function isMissingKeyTelemetryError(error: unknown): boolean {
+  return error instanceof TeslaTelemetryError && error.code === "telemetry_missing_key";
+}
+
+/** `skipped_vehicles` reason `unsupported_firmware` -- needs a Tesla
+ * software update; long backoff, but explicitly NOT the permanent
+ * `unsupported_hardware` park (SHARED CONTRACT, D2). */
+export function isUnsupportedFirmwareTelemetryError(error: unknown): boolean {
+  return error instanceof TeslaTelemetryError && error.code === "telemetry_unsupported_firmware";
+}
+
+/** `skipped_vehicles` reason `max_configs` -- another third-party app holds
+ * this vehicle's telemetry slots; owner-actionable, and reuses the
+ * pre-existing `tesla_telemetry_limit_reached` / 'unsupported' state the UI
+ * already renders for a limit-reached vehicle (SHARED CONTRACT, D2). */
+export function isMaxConfigsTelemetryError(error: unknown): boolean {
+  return error instanceof TeslaTelemetryError && error.code === "telemetry_max_configs";
 }
 
 export async function processTelemetry(row: TelemetryRow, workerPool: Pool = pool) {
@@ -1293,7 +1327,10 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
     const tokens = await refreshTeslaToken(context.refresh_token_ciphertext, context);
     await persistRotatedTeslaToken(client, context, tokens);
     const proxyUrl = process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL?.trim() ?? "";
-    const tesla = new TeslaTelemetryClient(proxyUrl, tokens.access_token!);
+    const tesla = new TeslaTelemetryClient(
+      { proxyUrl, regionBaseUrl: context.region_base_url },
+      tokens.access_token!,
+    );
 
     if (row.status === "removal_requested") {
       const requestId = await tesla.remove(context.vin);
@@ -1312,23 +1349,63 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
     if (configHash !== row.applied_config_hash) {
       await client.query(`update public.onlyevs_telemetry_enrollments set status = 'configuring'
         where workspace_id = $1 and vehicle_id = $2`, [row.workspace_id, row.vehicle_id]);
+
+      // Tesla's own best-practice guidance: check the virtual key is
+      // present before sending a signed configure() command, so a missing
+      // key is never a billed, rejected command
+      // (tesla-api-alignment-20260818.md D2/D3). Scoped to this
+      // enrollment's very first configure() attempt only --
+      // applied_config_hash is still null the first time through, so a
+      // later reconfigure (e.g. the guest's location-consent toggle
+      // changing the requested fields) does not re-spend this call.
+      let keyProbeTotal: number | null = null;
+      if (row.applied_config_hash === null) {
+        const probe = await tesla.fleetStatus(context.vin);
+        keyProbeTotal = probe.totalNumberOfKeys;
+      }
+      if (keyProbeTotal === 0) {
+        throw new TeslaTelemetryError("telemetry_missing_key", 422, false, null);
+      }
+
       const requestId = await tesla.configure(context.vin, config);
       await client.query(`update public.onlyevs_telemetry_enrollments set status = 'pending_sync',
         location_enabled = $3, applied_config_hash = $4, last_provider_request_id = $5,
-        provider_state = '{}', last_error_code = null, next_action_at = now() + interval '1 minute',
+        provider_state = $6::jsonb, last_error_code = null, next_action_at = now() + interval '1 minute',
         claimed_by = null, claim_expires_at = null
         where workspace_id = $1 and vehicle_id = $2`,
-      [row.workspace_id, row.vehicle_id, locationEnabled, configHash, requestId]);
+      [
+        row.workspace_id,
+        row.vehicle_id,
+        locationEnabled,
+        configHash,
+        requestId,
+        JSON.stringify(keyProbeTotal !== null ? { totalNumberOfKeys: keyProbeTotal } : {}),
+      ]);
       return;
     }
 
     const provider = await tesla.status(context.vin);
+    // Active/pending_sync is derived from `synced` alone -- never from a
+    // `key_paired`-style field on this response, per the SHARED CONTRACT
+    // (tesla-api-alignment-20260818.md): `GET fleet_telemetry_config`
+    // documents only `synced` and `limit_reached`. Virtual-key pairing
+    // state comes exclusively from the fleetStatus() probe above and/or a
+    // 'telemetry_missing_key' skip reason.
     const status = provider.state.limitReached
       ? "unsupported"
-      : provider.state.synced && provider.state.keyPaired !== false ? "active" : "pending_sync";
+      : provider.state.synced ? "active" : "pending_sync";
+    // D1 (tesla-api-alignment-20260818.md): once active, back the poll off
+    // to the long interval -- an unconditional short poll here is what cost
+    // 288 billable calls/day/vehicle against a $10 account billing limit
+    // whose breach removes Fleet Telemetry configurations and does not
+    // restore them. Every non-active state (including limit-reached, which
+    // can resolve the moment the owner frees a slot in the Tesla app) keeps
+    // the existing short cadence unchanged. Mirrors processDomain's
+    // identical active/inactive next_check_at split above.
     await client.query(`update public.onlyevs_telemetry_enrollments set status = $3,
       provider_state = $4, last_provider_request_id = $5, last_error_code = $6,
-      next_action_at = now() + interval '5 minutes', claimed_by = null, claim_expires_at = null
+      next_action_at = case when $3 = 'active' then now() + ($7)::interval else now() + interval '5 minutes' end,
+      claimed_by = null, claim_expires_at = null
       where workspace_id = $1 and vehicle_id = $2`, [
       row.workspace_id,
       row.vehicle_id,
@@ -1336,6 +1413,7 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
       JSON.stringify(provider.state),
       provider.requestId,
       provider.state.limitReached ? "tesla_telemetry_limit_reached" : null,
+      `${TELEMETRY_ACTIVE_POLL_INTERVAL_MS} milliseconds`,
     ]);
   } catch (error) {
     // A 'removal_requested' enrollment that has exhausted its retry budget
@@ -1430,11 +1508,63 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
       ]).catch(() => undefined);
       return;
     }
+    if (isMissingKeyTelemetryError(error)) {
+      // Self-healing (D2/SHARED CONTRACT): status stays 'error' -- 'error'
+      // already covers >1 distinct owner-facing cause, same as the
+      // deployment-config-blocked branch above -- rather than 'unsupported',
+      // and attempt_count is not ratcheted, since there is no
+      // permanent-failure cap to approach here: the owner pairing the key
+      // resolves this on its own schedule, not the worker's.
+      await client.query(`update public.onlyevs_telemetry_enrollments set status = 'error',
+        last_error_code = 'telemetry_missing_key', next_action_at = now() + ($3)::interval,
+        claimed_by = null, claim_expires_at = null where workspace_id = $1 and vehicle_id = $2`, [
+        row.workspace_id,
+        row.vehicle_id,
+        `${TELEMETRY_MISSING_KEY_RETRY_MS} milliseconds`,
+      ]).catch(() => undefined);
+      return;
+    }
+    if (isUnsupportedFirmwareTelemetryError(error)) {
+      // Needs a Tesla-pushed firmware update, not permanent -- long
+      // backoff, never the 365-day telemetry_unsupported_hardware park
+      // below (D2/SHARED CONTRACT).
+      await client.query(`update public.onlyevs_telemetry_enrollments set status = 'error',
+        last_error_code = 'telemetry_unsupported_firmware', next_action_at = now() + ($3)::interval,
+        claimed_by = null, claim_expires_at = null where workspace_id = $1 and vehicle_id = $2`, [
+        row.workspace_id,
+        row.vehicle_id,
+        `${TELEMETRY_UNSUPPORTED_FIRMWARE_RETRY_MS} milliseconds`,
+      ]).catch(() => undefined);
+      return;
+    }
+    if (isMaxConfigsTelemetryError(error)) {
+      // Owner-actionable (another third-party app holds this vehicle's
+      // telemetry slots) -- reuses the exact 'unsupported' +
+      // 'tesla_telemetry_limit_reached' state already rendered for
+      // limit-reached (the GET status() path above), so this needs no new
+      // UI-facing state, and the same short cadence since freeing a slot
+      // elsewhere can resolve it at any time (D2/SHARED CONTRACT).
+      await client.query(`update public.onlyevs_telemetry_enrollments set status = 'unsupported',
+        last_error_code = 'tesla_telemetry_limit_reached', next_action_at = now() + interval '5 minutes',
+        claimed_by = null, claim_expires_at = null where workspace_id = $1 and vehicle_id = $2`, [
+        row.workspace_id,
+        row.vehicle_id,
+      ]).catch(() => undefined);
+      return;
+    }
     const reauth = Boolean((error as Error & { reauth?: boolean }).reauth);
     const retryable = error instanceof TeslaTelemetryError ? error.retryable : !reauth;
     const retryStatus = row.status === "removal_requested"
       ? "removal_requested"
       : row.applied_config_hash ? "pending_sync" : "requested";
+    // 'telemetry_unsupported_hardware' (D2/SHARED CONTRACT: genuinely
+    // permanent for this car) joins the pre-existing 'telemetry_vehicle_skipped'
+    // fallback (an unrecognized-but-present skip reason) in the one
+    // vehicle-specific class that still gets the 365-day park below --
+    // missing_key/unsupported_firmware/max_configs all return above this
+    // point precisely so they never reach it.
+    const permanentSkip = error instanceof TeslaTelemetryError
+      && (error.code === "telemetry_vehicle_skipped" || error.code === "telemetry_unsupported_hardware");
     if (reauth) {
       await client.query("update public.onlyevs_integrations set status = 'reauth_required', last_error_code = 'tesla_refresh_failed' where id = $1", [row.integration_id]).catch(() => undefined);
     }
@@ -1444,7 +1574,7 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
       claimed_by = null, claim_expires_at = null where workspace_id = $1 and vehicle_id = $2`, [
       row.workspace_id,
       row.vehicle_id,
-      reauth ? "error" : retryable ? retryStatus : error instanceof TeslaTelemetryError && error.code === "telemetry_vehicle_skipped" ? "unsupported" : "error",
+      reauth ? "error" : retryable ? retryStatus : permanentSkip ? "unsupported" : "error",
       error instanceof Error ? error.message.slice(0, 160) : "telemetry_worker_failure",
     ]).catch(() => undefined);
   } finally {

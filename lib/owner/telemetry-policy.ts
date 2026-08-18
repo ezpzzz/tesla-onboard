@@ -101,6 +101,46 @@ export const TELEMETRY_REMOVAL_MAX_ATTEMPTS = 20;
  * while the deployment gap remains unfixed. */
 export const TELEMETRY_CONFIG_ERROR_RETRY_MS = 15 * 60 * 1_000;
 
+/** Once an enrollment reaches 'active', the worker's status() poll backs
+ * off to this interval instead of the short one used for every other state
+ * -- tesla-api-alignment-20260818.md D1: the prior unconditional 5-minute
+ * poll cost 288 billable calls/day/vehicle against a $10 account billing
+ * limit, and Tesla's billing-and-limits doc states that exceeding that
+ * limit suspends the API AND removes Fleet Telemetry configurations, which
+ * "will not be restored" -- so a steady-state active poll that is too
+ * frequent can silently and permanently destroy the very enrollment it is
+ * checking on. Mirrors the identical active/inactive split
+ * services/onlyevs-worker/index.ts's processDomain already uses at
+ * next_check_at (12 hours chosen over that function's 365 days because an
+ * active telemetry enrollment, unlike a verified domain, can still regress
+ * -- e.g. the owner unpairs the virtual key -- and the report calls out 12
+ * hours as materially cheaper than the 5-minute cadence while still
+ * noticing that within a business day). Every other enrollment state keeps
+ * the pre-existing 5-minute cadence unchanged. */
+export const TELEMETRY_ACTIVE_POLL_INTERVAL_MS = 12 * 60 * 60 * 1_000;
+
+/** Retry backoff for a `skipped_vehicles` reason of `missing_key`
+ * (surfaced as `TeslaTelemetryError` code `telemetry_missing_key`) --
+ * tesla-api-alignment-20260818.md D2/SHARED CONTRACT: this means the owner
+ * simply has not paired the application's virtual key to the vehicle yet.
+ * It is fully self-healing the moment they do, so it must retry on an
+ * hours-scale interval and must NEVER be presented or stored as
+ * 'unsupported' with the vehicle-permanent 365-day park (contrast
+ * `telemetry_unsupported_hardware`, which keeps that park). Hours, not the
+ * short 5-minute cadence, because pairing is a manual step a guest/owner
+ * takes in the Tesla app on their own schedule -- polling every 5 minutes
+ * for that buys nothing but spend. */
+export const TELEMETRY_MISSING_KEY_RETRY_MS = 4 * 60 * 60 * 1_000;
+
+/** Retry backoff for a `skipped_vehicles` reason of `unsupported_firmware`
+ * (`TeslaTelemetryError` code `telemetry_unsupported_firmware`) --
+ * tesla-api-alignment-20260818.md D2: the vehicle needs a Tesla-pushed
+ * software update, which is genuinely out of the owner's and our control
+ * and can take weeks, but is NOT a permanent condition the way
+ * `telemetry_unsupported_hardware` is -- so this gets a long backoff, never
+ * the 365-day hardware park. */
+export const TELEMETRY_UNSUPPORTED_FIRMWARE_RETRY_MS = 14 * 24 * 60 * 60 * 1_000;
+
 export interface TelemetryLocationEnvelope {
   vin: string;
   observedAt: number;

@@ -62,13 +62,22 @@ const CONTEXT_ROW = {
   vin: "5YJ3E1EA7KF000001",
   shop_slug: "shop-1",
   granted_scopes: [] as string[],
+  region_base_url: "https://fleet-api.prd.na.vn.cloud.tesla.com",
   refresh_token_ciphertext: REFRESH_TOKEN_CIPHERTEXT,
 };
 
-function baseHandler() {
+// D4 (tesla-api-alignment-20260818.md): remove() now calls the per-integration
+// region_base_url, not the proxy -- so the deployment-config gap that can
+// strand a disconnect is a missing/invalid region_base_url, not a missing
+// proxy. This context row reproduces exactly that gap.
+const CONTEXT_ROW_NO_REGION_BASE = { ...CONTEXT_ROW, region_base_url: "" };
+
+function baseHandler(overrides: Partial<Record<string, () => { rows: unknown[] } | undefined>> = {}) {
   return (sql: string) => {
     if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
-    if (sql.includes("from public.onlyevs_telemetry_enrollments e")) return { rows: [CONTEXT_ROW] };
+    if (sql.includes("from public.onlyevs_telemetry_enrollments e")) {
+      return overrides.context ? overrides.context() : { rows: [CONTEXT_ROW] };
+    }
     if (sql.includes("update private.onlyevs_integration_credentials")) return { rows: [] };
     if (sql.includes("update public.onlyevs_telemetry_enrollments")) return { rows: [] };
     if (sql.includes("delete from public.onlyevs_telemetry_enrollments")) return { rows: [] };
@@ -98,16 +107,16 @@ beforeEach(() => {
 });
 
 describe("processTelemetry -- removal_requested must survive an unconfigured deployment (defect 4, T: worker lane)", () => {
-  it("below the removal cap: a deployment-config error (telemetry_proxy_not_configured) keeps status='removal_requested', never demotes it to 'error'", async () => {
-    const originalProxyUrl = process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL;
-    process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = "";
-    const { pool, queries } = makeFakePool(baseHandler());
+  it("below the removal cap: a deployment-config error (telemetry_region_not_configured) keeps status='removal_requested', never demotes it to 'error'", async () => {
+    // D4: remove() now calls region_base_url, not the proxy -- so the
+    // deployment-config gap this test pins is a missing region_base_url on
+    // the integration row, not a missing ONLYEVS_TESLA_COMMAND_PROXY_URL.
+    const { pool, queries } = makeFakePool(baseHandler({ context: () => ({ rows: [CONTEXT_ROW_NO_REGION_BASE] }) }));
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }),
     );
 
     await processTelemetry(baseRow({ attempt_count: TELEMETRY_REMOVAL_MAX_ATTEMPTS - 2 }), pool);
-    process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = originalProxyUrl;
 
     // The row must never be written as a plain 'error' row -- that is
     // exactly the marker-loss bug (stranded 'disconnecting' integration,
@@ -118,7 +127,7 @@ describe("processTelemetry -- removal_requested must survive an unconfigured dep
     const update = findQuery(queries, /update public\.onlyevs_telemetry_enrollments set status = /);
     expect(update).toBeDefined();
     expect(update!.sql).toContain("status = 'removal_requested'");
-    expect(update!.params).toContain("telemetry_proxy_not_configured");
+    expect(update!.params).toContain("telemetry_region_not_configured");
     expect(update!.sql).toContain("attempt_count = attempt_count + 1");
 
     // Must not have been deleted / disconnected -- the row survives to
@@ -130,15 +139,12 @@ describe("processTelemetry -- removal_requested must survive an unconfigured dep
   });
 
   it("at/above the removal cap: a deployment-config error still reaches the existing cap-driven local-completion path (removal_requested is never lost before the cap can act on it)", async () => {
-    const originalProxyUrl = process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL;
-    process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = "";
-    const { pool, queries } = makeFakePool(baseHandler());
+    const { pool, queries } = makeFakePool(baseHandler({ context: () => ({ rows: [CONTEXT_ROW_NO_REGION_BASE] }) }));
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }),
     );
 
     await processTelemetry(baseRow({ attempt_count: TELEMETRY_REMOVAL_MAX_ATTEMPTS - 1 }), pool);
-    process.env.ONLYEVS_TESLA_COMMAND_PROXY_URL = originalProxyUrl;
 
     const del = findQuery(queries, "delete from public.onlyevs_telemetry_enrollments");
     expect(del).toBeDefined();
