@@ -180,42 +180,64 @@ async function parseRawAttachments(rawMessage: Buffer): Promise<PostalMimeAttach
 }
 
 /**
- * Deterministic uuid-shaped id derived from a sha256 hex digest (first 32
- * hex chars, reformatted 8-4-4-4-12). Used so a retried
- * storeEmailAttachment call for byte-identical content produces the exact
- * same attachment id and r2 object key as the first attempt -- see that
- * function's comment for why this is required for the `on conflict` guard
- * (and the AAD it feeds) to actually mean anything on retry.
+ * Deterministic uuid-shaped id (sha256 of the full identity, first 32 hex
+ * chars, reformatted 8-4-4-4-12).
+ *
+ * PK-collision fix (auditor-verified, see git history for the bug report):
+ * a prior version derived this id from `sha256` alone, with no workspace or
+ * message component. Turo emails routinely share byte-identical attachment
+ * bytes (template/logo images embedded as inline cid parts) -- ordinary,
+ * expected duplication, not an adversarial input -- so two DIFFERENT
+ * inbound messages produced the SAME attachment id while the R2 key (which
+ * already embedded inboundEmailId) differed, defeating the `on conflict`
+ * guard below and raising an uncaught PK violation that rolled back the
+ * whole parse transaction, including candidate creation. The id must
+ * therefore be derived from the full identity of "this attachment part": the
+ * workspace, the message it came from, its position within that message
+ * (attachmentSeq, so two byte-identical parts *in the same message* --
+ * e.g. the same logo referenced by two different cids -- still get distinct
+ * ids/rows instead of colliding with each other), and its content hash.
+ * Two different messages sharing identical bytes now yield different ids
+ * (different inboundEmailId); the same content in two different workspaces
+ * now yields different ids (different workspaceId); a crash-retry of the
+ * SAME message reproduces the exact same id for each of its parts, because
+ * parseRawAttachments re-parses the same raw bytes into the same ordered
+ * attachment list every time (see that function's own comment).
  */
-function deterministicAttachmentId(sha256: string): string {
-  const hex = sha256.slice(0, 32);
+function deterministicAttachmentId(workspaceId: string, inboundEmailId: string, attachmentSeq: number, sha256: string): string {
+  const hex = createHash("sha256").update(`${workspaceId}:${inboundEmailId}:${attachmentSeq}:${sha256}`).digest("hex").slice(0, 32);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 async function storeEmailAttachment(
   client: PoolClient,
   attachment: PostalMimeAttachment,
-  ctx: { workspaceId: string; messageIndexId: string; inboundEmailId: string },
+  ctx: { workspaceId: string; messageIndexId: string; inboundEmailId: string; attachmentSeq: number },
 ): Promise<void> {
   const contentBytes = toBuffer(attachment.content);
   const sha256 = createHash("sha256").update(contentBytes).digest("hex");
-  // Both the id and the r2 object key are derived from the content hash
-  // (rather than a fresh randomUUID) so a crash-retry of this same message
-  // reproduces the exact same key -- the `on conflict (workspace_id,
-  // r2_object_key) do nothing` guard below can then actually fire (it never
-  // could when the key embedded a fresh random id every call), and the R2
-  // PUT on retry overwrites the same object with freshly-encrypted but
-  // byte-identical plaintext under the same AAD, rather than orphaning a
-  // second object no row ever references.
-  const attachmentId = deterministicAttachmentId(sha256);
-  const r2ObjectKey = `onlyevs-email-attachments/${ctx.workspaceId}/${ctx.inboundEmailId}/${sha256}.evmail`;
+  // Id and r2 object key are both derived from the same full identity
+  // (workspace + message + in-message position + content hash) --
+  // deterministicAttachmentId's own comment explains why each component is
+  // required. Because the key includes exactly the same components as the
+  // id, an id collision and a (workspace_id, r2_object_key) collision can
+  // only ever be the same logical row (a crash-retry of this same
+  // attachment part), never two distinct logical attachments racing for one
+  // slot -- which is what makes `on conflict (id) do nothing` below a
+  // provably safe arbiter rather than an assumption. The
+  // (workspace_id, r2_object_key) unique constraint stays in the schema as
+  // a belt: if the two derivations ever drifted apart, that constraint
+  // would raise loudly instead of silently allowing a second row over the
+  // same R2 object.
+  const attachmentId = deterministicAttachmentId(ctx.workspaceId, ctx.inboundEmailId, ctx.attachmentSeq, sha256);
+  const r2ObjectKey = `onlyevs-email-attachments/${ctx.workspaceId}/${ctx.inboundEmailId}/${ctx.attachmentSeq}-${sha256}.evmail`;
   const aad = buildAttachmentAad({ workspaceId: ctx.workspaceId, messageIndexId: ctx.messageIndexId, attachmentId, r2ObjectKey });
   await r2Put(r2ObjectKey, encryptEmailBytes(contentBytes, aad));
   await client.query(
     `insert into private.onlyevs_email_attachments
        (id, workspace_id, message_index_id, filename, content_type, size_bytes, content_id, sha256, r2_object_key)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-     on conflict (workspace_id, r2_object_key) do nothing`,
+     on conflict (id) do nothing`,
     [
       attachmentId, ctx.workspaceId, ctx.messageIndexId,
       attachment.filename ?? null, attachment.mimeType ?? null, contentBytes.byteLength,
@@ -237,16 +259,18 @@ interface MessageIndexUpsertInput {
 /**
  * Idempotent by `inbound_email_id` (the table's own unique constraint) --
  * the parse job (T8, new mail) and the reconciler (T9, already-captured
- * mail) both call this, and either can safely race or retry the other
- * without duplicating a row. Attachments are extracted from the *same* raw
- * message every call; re-running this for a message that already has
- * attachment rows produces a second set of (harmlessly orphaned, since
- * `r2_object_key` is sha256-deterministic over the attachment's own bytes --
- * see deterministicAttachmentId/storeEmailAttachment above -- a byte-
- * identical re-run reproduces the exact same key, so "second set" only
- * happens when the content genuinely differs) R2 objects rather than
- * duplicate rows -- `on conflict (workspace_id, r2_object_key) do nothing`
- * guards the row, not the object. See T9's own idempotency note: the
+ * mail) both call this -- and this is the ONLY call site that loops over
+ * parsed attachments into storeEmailAttachment, so both paths derive
+ * attachment ids/keys identically by construction; there is nowhere for a
+ * second, divergent derivation to live. Either caller can safely race or
+ * retry the other without duplicating a row. Attachments are extracted from
+ * the *same* raw message every call, in the same order (parseRawAttachments
+ * re-parses identical bytes deterministically), so a re-run for a message
+ * that already has attachment rows reproduces the exact same
+ * (id, r2_object_key) pair per attachment position --
+ * `on conflict (id) do nothing` (see storeEmailAttachment's own comment for
+ * why that arbiter is safe) makes the re-run a genuine no-op, not a second
+ * row or a second orphaned R2 object. See T9's own idempotency note: the
  * reconciler's claim query only ever selects inbound rows that still lack an
  * index row, so this whole function runs at most once per message under
  * normal operation; the only way to re-run it is a mid-transaction crash
@@ -284,8 +308,15 @@ async function upsertEmailMessageIndexAndAttachments(client: PoolClient, input: 
     ],
   );
   const messageIndexId = indexRow.rows[0]!.id;
-  for (const attachment of attachments) {
-    await storeEmailAttachment(client, attachment, { workspaceId: input.workspaceId, messageIndexId, inboundEmailId: input.inboundEmailId });
+  // attachmentSeq is this attachment part's position in the parsed list --
+  // required so two byte-identical parts within the SAME message (a cid
+  // image referenced twice, sent as two separate parts) get distinct ids
+  // and R2 keys instead of colliding with each other; see
+  // deterministicAttachmentId's comment.
+  for (const [attachmentSeq, attachment] of attachments.entries()) {
+    await storeEmailAttachment(client, attachment, {
+      workspaceId: input.workspaceId, messageIndexId, inboundEmailId: input.inboundEmailId, attachmentSeq,
+    });
   }
 }
 

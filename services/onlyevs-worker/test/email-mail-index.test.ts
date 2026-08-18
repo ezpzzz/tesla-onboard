@@ -174,6 +174,48 @@ function rawMimeWithAttachment(): Buffer {
   return Buffer.from(message, "utf8");
 }
 
+/** A multipart/mixed raw MIME message with TWO attachment parts carrying
+ * byte-identical content but distinct Content-ID headers -- the "same logo
+ * referenced by two different cids in one message" case (mandated test (4)
+ * for the attachment PK-collision fix). */
+function rawMimeWithTwoIdenticalAttachments(): Buffer {
+  const boundary = "TESTBOUNDARY456";
+  const attachmentBase64 = Buffer.from("fake-pdf-bytes-for-test").toString("base64");
+  const message = [
+    "From: Turo <noreply@mail.turo.com>",
+    "To: proxy@mail.evhost.app",
+    "Subject: Riley's trip with your Tesla Model 3 is booked!",
+    "Date: Sat, 15 Aug 2026 12:00:00 +0000",
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=\"utf-8\"",
+    "",
+    "Your trip is confirmed.",
+    "",
+    `--${boundary}`,
+    "Content-Type: image/png; name=\"logo.png\"",
+    "Content-Disposition: inline; filename=\"logo.png\"",
+    "Content-ID: <logo-a@turo>",
+    "Content-Transfer-Encoding: base64",
+    "",
+    attachmentBase64,
+    "",
+    `--${boundary}`,
+    "Content-Type: image/png; name=\"logo.png\"",
+    "Content-Disposition: inline; filename=\"logo.png\"",
+    "Content-ID: <logo-b@turo>",
+    "Content-Transfer-Encoding: base64",
+    "",
+    attachmentBase64,
+    "",
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+  return Buffer.from(message, "utf8");
+}
+
 function rawMimeNoAttachment(): Buffer {
   return Buffer.from(
     [
@@ -387,6 +429,164 @@ describe("processParseJob — T8 mail index + attachments, candidate regression 
     expect(indexInsert).toBeDefined();
     expect(indexInsert!.params[8]).toBe(false); // has_attachments
     expect(s3State.putCalls).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Attachment PK-collision fix (auditor-verified): a prior version derived
+// the attachment id from content bytes alone (deterministicAttachmentId
+// (sha256)) while the R2 key embedded inboundEmailId -- two messages
+// sharing byte-identical attachment bytes (the NORMAL case: every Turo
+// email shares template/logo images) produced the SAME id but DIFFERENT
+// keys, so the `on conflict` guard could never fire and a genuine PK
+// violation rolled back the whole parse transaction. These tests exercise
+// the real processParseJob -> storeEmailAttachment path (no mocking of the
+// derivation itself) and assert on the actual ids/keys/R2 puts it produced.
+// ===========================================================================
+
+describe("attachment identity — PK-collision fix", () => {
+  const ALIAS_HASH = "alias-hash-1";
+
+  /** Generalized version of the T8 describe block's setUpSuccessfulParse,
+   * parameterized by workspace/inbound id so each test can vary exactly the
+   * dimension it's proving distinguishes attachment identity. */
+  function setUpParse(opts: { workspaceId: string; inboundId: string; rawMessage: Buffer; manifest: NormalizedEmailManifest }) {
+    const built = buildEncryptedEnvelope({
+      rawMessage: opts.rawMessage, manifest: opts.manifest, inboundId: opts.inboundId, aliasHash: ALIAS_HASH,
+      objectKey: `objects/${opts.inboundId}.evmail`,
+    });
+    s3State.get = () => built.envelope;
+
+    const { client, calls } = makeFakeClient([
+      {
+        match: "select e.*, a.alias_hash from public.onlyevs_inbound_emails e join private.onlyevs_email_aliases a",
+        handler: () => ({
+          rows: [{
+            id: opts.inboundId, workspace_id: opts.workspaceId, integration_id: "integration-1",
+            accepted_alias_revision: "1", raw_sha256: built.rawSha256, normalized_sha256: built.normalizedSha256,
+            ciphertext_sha256: built.ciphertextSha256, r2_object_key: `objects/${opts.inboundId}.evmail`,
+            kek_version: built.kekVersion, alias_hash: ALIAS_HASH,
+          }],
+        }),
+      },
+      { match: "select i.selected_calendar_timezone", handler: () => ({ rows: [] }) },
+      {
+        match: "insert into public.onlyevs_email_candidates(workspace_id,integration_id,inbound_email_id,reservation_id,event_type,proposed_state,blocker_codes,state,occurred_at)",
+        handler: () => ({ rows: [{ id: `candidate-${opts.inboundId}` }] }),
+      },
+      {
+        match: "select shop_slug from public.onlyevs_email_integrations where id=$1 and workspace_id=$2",
+        handler: () => ({ rows: [{ shop_slug: "demo-shop" }] }),
+      },
+      {
+        match: "insert into private.onlyevs_email_message_index",
+        handler: () => ({ rows: [{ id: `msgidx-${opts.inboundId}` }] }),
+      },
+      {
+        match: "insert into private.onlyevs_email_attachments",
+        handler: () => ({ rows: [], rowCount: 1 }),
+      },
+    ]);
+    const pool = { connect: vi.fn(async () => client), query: vi.fn() } as unknown as Pool;
+    return { pool, calls };
+  }
+
+  function attachmentInserts(calls: Array<{ sql: string; params: unknown[] }>) {
+    return calls
+      .filter((c) => c.sql.includes("insert into private.onlyevs_email_attachments"))
+      .map((c) => c.params as [string, string, string, string | null, string | null, number, string | null, string, string]);
+  }
+
+  it("(1) two different messages sharing byte-identical attachment bytes both parse successfully with distinct ids and R2 keys", async () => {
+    const manifest = baseManifest();
+    const rawMessage = rawMimeWithAttachment();
+
+    const a = setUpParse({ workspaceId: "ws-1", inboundId: "inbound-dup-a", rawMessage, manifest });
+    await processParseJob(a.pool, { id: "job-a", workspace_id: "ws-1", entity_id: "inbound-dup-a", attempt_count: 0, job_type: "parse" }, "worker-1");
+    const [idA, , , , , , , , keyA] = attachmentInserts(a.calls)[0]!;
+
+    const b = setUpParse({ workspaceId: "ws-1", inboundId: "inbound-dup-b", rawMessage, manifest });
+    await processParseJob(b.pool, { id: "job-b", workspace_id: "ws-1", entity_id: "inbound-dup-b", attempt_count: 0, job_type: "parse" }, "worker-1");
+    const [idB, , , , , , , , keyB] = attachmentInserts(b.calls)[0]!;
+
+    expect(idA).toBeDefined();
+    expect(idB).toBeDefined();
+    expect(idA).not.toBe(idB);
+    expect(keyA).not.toBe(keyB);
+    // Both parses succeeded and each PUT its own distinct R2 object -- the
+    // bug this pins produced a PK violation partway through the second
+    // parse's transaction instead of a second, independent row.
+    expect(s3State.putCalls).toHaveLength(2);
+    expect(s3State.putCalls[0]!.Key).not.toBe(s3State.putCalls[1]!.Key);
+  });
+
+  it("(2) a crash-retry of the same message reproduces the same attachment id and R2 key, and the insert no-ops via on conflict (id)", async () => {
+    const manifest = baseManifest();
+    const rawMessage = rawMimeWithAttachment();
+
+    const first = setUpParse({ workspaceId: "ws-1", inboundId: "inbound-retry", rawMessage, manifest });
+    await processParseJob(first.pool, { id: "job-1", workspace_id: "ws-1", entity_id: "inbound-retry", attempt_count: 0, job_type: "parse" }, "worker-1");
+    const [id1, , , , , , , , key1] = attachmentInserts(first.calls)[0]!;
+
+    // Simulate the retry: same inbound message re-run through the exact
+    // same parse path (a fresh fake pool/client, matching how a real retry
+    // reconnects, but the SAME workspace/inbound id and SAME raw bytes).
+    const retry = setUpParse({ workspaceId: "ws-1", inboundId: "inbound-retry", rawMessage, manifest });
+    await processParseJob(retry.pool, { id: "job-1-retry", workspace_id: "ws-1", entity_id: "inbound-retry", attempt_count: 1, job_type: "parse" }, "worker-1");
+    const attachmentInsertRetry = attachmentInserts(retry.calls)[0]!;
+    const [id2, , , , , , , , key2] = attachmentInsertRetry;
+
+    expect(id2).toBe(id1);
+    expect(key2).toBe(key1);
+    // The retry's insert statement text itself must use the safe arbiter.
+    const retryInsertSql = retry.calls.find((c) => c.sql.includes("insert into private.onlyevs_email_attachments"))!.sql;
+    expect(retryInsertSql).toContain("on conflict (id) do nothing");
+  });
+
+  it("(3) byte-identical attachment content in two different workspaces gets distinct attachment ids", async () => {
+    const manifest = baseManifest();
+    const rawMessage = rawMimeWithAttachment();
+
+    // Same inbound id is realistic here too (message ids are provider-
+    // global, not workspace-scoped) -- workspaceId is the only thing that
+    // varies, proving it alone is enough to separate identity.
+    const wsA = setUpParse({ workspaceId: "ws-A", inboundId: "inbound-shared", rawMessage, manifest });
+    await processParseJob(wsA.pool, { id: "job-wsA", workspace_id: "ws-A", entity_id: "inbound-shared", attempt_count: 0, job_type: "parse" }, "worker-1");
+    const [idA] = attachmentInserts(wsA.calls)[0]!;
+
+    const wsB = setUpParse({ workspaceId: "ws-B", inboundId: "inbound-shared", rawMessage, manifest });
+    await processParseJob(wsB.pool, { id: "job-wsB", workspace_id: "ws-B", entity_id: "inbound-shared", attempt_count: 0, job_type: "parse" }, "worker-1");
+    const [idB] = attachmentInserts(wsB.calls)[0]!;
+
+    expect(idA).not.toBe(idB);
+  });
+
+  it("(4) one message with the same bytes attached twice under two different cids parses without failing, producing two distinct attachment rows", async () => {
+    const manifest = baseManifest();
+    const rawMessage = rawMimeWithTwoIdenticalAttachments();
+
+    const setup = setUpParse({ workspaceId: "ws-1", inboundId: "inbound-two-cids", rawMessage, manifest });
+    await expect(
+      processParseJob(setup.pool, { id: "job-two-cids", workspace_id: "ws-1", entity_id: "inbound-two-cids", attempt_count: 0, job_type: "parse" }, "worker-1"),
+    ).resolves.toBeUndefined();
+
+    // Chosen behavior: NOT deduped -- each cid part gets its own row (see
+    // attachmentSeq in storeEmailAttachment's caller loop), so both cid
+    // references in the message HTML can resolve to a real attachment
+    // later. Two distinct rows, two distinct ids, two distinct R2 puts.
+    const inserts = attachmentInserts(setup.calls);
+    expect(inserts).toHaveLength(2);
+    const [idFirst, , , , , , contentIdFirst, , keyFirst] = inserts[0]!;
+    const [idSecond, , , , , , contentIdSecond, , keySecond] = inserts[1]!;
+    expect(idFirst).not.toBe(idSecond);
+    expect(keyFirst).not.toBe(keySecond);
+    expect(contentIdFirst).toBe("<logo-a@turo>");
+    expect(contentIdSecond).toBe("<logo-b@turo>");
+    expect(s3State.putCalls).toHaveLength(2);
+    expect(s3State.putCalls[0]!.Key).not.toBe(s3State.putCalls[1]!.Key);
+
+    const indexInsert = setup.calls.find((c) => c.sql.includes("insert into private.onlyevs_email_message_index"));
+    expect(indexInsert!.params[8]).toBe(true); // has_attachments
   });
 });
 
