@@ -10,6 +10,7 @@ import {
   enrolledAgeLabel,
   freshnessAgeLabel,
   liveFieldFreshness,
+  liveStateEmptyCopy,
   msToWholeDays,
   msToWholeMonths,
   type LocationEvidenceApiState,
@@ -99,6 +100,36 @@ describe("liveFieldFreshness", () => {
   });
   it("is stale beyond the 24h current-stats window", () => {
     expect(liveFieldFreshness(NOW - 25 * HOUR, NOW)).toBe("stale");
+  });
+});
+
+describe("liveStateEmptyCopy", () => {
+  const NO_TELEMETRY_TITLE = "No telemetry yet";
+  const AUTOMATIC_DETAIL =
+    "This vehicle hasn't streamed a signal yet. Once Tesla telemetry is connected for it, live state and trip evidence start capturing automatically.";
+
+  it("stays byte-identical to the original automatic-capture copy when there is no enrollment row at all (undefined = still loading, null = no row)", () => {
+    expect(liveStateEmptyCopy(undefined)).toEqual({ title: NO_TELEMETRY_TITLE, detail: AUTOMATIC_DETAIL });
+    expect(liveStateEmptyCopy(null)).toEqual({ title: NO_TELEMETRY_TITLE, detail: AUTOMATIC_DETAIL });
+  });
+
+  it("keeps the automatic-capture copy for a non-error enrollment status (e.g. still setting up)", () => {
+    const copy = liveStateEmptyCopy({ status: "requested", lastErrorCode: null, createdAt: NOW });
+    expect(copy).toEqual({ title: NO_TELEMETRY_TITLE, detail: AUTOMATIC_DETAIL });
+  });
+
+  it("defers to the status strip above instead of promising automatic capture when the deployment's proxy was never configured", () => {
+    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: "telemetry_proxy_not_configured", createdAt: NOW });
+    expect(copy.title).toBe(NO_TELEMETRY_TITLE);
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.detail).toMatch(/configured/i);
+    // Don't re-explain the whole error -- the strip above already does.
+    expect(copy.detail.length).toBeLessThan(AUTOMATIC_DETAIL.length + 60);
+  });
+
+  it("also defers for any other errored enrollment -- the card can't promise something it doesn't know will happen", () => {
+    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: "some_other_code", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
   });
 });
 

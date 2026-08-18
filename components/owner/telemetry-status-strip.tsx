@@ -32,8 +32,11 @@ interface EnrollmentRowShape {
 /** `undefined` = still loading, `null` = no enrollment row for this vehicle
  * (never-enrolled, or the read failed — both render the same "hidden"
  * outcome via deriveTelemetryStripState, so a query failure degrades to
- * manual-era rather than a broken strip). */
-function useTelemetryEnrollment(
+ * manual-era rather than a broken strip). Exported so the vehicle detail
+ * page can fetch this once and hand the same row to both this strip and
+ * TelemetryLiveStateCard -- one fetch, one source of truth, so the two
+ * panels can never disagree about what the enrollment says. */
+export function useTelemetryEnrollment(
   scope: VehicleWorkspaceScope | null,
   vehicleId: string,
 ): TelemetryEnrollmentRow | null | undefined {
@@ -90,7 +93,7 @@ export function telemetryErrorStripCopy(lastErrorCode: string | null): Telemetry
   if (lastErrorCode === "telemetry_proxy_not_configured") {
     return {
       title: "Telemetry service isn't configured for this deployment",
-      detail: "This deployment's telemetry service needs operator setup before it can stream data. It will not start on its own once that happens -- reconnecting Tesla will not fix this.",
+      detail: "This deployment's telemetry service needs operator setup before it can stream data. It will not start until an operator finishes that setup -- reconnecting Tesla will not fix this.",
     };
   }
   return {
@@ -99,17 +102,41 @@ export function telemetryErrorStripCopy(lastErrorCode: string | null): Telemetry
   };
 }
 
+/**
+ * Appends an age clause (e.g. "enrolled 5m ago") as its own capitalized
+ * sentence rather than a lowercase fragment glued on after a full stop --
+ * the strip's age labels read as lowercase clauses (see enrolledAgeLabel in
+ * telemetry-view.ts), which only reads correctly mid-sentence. Every state
+ * below that appends an age composes through this one function so the fix
+ * lives in one place instead of three matching string templates.
+ */
+export function composeStripDetail(sentence: string, ageLabel: string): string {
+  const capitalized = ageLabel.length === 0 ? ageLabel : ageLabel.charAt(0).toUpperCase() + ageLabel.slice(1);
+  return `${sentence} ${capitalized}.`;
+}
+
+export function telemetrySettingUpDetail(ageLabel: string): string {
+  return composeStripDetail("We're configuring this vehicle's telemetry stream with Tesla.", ageLabel);
+}
+
+export function telemetryPendingPairingDetail(ageLabel: string): string {
+  return composeStripDetail(
+    "Open the Tesla app → Locks → pair the virtual key for this vehicle to start streaming.",
+    ageLabel,
+  );
+}
+
+export function telemetryErrorDetail(lastErrorCode: string | null, ageLabel: string): string {
+  return composeStripDetail(telemetryErrorStripCopy(lastErrorCode).detail, ageLabel);
+}
+
 export function TelemetryStatusStrip({
-  scope,
-  vehicleId,
+  enrollment,
   hasLiveSignal,
 }: {
-  scope: VehicleWorkspaceScope | null;
-  vehicleId: string;
+  enrollment: TelemetryEnrollmentRow | null | undefined;
   hasLiveSignal: boolean;
 }) {
-  const enrollment = useTelemetryEnrollment(scope, vehicleId);
-
   // Loading shim reserves the strip's typical height so nothing jumps when
   // the read resolves (design review Issue 2, 2A).
   if (enrollment === undefined) {
@@ -131,7 +158,7 @@ export function TelemetryStatusStrip({
         <StatePanel
           tone="brand"
           title="Setting up telemetry — no action needed"
-          detail={`We're configuring this vehicle's telemetry stream with Tesla. ${state.ageLabel}.`}
+          detail={telemetrySettingUpDetail(state.ageLabel)}
         />
       );
     case "pending-pairing":
@@ -139,7 +166,7 @@ export function TelemetryStatusStrip({
         <StatePanel
           tone="brand"
           title="Pair the virtual key to finish telemetry setup"
-          detail={`Open the Tesla app → Locks → pair the virtual key for this vehicle to start streaming. ${state.ageLabel}.`}
+          detail={telemetryPendingPairingDetail(state.ageLabel)}
           action={manageLink}
         />
       );
@@ -150,7 +177,7 @@ export function TelemetryStatusStrip({
         <StatePanel
           tone="danger"
           title={copy.title}
-          detail={`${copy.detail} ${state.ageLabel}.`}
+          detail={telemetryErrorDetail(enrollment?.lastErrorCode ?? null, state.ageLabel)}
           // Reconnecting Tesla can't fix a deployment that never configured
           // its telemetry proxy -- don't dangle an action that won't help.
           action={notConfigured ? undefined : manageLink}

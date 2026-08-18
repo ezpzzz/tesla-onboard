@@ -13,7 +13,7 @@ import { Badge, Card } from "@/components/ui";
 import { StatePanel } from "@/components/evhost-ui";
 import { StatTile } from "@/components/owner/owner-ui";
 import type { VehicleStatsCurrent } from "@/lib/owner/access-types";
-import { freshnessAgeLabel, liveFieldFreshness } from "./telemetry-view";
+import { freshnessAgeLabel, liveFieldFreshness, liveStateEmptyCopy, type TelemetryEnrollmentRow } from "./telemetry-view";
 
 function FieldFreshness({ observedAtMs, nowMs }: { observedAtMs: number | null; nowMs: number }) {
   const state = liveFieldFreshness(observedAtMs, nowMs);
@@ -38,15 +38,22 @@ const connectivityTone: Record<VehicleStatsCurrent["connectivity"], "good" | "wa
 export function TelemetryLiveStateCard({
   live,
   nowMs,
+  enrollment,
 }: {
   live: VehicleStatsCurrent | undefined;
   nowMs: number;
+  /** Additive, safe default of `undefined` (renders the original
+   * automatic-capture copy) -- see liveStateEmptyCopy in telemetry-view.ts.
+   * Passed by the vehicle detail page from the same fetch that drives
+   * TelemetryStatusStrip above, so the two panels can never disagree. */
+  enrollment?: TelemetryEnrollmentRow | null;
 }) {
   if (!live || live.observedAt === null) {
+    const copy = liveStateEmptyCopy(enrollment);
     return (
       <StatePanel
-        title="No telemetry yet"
-        detail="This vehicle hasn't streamed a signal yet. Once Tesla telemetry is connected for it, live state and trip evidence start capturing automatically."
+        title={copy.title}
+        detail={copy.detail}
         action={
           <Link href="/owner/integrations" className="text-sm font-medium text-brand hover:underline">
             Manage Tesla connection

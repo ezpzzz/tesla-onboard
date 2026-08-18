@@ -97,6 +97,40 @@ export function deriveTelemetryStripState(args: {
   return { kind: "setting-up", ageLabel: enrolledAgeLabel(enrollment.createdAt, nowMs) };
 }
 
+/* ── Live-state empty-state copy ──────────────────────────────────────── */
+
+export interface LiveStateEmptyCopy {
+  title: string;
+  detail: string;
+}
+
+/**
+ * Copy for TelemetryLiveStateCard's empty state ("no signal streamed for
+ * this vehicle yet"). Enrollment-aware so it can never contradict the
+ * status strip rendered directly above it on the same page: an `error`
+ * enrollment (in particular `telemetry_proxy_not_configured`, where nothing
+ * will start on its own) must not promise capture starts "automatically" --
+ * it defers to that strip's own panel instead of repeating the error. With
+ * no enrollment row at all (`undefined` while loading, or `null` for a
+ * never-enrolled vehicle) the copy stays byte-identical to the original
+ * pre-enrollment-awareness text.
+ */
+export function liveStateEmptyCopy(enrollment: TelemetryEnrollmentRow | null | undefined): LiveStateEmptyCopy {
+  const title = "No telemetry yet";
+  if (enrollment?.status === "error") {
+    return {
+      title,
+      detail:
+        "This vehicle hasn't streamed a signal yet. Live state and trip evidence will start capturing once this deployment's telemetry service is configured -- see the notice above.",
+    };
+  }
+  return {
+    title,
+    detail:
+      "This vehicle hasn't streamed a signal yet. Once Tesla telemetry is connected for it, live state and trip evidence start capturing automatically.",
+  };
+}
+
 /* ── Live-state per-field freshness ───────────────────────────────────── */
 
 export type LiveFieldFreshness = "fresh" | "stale" | "absent";
