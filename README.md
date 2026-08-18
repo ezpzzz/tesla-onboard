@@ -114,6 +114,7 @@ top-level tabs. It shows:
   always completes on the canonical evhost.app broker before returning the guest
   to the same tenant. Platform OAuth, DNS-provider, and encryption credentials
   remain server-managed rather than tenant-editable.
+- **Workspace Mail** — `/owner/mail` is a per-workspace Turo email inbox, dark-shipped behind the email-ingest worker flag. Messages are decrypted on read and full HTML renders only inside a sandboxed, script-free iframe; attachments live as separate encrypted objects. Deletion is a real purge across every stored copy, and retention runs that same purge machinery automatically rather than a bucket-level expiry.
 - **Calendar, Tesla access, and fleet stats** — when the background control plane is enabled, an owner can connect Google
   Calendar to populate a review queue that refreshes every 15 minutes,
   explicitly confirm an event into a trip, and schedule time-bounded Tesla driver access after the guest opens the
