@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  INTEGRATION_FORCE_DISCONNECT_LABEL,
+  INTEGRATION_STALE_DISCONNECT_NOTE,
   TURO_EMAIL_FORWARDING_NOTE,
   TURO_EMAIL_SETUP_STEPS,
   TuroEmailVerificationDetail,
@@ -52,5 +54,17 @@ describe("Turo email setup UX", () => {
     const markup = renderToStaticMarkup(createElement(TuroEmailVerificationDetail));
 
     expect(markup).not.toMatch(/verified\s*✓|delivered|status: (active|pending)/i);
+  });
+});
+
+describe("Stale Tesla disconnect recovery copy", () => {
+  it("names the real cause honestly: the background processing service, not the owner or the vehicle", () => {
+    expect(INTEGRATION_STALE_DISCONNECT_NOTE).toBe(
+      "Disconnect hasn't completed — the background processing service hasn't picked it up.",
+    );
+  });
+
+  it("labels the manual recovery action plainly", () => {
+    expect(INTEGRATION_FORCE_DISCONNECT_LABEL).toBe("Force disconnect");
   });
 });

@@ -72,6 +72,33 @@ function useTelemetryEnrollment(
   return row;
 }
 
+export interface TelemetryErrorStripCopy {
+  title: string;
+  detail: string;
+}
+
+/**
+ * Copy for the strip's "error" state. `last_error_code ===
+ * "telemetry_proxy_not_configured"` means this deployment's telemetry proxy
+ * was never set up -- distinct from a Tesla-side setup failure the owner can
+ * retry by reconnecting. That case gets its own honest copy naming the real
+ * cause (operator setup, not a vehicle/owner action) and never implies the
+ * worker will pick it up and start streaming on its own. Any other error
+ * code keeps the original reconnect-and-retry copy unchanged.
+ */
+export function telemetryErrorStripCopy(lastErrorCode: string | null): TelemetryErrorStripCopy {
+  if (lastErrorCode === "telemetry_proxy_not_configured") {
+    return {
+      title: "Telemetry service isn't configured for this deployment",
+      detail: "This deployment's telemetry service needs operator setup before it can stream data. It will not start on its own once that happens -- reconnecting Tesla will not fix this.",
+    };
+  }
+  return {
+    title: "Telemetry setup failed",
+    detail: "Reconnect Tesla to retry configuring this vehicle.",
+  };
+}
+
 export function TelemetryStatusStrip({
   scope,
   vehicleId,
@@ -116,15 +143,20 @@ export function TelemetryStatusStrip({
           action={manageLink}
         />
       );
-    case "error":
+    case "error": {
+      const notConfigured = enrollment?.lastErrorCode === "telemetry_proxy_not_configured";
+      const copy = telemetryErrorStripCopy(enrollment?.lastErrorCode ?? null);
       return (
         <StatePanel
           tone="danger"
-          title="Telemetry setup failed"
-          detail={`Reconnect Tesla to retry configuring this vehicle. ${state.ageLabel}.`}
-          action={manageLink}
+          title={copy.title}
+          detail={`${copy.detail} ${state.ageLabel}.`}
+          // Reconnecting Tesla can't fix a deployment that never configured
+          // its telemetry proxy -- don't dangle an action that won't help.
+          action={notConfigured ? undefined : manageLink}
         />
       );
+    }
     case "limit-reached":
       return (
         <StatePanel
