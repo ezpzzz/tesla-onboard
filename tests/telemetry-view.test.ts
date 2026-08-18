@@ -105,6 +105,20 @@ describe("deriveTelemetryStripState", () => {
     })).toEqual({ kind: "unsupported-firmware" });
   });
 
+  it("renders the honest generic error state (never unsupported-firmware/hardware) for the unrecognized telemetry_vehicle_skipped fallback, even under status=unsupported", () => {
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "error", lastErrorCode: "telemetry_vehicle_skipped" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "error", ageLabel: "enrolled 1h ago" });
+
+    expect(deriveTelemetryStripState({
+      enrollment: { ...base, status: "unsupported", lastErrorCode: "telemetry_vehicle_skipped" },
+      hasLiveSignal: false,
+      nowMs: NOW,
+    })).toEqual({ kind: "error", ageLabel: "enrolled 1h ago" });
+  });
+
   it("renders needs-pairing (self-healing, not an error) for telemetry_missing_key regardless of status", () => {
     expect(deriveTelemetryStripState({
       enrollment: { ...base, status: "pending_sync", lastErrorCode: "telemetry_missing_key" },
@@ -198,6 +212,17 @@ describe("deriveTelemetryCause", () => {
     ).toBe("unsupported-hardware");
   });
 
+  it("other-error (never unsupported-firmware/hardware) for the generic telemetry_vehicle_skipped fallback -- a reason this build doesn't recognize is not evidence of a firmware or hardware cause, regardless of which status column value carries it", () => {
+    expect(
+      deriveTelemetryCause({ status: "error", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW }),
+    ).toBe("other-error");
+    // Defense in depth for a legacy/pre-fix row that still has status
+    // 'unsupported' from before the worker stopped writing that combination.
+    expect(
+      deriveTelemetryCause({ status: "unsupported", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW }),
+    ).toBe("other-error");
+  });
+
   it("needs-pairing for the documented telemetry_missing_key skip reason, regardless of which status column value carries it -- self-healing, never the 365-day park", () => {
     for (const status of ["pending_sync", "error", "unsupported", "requested", "configuring"] as const) {
       expect(
@@ -267,6 +292,15 @@ describe("liveStateEmptyCopy", () => {
     expect(copy.showManageLink).toBe(false);
   });
 
+  it("unrecognized skip reason (telemetry_vehicle_skipped): must NOT claim firmware or hardware are the cause, defers to the setup-failed notice, no action", () => {
+    const copy = liveStateEmptyCopy({ status: "error", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW });
+    expect(copy.detail).not.toMatch(/automatically/i);
+    expect(copy.detail).not.toMatch(/deployment/i);
+    expect(copy.detail).not.toMatch(/firmware/i);
+    expect(copy.detail).not.toMatch(/hardware/i);
+    expect(copy.showManageLink).toBe(false);
+  });
+
   it("limit-reached: must NOT say capture starts automatically, defers to the strip's owner-actionable explanation, no action", () => {
     const copy = liveStateEmptyCopy({ status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW });
     expect(copy.detail).not.toMatch(/automatically/i);
@@ -294,6 +328,7 @@ describe("liveStateEmptyCopy", () => {
       { status: "pending_sync", lastErrorCode: "telemetry_missing_key", createdAt: NOW },
       { status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW },
       { status: "error", lastErrorCode: null, createdAt: NOW },
+      { status: "error", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW },
       { status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW },
       { status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW },
       { status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW },
@@ -312,6 +347,7 @@ describe("liveStateEmptyCopy", () => {
       { status: "pending_sync", lastErrorCode: "telemetry_missing_key", createdAt: NOW },
       { status: "error", lastErrorCode: "telemetry_proxy_not_configured", createdAt: NOW },
       { status: "error", lastErrorCode: "tesla_refresh_failed", createdAt: NOW },
+      { status: "error", lastErrorCode: "telemetry_vehicle_skipped", createdAt: NOW },
       { status: "unsupported", lastErrorCode: "telemetry_max_configs", createdAt: NOW },
       { status: "unsupported", lastErrorCode: "telemetry_unsupported_firmware", createdAt: NOW },
       { status: "unsupported", lastErrorCode: "telemetry_unsupported_hardware", createdAt: NOW },

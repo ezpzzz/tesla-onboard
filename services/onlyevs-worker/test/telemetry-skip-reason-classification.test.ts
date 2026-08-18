@@ -20,6 +20,7 @@ const {
   isMissingKeyTelemetryError,
   isUnsupportedFirmwareTelemetryError,
   isMaxConfigsTelemetryError,
+  isUnrecognizedSkipTelemetryError,
 } = await import("@/services/onlyevs-worker/index");
 const {
   TELEMETRY_MISSING_KEY_RETRY_MS,
@@ -205,6 +206,45 @@ describe("processTelemetry -- per-VIN skip-reason classification (D2, T: worker 
     void now;
   });
 
+  it("unrecognized skip reason (a future Tesla reason string outside SKIP_REASON_CODES): fails SAFE -- status stays 'error' (never the 365-day 'unsupported' park reserved for unsupported_hardware), long-but-finite retry, attempt_count NOT bumped", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse(200, { response: { vehicle_info: { [CONTEXT_ROW.vin]: { total_number_of_keys: 1 } } } }))
+      // A reason string Tesla could add tomorrow that isn't one of the four
+      // documented reasons this build knows -- tesla-telemetry-client.ts
+      // normalizes any such reason to the generic 'telemetry_vehicle_skipped'
+      // code (SKIP_REASON_CODES has no entry for it).
+      .mockResolvedValueOnce(jsonResponse(200, { response: { updated_vehicles: 0, skipped_vehicles: { [CONTEXT_ROW.vin]: "some_future_reason_this_build_does_not_know" } } }));
+
+    await processTelemetry(baseRow({ attempt_count: 3 }), pool);
+
+    const update = findQuery(queries, "last_error_code = 'telemetry_vehicle_skipped'");
+    expect(update).toBeDefined();
+    expect(update!.sql).toContain("status = 'error'");
+    expect(update!.sql).not.toContain("attempt_count = attempt_count + 1");
+
+    const intervalParam = update!.params.find((p) => typeof p === "string" && p.includes("milliseconds")) as string;
+    const ms = Number(intervalParam.split(" ")[0]);
+    // Long but explicitly finite: nowhere near the 365-day permanent park.
+    expect(ms).toBeGreaterThan(24 * 60 * 60 * 1000);
+    expect(ms).toBeLessThan(365 * 24 * 60 * 60 * 1000);
+  });
+
+  it("the bare-VIN legacy skipped_vehicles shape (no reason at all) is classified the same as an unrecognized reason, not the permanent park", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse(200, { response: { vehicle_info: { [CONTEXT_ROW.vin]: { total_number_of_keys: 1 } } } }))
+      .mockResolvedValueOnce(jsonResponse(200, { response: { skipped_vehicles: [CONTEXT_ROW.vin] } }));
+
+    await processTelemetry(baseRow({ attempt_count: 3 }), pool);
+
+    const update = findQuery(queries, "last_error_code = 'telemetry_vehicle_skipped'");
+    expect(update).toBeDefined();
+    expect(update!.sql).toContain("status = 'error'");
+  });
+
   it("max_configs: reuses the existing limit-reached UI state ('unsupported' + tesla_telemetry_limit_reached)", async () => {
     const { pool, queries } = makeFakePool(baseHandler());
     fetchMock
@@ -226,5 +266,11 @@ describe("processTelemetry -- per-VIN skip-reason classification (D2, T: worker 
     expect(isMissingKeyTelemetryError(new TeslaTelemetryError("telemetry_unsupported_hardware", 422, false, null))).toBe(false);
     expect(isUnsupportedFirmwareTelemetryError(new TeslaTelemetryError("telemetry_max_configs", 422, false, null))).toBe(false);
     expect(isMaxConfigsTelemetryError(new TeslaTelemetryError("telemetry_missing_key", 422, false, null))).toBe(false);
+  });
+
+  it("isUnrecognizedSkipTelemetryError matches only the generic fallback code, never the genuinely-permanent hardware code", () => {
+    expect(isUnrecognizedSkipTelemetryError(new TeslaTelemetryError("telemetry_vehicle_skipped", 422, false, null))).toBe(true);
+    expect(isUnrecognizedSkipTelemetryError(new TeslaTelemetryError("telemetry_unsupported_hardware", 422, false, null))).toBe(false);
+    expect(isUnrecognizedSkipTelemetryError(new TeslaTelemetryError("telemetry_missing_key", 422, false, null))).toBe(false);
   });
 });

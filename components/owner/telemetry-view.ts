@@ -107,10 +107,21 @@ export function deriveTelemetryCause(enrollment: TelemetryEnrollmentRow | null |
   if (lastErrorCode === "telemetry_max_configs") return "limit-reached";
   if (lastErrorCode === "telemetry_unsupported_hardware") return "unsupported-hardware";
   if (lastErrorCode === "telemetry_unsupported_firmware") return "unsupported-firmware";
+  // tesla-telemetry-client.ts's generic fallback for a skip reason outside
+  // all four documented codes above (or a legacy bare-VIN entry with no
+  // reason at all). This is explicitly NOT firmware or hardware evidence --
+  // only the two lastErrorCode checks above may claim either -- so it must
+  // fail into the same honest, generic bucket as any other unrecognized
+  // error rather than guessing a cause. Checked ahead of the `switch(status)`
+  // fallback below so a legacy/pre-fix row that still carries status
+  // 'unsupported' from before the worker stopped writing that combination
+  // (services/onlyevs-worker/index.ts's isUnrecognizedSkipTelemetryError
+  // branch) renders the same honest way as the current status='error' shape.
+  if (lastErrorCode === "telemetry_vehicle_skipped") return "other-error";
 
   switch (status) {
     case "unsupported":
-      // A parked row without one of the four specific codes above (e.g. an
+      // A parked row without one of the six specific codes above (e.g. an
       // older row, or a future code this build doesn't know yet) -- still
       // park-worthy, and firmware is the more common real-world cause, but
       // this is a fallback, not a claim that we know it's firmware.

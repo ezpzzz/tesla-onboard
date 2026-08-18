@@ -223,7 +223,7 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
     expect(result.attempt_count).toBe(3);
   });
 
-  it("regression pin: a genuinely vehicle-specific non-retryable error (telemetry_vehicle_skipped) keeps the existing 365-day park and attempt_count bump", async () => {
+  it("regression pin: an unrecognized skip reason (telemetry_vehicle_skipped) fails SAFE -- long-but-finite retry under status 'error', never the 365-day 'unsupported' park, attempt_count NOT bumped", async () => {
     const { pool, queries } = makeFakePool(baseHandler());
     fetchMock
       .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
@@ -235,13 +235,44 @@ describe("processTelemetry -- deployment-config telemetry errors (T: worker lane
     const now = Date.now();
     await processTelemetry(baseRow({ status: "requested", applied_config_hash: null, attempt_count: 3 }), pool);
 
+    // This code path doesn't match replayEnrollmentState's three known UPDATE
+    // shapes (it's a fourth, dedicated branch -- same family as the
+    // missing_key/unsupported_firmware branches covered directly in
+    // telemetry-skip-reason-classification.test.ts), so assert against the
+    // captured query directly rather than teaching the replay helper a shape
+    // only this one test uses.
+    const update = queries.find(
+      (q) => q.sql.includes("update public.onlyevs_telemetry_enrollments") && q.sql.includes("last_error_code = 'telemetry_vehicle_skipped'"),
+    );
+    expect(update).toBeDefined();
+    expect(update!.sql).toContain("status = 'error'");
+    expect(update!.sql).not.toContain("attempt_count = attempt_count + 1");
+    const intervalParam = update!.params.find((p) => typeof p === "string" && p.includes("milliseconds")) as string;
+    const ms = Number(intervalParam.split(" ")[0]);
+    expect(ms).toBeGreaterThan(24 * 60 * 60 * 1000);
+    expect(ms).toBeLessThan(365 * 24 * 60 * 60 * 1000);
+    void now;
+  });
+
+  it("regression pin: the genuinely-permanent unsupported_hardware skip reason still keeps the 365-day 'unsupported' park -- narrowing the unrecognized-reason case above must not weaken this one", async () => {
+    const { pool, queries } = makeFakePool(baseHandler());
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "tok", refresh_token: "new-refresh", expires_in: 3600 }))
+      .mockResolvedValueOnce(keyProbeResponse())
+      .mockResolvedValueOnce(
+        jsonResponse(200, { response: { updated_vehicles: 0, skipped_vehicles: { [CONTEXT_ROW.vin]: "unsupported_hardware" } } }),
+      );
+
+    const now = Date.now();
+    await processTelemetry(baseRow({ status: "requested", applied_config_hash: null, attempt_count: 3 }), pool);
+
     const result = replayEnrollmentState(
       { status: "requested", last_error_code: null, attempt_count: 3, next_action_at: new Date(0) },
       queries,
       now,
     );
     expect(result.status).toBe("unsupported");
-    expect(result.last_error_code).toBe("telemetry_vehicle_skipped");
+    expect(result.last_error_code).toBe("telemetry_unsupported_hardware");
     expect(result.attempt_count).toBe(4);
     const expected = now + 365 * 24 * 60 * 60 * 1000;
     expect(result.next_action_at.getTime()).toBeGreaterThanOrEqual(expected - 5_000);

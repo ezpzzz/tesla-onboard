@@ -24,6 +24,7 @@ import {
   LOCATION_RETENTION_MS,
   TELEMETRY_ACTIVE_POLL_INTERVAL_MS,
   TELEMETRY_CONFIG_ERROR_RETRY_MS,
+  TELEMETRY_DEPLOYMENT_CONFIG_ERROR_CODES,
   TELEMETRY_MISSING_KEY_RETRY_MS,
   TELEMETRY_REMOVAL_MAX_ATTEMPTS,
   TELEMETRY_UNSUPPORTED_FIRMWARE_RETRY_MS,
@@ -1270,15 +1271,26 @@ async function finishTeslaDisconnect(client: PoolClient, integrationId: string) 
  * status/next_action_at/attempt_count decisions below. See
  * TELEMETRY_CONFIG_ERROR_RETRY_MS's comment (lib/owner/telemetry-policy.ts)
  * for why this class gets its own short retry instead of the
- * vehicle-specific 365-day park. `telemetry_region_not_configured` joined
- * this predicate with D4 (tesla-api-alignment-20260818.md): before that fix,
- * a missing `ONLYEVS_TESLA_COMMAND_PROXY_URL` was the only way remove()
- * could fail on a deployment-config gap; after D4, remove()/status() route
- * through `onlyevs_integrations.region_base_url` instead, so a missing/
- * invalid value there is now that same class of gap for those two calls. */
+ * vehicle-specific 365-day park.
+ *
+ * Derives from TELEMETRY_DEPLOYMENT_CONFIG_ERROR_CODES
+ * (lib/owner/telemetry-policy.ts) -- the single source of truth for this
+ * code set -- rather than an inline string/array literal. That constant's
+ * own header comment explains why: `private.claim_onlyevs_due_telemetry`'s
+ * deployment-config allowlist (and its matching partial index) must list
+ * exactly the same codes or a row this predicate routes to the short retry
+ * becomes permanently unclaimable, which is exactly the bug that shipped
+ * TWICE on this branch (once for `telemetry_proxy_not_configured` itself,
+ * fixed by 20260818210000_onlyevs_telemetry_config_error_reclaim.sql; again
+ * when `telemetry_region_not_configured` joined this predicate for D4
+ * (tesla-api-alignment-20260818.md) without the SQL allowlist being widened
+ * to match, fixed by 20260818220000_onlyevs_telemetry_config_error_reclaim_widen.sql).
+ * services/onlyevs-worker/test/telemetry-config-error-code-lockstep.test.ts
+ * is the guard that makes a repeat of that drift fail CI instead of
+ * shipping a third time. */
 export function isDeploymentConfigTelemetryError(error: unknown): boolean {
   return error instanceof TeslaTelemetryError
-    && (error.code === "telemetry_proxy_not_configured" || error.code === "telemetry_region_not_configured");
+    && (TELEMETRY_DEPLOYMENT_CONFIG_ERROR_CODES as readonly string[]).includes(error.code);
 }
 
 /** `skipped_vehicles` reason `missing_key` -- self-healing the instant the
@@ -1302,6 +1314,21 @@ export function isUnsupportedFirmwareTelemetryError(error: unknown): boolean {
  * already renders for a limit-reached vehicle (SHARED CONTRACT, D2). */
 export function isMaxConfigsTelemetryError(error: unknown): boolean {
   return error instanceof TeslaTelemetryError && error.code === "telemetry_max_configs";
+}
+
+/** `skipped_vehicles` entry present but carrying a reason outside all four
+ * of Tesla's documented codes above (or none at all) -- tesla-telemetry-
+ * client.ts's `SKIP_REASON_CODES` fallback. This must NEVER be treated as
+ * `telemetry_unsupported_hardware`'s permanent 365-day park: a reason string
+ * this build doesn't recognize (because Tesla added it after this build
+ * shipped, or the response shape is one this codebase hasn't seen) is not
+ * evidence the vehicle is permanently unsupported -- only the genuinely-
+ * documented `unsupported_hardware` reason is. Long-but-finite retry instead,
+ * same order of magnitude as the firmware case, so a self-resolving or
+ * newly-classified reason is retried on a human timescale rather than parked
+ * for a year on a guess. */
+export function isUnrecognizedSkipTelemetryError(error: unknown): boolean {
+  return error instanceof TeslaTelemetryError && error.code === "telemetry_vehicle_skipped";
 }
 
 export async function processTelemetry(row: TelemetryRow, workerPool: Pool = pool) {
@@ -1537,6 +1564,27 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
       ]).catch(() => undefined);
       return;
     }
+    if (isUnrecognizedSkipTelemetryError(error)) {
+      // A skip reason outside all four documented codes (or a legacy
+      // bare-VIN entry with no reason at all) is NOT evidence this vehicle
+      // is permanently unsupported -- only 'telemetry_unsupported_hardware'
+      // is. Fail safe: same long-but-finite backoff as the firmware case,
+      // status stays 'error' (never 'unsupported'), and this must never
+      // reach the permanentSkip 365-day park below. Reuses
+      // TELEMETRY_UNSUPPORTED_FIRMWARE_RETRY_MS rather than adding a new
+      // policy constant -- both are "long but explicitly not permanent"
+      // backoffs of the same order of magnitude, and this class deliberately
+      // carries no firmware/hardware claim of its own for a UI copy constant
+      // to attach to.
+      await client.query(`update public.onlyevs_telemetry_enrollments set status = 'error',
+        last_error_code = 'telemetry_vehicle_skipped', next_action_at = now() + ($3)::interval,
+        claimed_by = null, claim_expires_at = null where workspace_id = $1 and vehicle_id = $2`, [
+        row.workspace_id,
+        row.vehicle_id,
+        `${TELEMETRY_UNSUPPORTED_FIRMWARE_RETRY_MS} milliseconds`,
+      ]).catch(() => undefined);
+      return;
+    }
     if (isMaxConfigsTelemetryError(error)) {
       // Owner-actionable (another third-party app holds this vehicle's
       // telemetry slots) -- reuses the exact 'unsupported' +
@@ -1558,13 +1606,15 @@ export async function processTelemetry(row: TelemetryRow, workerPool: Pool = poo
       ? "removal_requested"
       : row.applied_config_hash ? "pending_sync" : "requested";
     // 'telemetry_unsupported_hardware' (D2/SHARED CONTRACT: genuinely
-    // permanent for this car) joins the pre-existing 'telemetry_vehicle_skipped'
-    // fallback (an unrecognized-but-present skip reason) in the one
-    // vehicle-specific class that still gets the 365-day park below --
-    // missing_key/unsupported_firmware/max_configs all return above this
-    // point precisely so they never reach it.
+    // permanent for this car) is the ONLY code that reaches the 365-day
+    // park below -- missing_key/unsupported_firmware/max_configs/an
+    // unrecognized skip reason (isUnrecognizedSkipTelemetryError) all return
+    // above this point precisely so they never reach it. An unrecognized
+    // reason is deliberately excluded from this permanent class: it is not
+    // documented evidence of anything permanent, only evidence this build
+    // doesn't know what Tesla meant.
     const permanentSkip = error instanceof TeslaTelemetryError
-      && (error.code === "telemetry_vehicle_skipped" || error.code === "telemetry_unsupported_hardware");
+      && error.code === "telemetry_unsupported_hardware";
     if (reauth) {
       await client.query("update public.onlyevs_integrations set status = 'reauth_required', last_error_code = 'tesla_refresh_failed' where id = $1", [row.integration_id]).catch(() => undefined);
     }

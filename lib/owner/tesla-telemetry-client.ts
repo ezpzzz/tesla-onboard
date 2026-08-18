@@ -52,9 +52,15 @@ function requestId(response: Response): string | null {
  * `TeslaTelemetryError` codes services/onlyevs-worker/index.ts's
  * processTelemetry branches on. An entry present in `skipped_vehicles` but
  * carrying a reason outside this map (or none at all) falls back to the
- * pre-existing, unrecognized-but-present `telemetry_vehicle_skipped` code
- * -- not a regression, since that classification existed before per-VIN
- * reasons were read at all. */
+ * generic, unrecognized-but-present `telemetry_vehicle_skipped` code. That
+ * fallback must fail SAFE downstream: services/onlyevs-worker/index.ts's
+ * `isUnrecognizedSkipTelemetryError` gives it a long-but-finite retry
+ * (never the 365-day park reserved for the genuinely-permanent
+ * `telemetry_unsupported_hardware`), and components/owner/telemetry-view.ts's
+ * `deriveTelemetryCause` renders it as the honest generic `other-error`
+ * cause -- never a firmware or hardware claim it has no evidence for. A
+ * skip reason Tesla adds after this map was last updated lands here, not in
+ * the permanent-park bucket. */
 const SKIP_REASON_CODES: Record<string, string> = {
   missing_key: "telemetry_missing_key",
   unsupported_hardware: "telemetry_unsupported_hardware",
