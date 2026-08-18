@@ -22,6 +22,7 @@ import {
   haversineMiles,
   HISTORY_RETENTION_MS,
   LOCATION_RETENTION_MS,
+  TELEMETRY_REMOVAL_MAX_ATTEMPTS,
   validCoordinates,
 } from "@/lib/owner/telemetry-policy";
 import { resolveVehiclePolicyPct } from "@/lib/owner/derive";
@@ -1255,8 +1256,8 @@ async function finishTeslaDisconnect(client: PoolClient, integrationId: string) 
   [integrationId]);
 }
 
-async function processTelemetry(row: TelemetryRow) {
-  const client = await pool.connect();
+export async function processTelemetry(row: TelemetryRow, workerPool: Pool = pool) {
+  const client = await workerPool.connect();
   let lockedIntegrationId: string | null = null;
   try {
     if (!await acquireIntegrationLock(client, row.integration_id)) {
@@ -1323,6 +1324,28 @@ async function processTelemetry(row: TelemetryRow) {
       provider.state.limitReached ? "tesla_telemetry_limit_reached" : null,
     ]);
   } catch (error) {
+    // A 'removal_requested' enrollment that has exhausted its retry budget
+    // would otherwise spin forever: nothing outside this worker ever clears
+    // 'disconnecting' (see the migration's async-branch comment), so past
+    // TELEMETRY_REMOVAL_MAX_ATTEMPTS attempts give up on provider-side
+    // confirmation and complete the disconnect locally -- mirroring
+    // force_complete_onlyevs_integration_disconnect's semantics (credentials
+    // deleted, enrollment gone, integration marked disconnected) but leaving
+    // an explicit last_error_code trail that removal was never confirmed
+    // with Tesla. This must never throw, even if the proxy itself is
+    // unreachable or unconfigured -- best-effort cleanup, not a retry path.
+    if (row.status === "removal_requested" && row.attempt_count + 1 >= TELEMETRY_REMOVAL_MAX_ATTEMPTS) {
+      await client.query(
+        "delete from public.onlyevs_telemetry_enrollments where workspace_id = $1 and vehicle_id = $2",
+        [row.workspace_id, row.vehicle_id],
+      ).catch(() => undefined);
+      await client.query(
+        "update public.onlyevs_integrations set last_error_code = 'telemetry_removal_unconfirmed' where id = $1",
+        [row.integration_id],
+      ).catch(() => undefined);
+      await finishTeslaDisconnect(client, row.integration_id).catch(() => undefined);
+      return;
+    }
     const reauth = Boolean((error as Error & { reauth?: boolean }).reauth);
     const retryable = error instanceof TeslaTelemetryError ? error.retryable : !reauth;
     const retryStatus = row.status === "removal_requested"
@@ -2104,7 +2127,7 @@ async function runOnce() {
   await Promise.allSettled([
     ...grants.rows.map(processGrant),
     ...domains.rows.map(processDomain),
-    ...telemetry.rows.map(processTelemetry),
+    ...telemetry.rows.map((row) => processTelemetry(row, pool)),
     ...calendars.rows.map(processCalendar),
     ...chargingSyncs.rows.map((row) => syncChargingInvoices(pool, row)),
   ]);
